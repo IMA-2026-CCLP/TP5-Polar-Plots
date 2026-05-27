@@ -34,18 +34,17 @@ from pathlib import Path
 # CONFIGURACIÓN
 # ══════════════════════════════════════════════════════════════
 
-CARPETA = r"D:\UNTREF\IMA\TP5 - PATRON POLAR\Medición_Juli\Media_processed\piano"
-
-DINAMICA = "piano"
+# Carpeta raíz que contiene las subcarpetas forte/ y piano/
+CARPETA_BASE = r"D:\UNTREF\IMA\TP5 - PATRON POLAR\Medición_Juli\Media_processed"
 
 # Ángulos de mesa que faltan y sus simétricos
 ANGULOS_FALTANTES = {
-    0:  180,   # mesa a 0°  → tomar de 180°
-    10: 170,   # mesa a 10° → tomar de 170°
-    20: 160,   # mesa a 20° → tomar de 160°
+    0:  180,
+    10: 170,
+    20: 160,
 }
 
-N_MICS = 19   # total de micrófonos en el array
+N_MICS = 19
 
 # ══════════════════════════════════════════════════════════════
 
@@ -64,10 +63,19 @@ def mic_espejo(mic_num: int, n_mics: int) -> int:
     return n_mics + 1 - mic_num
 
 
-def procesar():
-    carpeta = Path(CARPETA)
+def procesar_dinamica(dinamica: str):
+    """Aplica el remapeo de simetría para una dinámica dada."""
 
-    print("Remapeo a realizar:")
+    carpeta = Path(CARPETA_BASE) / dinamica
+
+    if not carpeta.exists():
+        print(f"\n  [ERROR] No se encontró la carpeta: {carpeta}")
+        return
+
+    print(f"\n{'═'*60}")
+    print(f"  Procesando: {dinamica.upper()}")
+    print(f"  Carpeta:    {carpeta}")
+    print(f"{'═'*60}")
     print(f"  {'FUENTE':<45}  →  DESTINO")
     print(f"  {'-'*45}     {'-'*45}")
 
@@ -80,40 +88,65 @@ def procesar():
 
             mic_src = mic_espejo(mic_dest, N_MICS)
 
-            nombre_src  = f"mic_{mic_src}_ang_{DINAMICA}_{ang_simetrico}.wav"
-            nombre_dest = f"mic_{mic_dest}_ang_{DINAMICA}_{ang_faltante}.wav"
+            nombre_src  = f"mic_{mic_src}_ang_{dinamica}_{ang_simetrico}.wav"
+            nombre_dest = f"mic_{mic_dest}_ang_{dinamica}_{ang_faltante}.wav"
 
             path_src  = carpeta / f"mic{mic_src}"  / nombre_src
             path_dest = carpeta / f"mic{mic_dest}" / nombre_dest
 
-            # Verificar que el archivo fuente existe
             if not path_src.exists():
                 print(f"  [NO EXISTE] {path_src.relative_to(carpeta)}")
                 errores += 1
                 continue
 
-            # No sobreescribir si ya existe el destino
             if path_dest.exists():
                 print(f"  [YA EXISTE] {nombre_dest}")
                 existian += 1
                 continue
 
-            # Crear carpeta destino si no existe
             path_dest.parent.mkdir(parents=True, exist_ok=True)
-
-            # Copiar
             shutil.copy2(str(path_src), str(path_dest))
             print(f"  {str(path_src.relative_to(carpeta)):<45}  →  "
                   f"{str(path_dest.relative_to(carpeta))}")
             copiados += 1
 
-    print(f"\n── Resumen ────────────────────────────────────────")
-    print(f"  Copiados:        {copiados}")
-    print(f"  Ya existían:     {existian}")
-    print(f"  Fuente faltante: {errores}")
     total = N_MICS * len(ANGULOS_FALTANTES)
-    print(f"  Total esperado:  {total}  ({N_MICS} mics × {len(ANGULOS_FALTANTES)} ángulos)")
+    print(f"\n  Resumen {dinamica.upper()}:")
+    print(f"    Copiados:        {copiados} / {total}")
+    print(f"    Ya existían:     {existian}")
+    print(f"    Fuente faltante: {errores}")
+
+
+def elegir_dinamica() -> list:
+    """Muestra el menú y devuelve la lista de dinámicas a procesar."""
+    print("\n╔══════════════════════════════════════════╗")
+    print("║   Simetría — ángulos faltantes 0/10/20°  ║")
+    print("╠══════════════════════════════════════════╣")
+    print("║  1 → forte                               ║")
+    print("║  2 → piano                               ║")
+    print("║  3 → ambas dinámicas                     ║")
+    print("╚══════════════════════════════════════════╝")
+
+    while True:
+        opcion = input("\nElegí una opción (1 / 2 / 3): ").strip()
+        if opcion == "1":
+            return ["forte"]
+        elif opcion == "2":
+            return ["piano"]
+        elif opcion == "3":
+            return ["forte", "piano"]
+        else:
+            print("  Opción inválida. Ingresá 1, 2 o 3.")
+
+
+def main():
+    dinamicas = elegir_dinamica()
+    for din in dinamicas:
+        procesar_dinamica(din)
+    print(f"\n{'═'*60}")
+    print("  Listo.")
+    print(f"{'═'*60}\n")
 
 
 if __name__ == '__main__':
-    procesar()
+    main()
