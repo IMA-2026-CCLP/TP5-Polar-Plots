@@ -1,0 +1,8 @@
+1. Renderizar todo desde Reaper a una nueva carpeta (ej: `Media_processed`) para asegurarse de que los archivos estén en formato WAV, con la misma frecuencia de muestreo y sin compresión. Los archivos aparecerán todos desordenados en ese directorio por ahora.
+   
+2. Para ordenar los archivos por micrófono y ángulo, ejecutar el script `organizar_archivos.py` (ver instrucciones en su sección). Esto creará subcarpetas `mic8/`, `mic10/` y `mic9/` (vacía) dentro de `Media_processed/forte/`, y moverá cada archivo a su lugar correspondiente. Lo mismo se hará para la otra dinámica (ej: `piano`).
+   
+3. Como faltan las mediciones de 0°, 10°, 20° para todos los mics ya que hubo error en la matriz de reaper se asume simetria con 180° (ej: 0° = 180°, 10° = 170°, etc). Para generar esos archivos faltantes, ejecutar el script `simetria_mics.py` (ver instrucciones en su sección). Esto copiará los archivos de ángulos simétricos teniendo en cuenta la inversión de los micrófonos (ej: el archivo `mic_1_ang_forte_0.wav` se genera copiando `mic_19_ang_forte_180.wav`, y viceversa). Esto se hace para tener un set completo de archivos de mic 1 y mic 19 para luego generar mic 9 por interpolación temporal.
+   
+4. Ejecutar `interpolar_mic9_temporal.py` para generar los archivos de mic 9 por interpolación temporal entre mic 8 y mic 10. El script lee los archivos de mic 8 y mic 10, calcula el delay entre ellos usando GCC-PHAT, y luego interpola la señal de mic 9 aplicando un delay fraccional a la señal de mic 8. Los archivos generados se guardan en `mic9/` con el mismo formato de nombre que los originales.
+5. 
