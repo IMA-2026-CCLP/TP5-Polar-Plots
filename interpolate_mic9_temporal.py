@@ -24,8 +24,8 @@ import re
 # CONFIGURACIÓN
 # ══════════════════════════════════════════════════════════════
 
-CARPETA_ENTRADA = r"D:\UNTREF\IMA\TP5 - PATRON POLAR\Medición_Juli\Media_processed\forte"
-DINAMICA        = "forte"
+# Carpeta raíz que contiene las subcarpetas forte/ y piano/
+CARPETA_BASE = r"D:\UNTREF\IMA\TP5 - PATRON POLAR\Medición_Juli\Media_processed"
 
 MIC_FALTANTE = 9
 MIC_IZQ      = 8    # 70°
@@ -91,10 +91,20 @@ def alinear(sig: np.ndarray, delay: int, largo: int) -> np.ndarray:
     return np.pad(sig_al, (0, largo - len(sig_al)))
 
 
-def procesar():
-    entrada = Path(CARPETA_ENTRADA)
+def procesar_dinamica(dinamica: str):
+    entrada = Path(CARPETA_BASE) / dinamica
 
-    # ── Descubrir pares mic_8 / mic_10 por ángulo de fuente ──────────────
+    if not entrada.exists():
+        print(f"\n  [ERROR] No se encontró la carpeta: {entrada}")
+        return
+
+    print(f"\n{'═'*60}")
+    print(f"  Procesando: {dinamica.upper()}")
+    print(f"  Carpeta:    {entrada}")
+    print(f"{'═'*60}")
+    print(f"  Método: promedio temporal mic_{MIC_IZQ} + mic_{MIC_DER} "
+          f"con alineación GCC-PHAT\n")
+
     archivos_izq = {}
     archivos_der = {}
 
@@ -103,9 +113,9 @@ def procesar():
         if not m:
             continue
         mic_num  = int(m.group(1))
-        dinamica = m.group(2).lower()
+        din      = m.group(2).lower()
         ang      = int(m.group(3))
-        if dinamica != DINAMICA:
+        if din != dinamica:
             continue
         if mic_num == MIC_IZQ:
             archivos_izq[ang] = wav
@@ -114,12 +124,10 @@ def procesar():
 
     angulos = sorted(set(archivos_izq) & set(archivos_der))
     if not angulos:
-        print(f"No se encontraron pares mic_{MIC_IZQ}/mic_{MIC_DER}")
+        print(f"  No se encontraron pares mic_{MIC_IZQ}/mic_{MIC_DER}")
         return
 
-    print(f"Ángulos: {angulos}")
-    print(f"Método: promedio temporal mic_{MIC_IZQ} + mic_{MIC_DER} "
-          f"con alineación GCC-PHAT\n")
+    print(f"  Ángulos encontrados: {angulos}\n")
 
     salida_dir = entrada / f"mic{MIC_FALTANTE}"
     salida_dir.mkdir(exist_ok=True)
@@ -137,24 +145,21 @@ def procesar():
         sig_izq = sig_izq[:largo]
         sig_der = sig_der[:largo]
 
-        # ── Alinear mic_der respecto a mic_izq ───────────────────────────
-        delay = gcc_phat(sig_der, sig_izq, sr, MAX_DELAY_SEG)
+        delay      = gcc_phat(sig_der, sig_izq, sr, MAX_DELAY_SEG)
         sig_der_al = alinear(sig_der, delay, largo)
 
-        # ── Promedio simple ───────────────────────────────────────────────
         sig_mic9 = ((sig_izq.astype(np.float64) +
                      sig_der_al.astype(np.float64)) * 0.5).astype(np.float32)
 
-        # Niveles para verificación
-        rms_izq  = 20 * np.log10(np.sqrt(np.mean(sig_izq**2))    + 1e-10)
-        rms_der  = 20 * np.log10(np.sqrt(np.mean(sig_der**2))    + 1e-10)
-        rms_out  = 20 * np.log10(np.sqrt(np.mean(sig_mic9**2))   + 1e-10)
+        rms_izq = 20 * np.log10(np.sqrt(np.mean(sig_izq**2))  + 1e-10)
+        rms_der = 20 * np.log10(np.sqrt(np.mean(sig_der**2))  + 1e-10)
+        rms_out = 20 * np.log10(np.sqrt(np.mean(sig_mic9**2)) + 1e-10)
 
         pico = np.max(np.abs(sig_mic9))
         if pico > 1.0:
             sig_mic9 /= pico
 
-        nombre  = f"mic_{MIC_FALTANTE}_ang_{DINAMICA}_{ang_fuente}.wav"
+        nombre  = f"mic_{MIC_FALTANTE}_ang_{dinamica}_{ang_fuente}.wav"
         destino = salida_dir / nombre
         sf.write(str(destino), sig_mic9, sr, subtype='PCM_24')
 
@@ -164,8 +169,38 @@ def procesar():
               f"delay: {delay:+d} muestras  "
               f"salida: {rms_out:.1f} dBFS  →  {nombre}")
 
-    print(f"\n── Listo ──────────────────────────────────────")
-    print(f"  Archivos en: {salida_dir}")
+    print(f"\n  Listo. Archivos en: {salida_dir}")
+
+
+def elegir_dinamica() -> list:
+    print("\n╔══════════════════════════════════════════╗")
+    print("║     Interpolación mic 9 — GCC-PHAT        ║")
+    print("╠══════════════════════════════════════════╣")
+    print("║  1 → forte                               ║")
+    print("║  2 → piano                               ║")
+    print("║  3 → ambas dinámicas                     ║")
+    print("╚══════════════════════════════════════════╝")
+
+    while True:
+        opcion = input("\nElegí una opción (1 / 2 / 3): ").strip()
+        if opcion == "1":
+            return ["forte"]
+        elif opcion == "2":
+            return ["piano"]
+        elif opcion == "3":
+            return ["forte", "piano"]
+        else:
+            print("  Opción inválida. Ingresá 1, 2 o 3.")
+
+
+def main():
+    dinamicas = elegir_dinamica()
+    for din in dinamicas:
+        procesar_dinamica(din)
+    print(f"\n{'═'*60}")
+    print("  Todo listo.")
+    print(f"{'═'*60}\n")
+
 
 if __name__ == '__main__':
-    procesar()
+    main()
