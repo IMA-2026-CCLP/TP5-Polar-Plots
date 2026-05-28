@@ -1,0 +1,7 @@
+numpy==2.4.6
+pandas==3.0.3
+scipy==1.17.1
+soundfile=0.13.1
+matplotlib=3.10.9
+pyqtgraph==0.14.0
+pyqt6==6.11.1

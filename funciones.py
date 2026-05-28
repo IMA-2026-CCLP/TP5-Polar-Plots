@@ -1,14 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Nov  6 17:20:56 2022
-
-@author: Jeroigoldi
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf
 from scipy import signal
+from numpy.lib.stride_tricks import sliding_window_view
 
 def sweep(t, f_start, f_end, sample_rate):
     """
@@ -346,7 +340,7 @@ def sos_filter_audio(s, *filters):
             filtered_audio_bank.append(filtered_audio)
         return filtered_audio_bank
     
-def signal_to_SPL(s):
+def signal_to_SPL(s, isPower=False):
     '''
     Converts an array with pressure levels in Pa to db SPL.
 
@@ -364,9 +358,9 @@ def signal_to_SPL(s):
     p_ref = 2* 10**(-5)
     eps = np.finfo(float).eps
     P_norm = (abs(s) + eps) / p_ref 
-    return 20 * np.log10(P_norm)
+    return (10 if isPower else 20) * np.log10(P_norm)
 
-def magdb(x):
+def magdb(x, isPower=False):
     """
     
     Transforms amplitude values to dBFS.
@@ -384,5 +378,48 @@ def magdb(x):
     xmag = abs(x) / len(x)
     xmagnorm = xmag / np.max(abs(xmag))
     eps = np.finfo(float).eps
-    xmagdb = 20*np.log10(xmagnorm + eps)
+    xmagdb = (10 if isPower else 20) * np.log10(xmagnorm + eps)
     return xmagdb 
+
+
+def calculate_windowed_energy(
+    filtered_audio: np.ndarray, 
+    frame_length: int, 
+    hop_length: int, 
+    window_type: str = 'hann'
+) -> np.ndarray:
+    """
+    Slices audio into frames, applies a window, and calculates linear energy (Mean Square).
+    """
+    # 1. Create frames instantly without duplicating memory
+    frames = np.lib.stride_tricks.sliding_window_view(filtered_audio, window_shape=frame_length, axis=1)[:, ::hop_length, :]
+    
+    # 2. Generate and apply the window function
+    window = signal.get_window(window_type, frame_length)
+    windowed_frames = frames * window
+    
+    # 3. Calculate linear energy (Mean Square) per frame
+    # axis=1 averages the squared samples across each individual window
+    linear_energy = np.mean(windowed_frames ** 2, axis=-1)
+    
+    return linear_energy
+
+
+def process_audio(
+    raw_audio: np.ndarray,
+    sos: np.ndarray, 
+    frame_length: int,
+    hop_length: int
+) -> np.ndarray:
+    """
+    Full pipeline: Filters audio, calculates windowed linear energy, 
+    and converts the final result to dB.
+    
+    Returns:
+        1D array containing the time-evolution of the energy in dB for the given band.
+    """    
+    filtered_audio = sos_filter_audio(raw_audio, *sos)
+    linear_energy = calculate_windowed_energy(filtered_audio, frame_length, hop_length)    
+    energy_db = signal_to_SPL(linear_energy, isPower=True)
+    
+    return energy_db
