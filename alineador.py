@@ -306,20 +306,26 @@ class MotorAlineacion:
         carpeta_salida: Path,
         target_sr: int | None = None,
         subtype: str = "FLOAT",
+        marg_ini_ms: float = 0.0,
+        marg_fin_ms: float = 0.0,
         log_cb=None,
     ):
         """
         Exporta todos los WAVs (refs + mics) alineados.
 
+        Estructura de cada archivo exportado:
+            [marg_ini_ms ms de ceros] + [nota, duracion_comun muestras] + [marg_fin_ms ms de ceros]
+
+        El corte comienza exactamente en toma.start (onset alineado).
+        Las notas más cortas que duracion_comun se rellenan con ceros al final.
+        Los márgenes son silencio puro, idénticos para todas las tomas.
+
         Parámetros
         ----------
-        target_sr : int | None
-            Sample rate de destino. None → conserva el SR de cada toma.
-        subtype   : str
-            Subtipo de WAV para soundfile: "FLOAT", "PCM_24", "PCM_16".
-
-        Todos los archivos tienen la misma duración:
-            preroll_comun + duracion_comun
+        target_sr   : int | None   SR de destino (None = conserva original).
+        subtype     : str          "FLOAT" | "PCM_24" | "PCM_16".
+        marg_ini_ms : float        Milisegundos de silencio antes del onset.
+        marg_fin_ms : float        Milisegundos de silencio después del fin de nota.
         """
         carpeta_salida.mkdir(parents=True, exist_ok=True)
 
@@ -327,28 +333,34 @@ class MotorAlineacion:
         guardado = 0
 
         for toma in self.tomas:
-            sr       = toma.sr
-            out_sr   = target_sr if target_sr else sr
-            ini      = toma.start - self.preroll_comun   # siempre >= 0
-            dur      = self.preroll_comun + self.duracion_comun
+            sr     = toma.sr
+            out_sr = target_sr if target_sr else sr
+            ini    = toma.start          # onset exacto — sin pre-roll de audio real
+            dur    = self.duracion_comun  # muestras de nota (en sr original)
+
+            # Ceros de margen calculados en el SR de salida
+            n_pre = int(marg_ini_ms / 1000 * out_sr)
+            n_pos = int(marg_fin_ms  / 1000 * out_sr)
 
             def _cortar(sig: np.ndarray, sr_sig: int) -> np.ndarray:
-                # 1. Llevar sr_sig → toma.sr para poder cortar con ini/dur
+                # 1. Resamplear a toma.sr para cortar con ini/dur en escala correcta
                 work = sig
                 if sr_sig != sr:
                     g    = gcd(sr, sr_sig)
                     work = resample_poly(sig, sr // g, sr_sig // g).astype(np.float32)
                 seg = work[ini : ini + dur]
-                if len(seg) < dur:
+                if len(seg) < dur:                           # nota más corta → ceros al final
                     seg = np.pad(seg, (0, dur - len(seg)))
-                # 2. Llevar toma.sr → out_sr (si el usuario eligió otro SR)
+                # 2. Resamplear a out_sr si el usuario eligió otro SR
                 if out_sr != sr:
                     g   = gcd(sr, out_sr)
                     seg = resample_poly(seg, out_sr // g, sr // g).astype(np.float32)
-                return seg.astype(np.float32)
-
-            if target_sr:
-                _log(log_cb, f"  SR: {sr} Hz → {out_sr} Hz  |  {subtype}")
+                # 3. Añadir márgenes de silencio
+                return np.concatenate([
+                    np.zeros(n_pre, dtype=np.float32),
+                    seg.astype(np.float32),
+                    np.zeros(n_pos, dtype=np.float32),
+                ])
 
             # — Referencia — exportar SIEMPRE el original sin filtrar
             seg    = _cortar(toma.signal_ref_orig, sr)
@@ -363,7 +375,7 @@ class MotorAlineacion:
                     sig_m, sr_m = sf.read(str(mic_path), dtype="float32")
                     if sig_m.ndim > 1:
                         sig_m = sig_m[:, 0]
-                    seg_m   = _cortar(sig_m, int(sr_m))
+                    seg_m    = _cortar(sig_m, int(sr_m))
                     nombre_m = mic_path.stem + "_alineado.wav"
                     sf.write(str(carpeta_salida / nombre_m), seg_m, out_sr,
                              subtype=subtype)
@@ -373,7 +385,11 @@ class MotorAlineacion:
                 except Exception as e:
                     _log(log_cb, f"  [WARN] {mic_path.name}: {e}")
 
-        _log(log_cb, f"  Exportación completa: {guardado} archivos en {carpeta_salida}")
+        dur_total_s = (n_pre + int(dur * out_sr / sr) + n_pos) / out_sr
+        _log(log_cb,
+             f"  Exportación completa: {guardado} archivos · "
+             f"{dur_total_s:.3f} s por toma · {out_sr} Hz  [{subtype}]  "
+             f"→ {carpeta_salida}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -434,20 +450,26 @@ class ExportWorker(QObject):
         carpeta: Path,
         target_sr: int | None = None,
         subtype: str = "FLOAT",
+        marg_ini_ms: float = 0.0,
+        marg_fin_ms: float = 0.0,
     ):
         super().__init__()
-        self._motor     = motor
-        self._carpeta   = carpeta
-        self._target_sr = target_sr
-        self._subtype   = subtype
+        self._motor       = motor
+        self._carpeta     = carpeta
+        self._target_sr   = target_sr
+        self._subtype     = subtype
+        self._marg_ini_ms = marg_ini_ms
+        self._marg_fin_ms = marg_fin_ms
 
     def run(self):
         try:
             self._motor.exportar(
                 self._carpeta,
-                target_sr = self._target_sr,
-                subtype   = self._subtype,
-                log_cb    = lambda m: self.log.emit(m),
+                target_sr   = self._target_sr,
+                subtype     = self._subtype,
+                marg_ini_ms = self._marg_ini_ms,
+                marg_fin_ms = self._marg_fin_ms,
+                log_cb      = lambda m: self.log.emit(m),
             )
             self.terminado.emit()
         except Exception as e:
@@ -1146,15 +1168,18 @@ class AlineadorWindow(QMainWindow):
 
         target_sr = dlg.target_sr
         subtype   = dlg.subtype
+        marg_ini  = self._spin_marg_ini.value()
+        marg_fin  = self._spin_marg_fin.value()
 
         self._agregar_log(
             f"── Exportando a {carpeta_exp} ──\n"
-            f"   SR: {target_sr:,} Hz  |  {subtype}".replace(",", ".")
+            f"   SR: {target_sr} Hz  |  {subtype}\n"
+            f"   Pre-silencio: {marg_ini:.0f} ms  |  Post-silencio: {marg_fin:.0f} ms"
         )
         self._btn_exportar.setEnabled(False)
 
         self._worker = ExportWorker(        # mantener ref → no GC
-            self._motor, carpeta_exp, target_sr, subtype)
+            self._motor, carpeta_exp, target_sr, subtype, marg_ini, marg_fin)
         self._thread = QThread()
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
