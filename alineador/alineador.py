@@ -19,7 +19,6 @@ Uso: python alineador.py
 
 from __future__ import annotations
 import sys
-import re
 import tempfile
 import atexit
 import numpy as np
@@ -64,24 +63,26 @@ except Exception:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TomaDatos:
-    """Datos de una toma (un ángulo de mesa giratoria)."""
+    """
+    Datos de un archivo WAV a alinear.
+    Genérico: puede ser cualquier grabación mono o multicanal (se usa canal 0).
+    """
 
-    def __init__(self, ang: int, path_ref: Path, paths_mics: dict[int, Path]):
-        self.ang        = ang
-        self.path_ref   = path_ref
-        self.paths_mics = paths_mics          # {num_mic: Path}
+    def __init__(self, path: Path):
+        self.path   = path
+        self.nombre = path.stem          # nombre sin extensión, para etiquetas UI
 
-        # Señal de referencia original (nunca modificada — usada para export y display)
-        self.signal_ref_orig: np.ndarray | None = None
-        # Señal de referencia de trabajo (filtrada) — usada solo para análisis DSP
-        self.signal_ref: np.ndarray | None = None
+        # Señal original (inmutable — usada para export y display)
+        self.signal_orig: np.ndarray | None = None
+        # Señal de trabajo (filtrada para análisis DSP)
+        self.signal: np.ndarray | None = None
         self.sr: int = 0
 
         # Resultados del análisis
-        self.onset:         int = 0   # onset detectado en esta toma (solo informativo)
-        self.lag:           int = 0   # lag GCC-PHAT respecto a la maestra (informativo)
+        self.onset:         int = 0   # onset detectado
+        self.lag:           int = 0   # lag respecto a la referencia (GCC-PHAT)
         self.start_aligned: int = 0   # inicio definitivo del segmento a exportar
-        self.offset:        int = 0   # muestra de offset en signal_ref (fin de nota)
+        self.offset:        int = 0   # muestra de fin de evento
 
     @property
     def start(self) -> int:
@@ -90,15 +91,15 @@ class TomaDatos:
 
     @property
     def note_duration(self) -> int:
-        """Duración de la nota en muestras (offset - start)."""
+        """Duración del evento en muestras (offset − start)."""
         return max(0, self.offset - self.start)
 
     @property
     def available_after_start(self) -> int:
         """Muestras disponibles desde start hasta el fin del archivo."""
-        if self.signal_ref is None:
+        if self.signal is None:
             return 0
-        return max(0, len(self.signal_ref) - self.start)
+        return max(0, len(self.signal) - self.start)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -107,114 +108,131 @@ class TomaDatos:
 
 class MotorAlineacion:
     """
-    Realiza toda la cadena de procesamiento DSP.
-    No tiene dependencias de Qt — puede usarse en un hilo secundario.
+    Cadena de procesamiento DSP genérica para alineación de múltiples WAVs.
+    Sin dependencias de Qt — puede usarse en un hilo secundario.
     """
 
     def __init__(self):
         self.tomas: list[TomaDatos] = []
-        self.duracion_comun: int = 0    # muestras de nota (sin pre-roll)
-        self.preroll_comun:  int = 0    # muestras de pre-roll incluidas en el export
-        self._master_idx: int = 0
+        self.duracion_comun: int = 0
+        self.preroll_comun:  int = 0
+        self.ref_idx:        int = 0   # índice de la toma de referencia
 
     # ── Carga ────────────────────────────────────────────────────────────────
 
-    def cargar(
-        self,
-        carpeta: Path,
-        dinamica: str,
-        template_mics: str = "mic_{MIC}_ang_{DIN}_{ANG}.wav",
-        template_refs: str = "mic_ref_ang_{DIN}_{ANG}.wav",
-        log_cb=None,
-    ):
+    def cargar(self, archivos: list[Path], log_cb=None):
+        """
+        Carga la lista de archivos WAV provista.
+        Los archivos se ordenan por nombre antes de procesar.
+        """
         self.tomas = []
-        re_mics = _compilar_template(template_mics)
-        re_refs = _compilar_template(template_refs)
-
-        refs_map: dict[int, Path] = {}
-        mics_map: dict[int, dict[int, Path]] = {}
-
-        for wav in sorted(carpeta.glob("*.wav")):
-            nombre = wav.name
-            m = re_refs.match(nombre)
-            if m and m.group("din").lower() == dinamica.lower():
-                refs_map[int(m.group("ang"))] = wav
-                continue
-            m = re_mics.match(nombre)
-            if m and m.group("din").lower() == dinamica.lower():
-                ang = int(m.group("ang"))
-                mic = int(m.group("mic"))
-                mics_map.setdefault(ang, {})[mic] = wav
-
-        _log(log_cb, f"  Referencias encontradas : {len(refs_map)}")
-        _log(log_cb, f"  Ángulos con mics        : {len(mics_map)}")
-
-        if not refs_map:
-            raise RuntimeError("No se encontraron archivos de referencia.")
-
-        for ang in sorted(refs_map):
-            paths_mics = mics_map.get(ang, {})
-            toma = TomaDatos(ang, refs_map[ang], paths_mics)
-            sig, sr = sf.read(str(refs_map[ang]), dtype="float32")
+        if not archivos:
+            raise RuntimeError("No se seleccionaron archivos WAV.")
+        for wav in sorted(archivos, key=lambda p: p.name):
+            toma = TomaDatos(wav)
+            sig, sr = sf.read(str(wav), dtype="float32")
             if sig.ndim > 1:
                 sig = sig[:, 0]
-            toma.signal_ref      = sig
-            toma.signal_ref_orig = sig.copy()   # copia inmutable para export/display
-            toma.sr = int(sr)
+            toma.signal      = sig
+            toma.signal_orig = sig.copy()
+            toma.sr          = int(sr)
             self.tomas.append(toma)
-            _log(log_cb, f"  Cargado {ang:>4}°  {len(sig)/sr:.2f} s  sr={sr} Hz")
-
-        if not self.tomas:
-            raise RuntimeError("No se cargaron tomas.")
+            _log(log_cb, f"  {wav.name:<50}  {len(sig)/sr:.2f} s  {sr} Hz")
+        _log(log_cb, f"  Total: {len(self.tomas)} archivos cargados.")
 
     # ── Paso 1: Filtro pasa altos ─────────────────────────────────────────────
 
     def filtrar(self, fc_hz: float = 100.0, log_cb=None):
-        _log(log_cb, f"  Butterworth HP orden 4  fc={fc_hz} Hz  (sosfiltfilt)")
+        _log(log_cb, f"  Butterworth HP orden 4  fc={fc_hz} Hz")
         for toma in self.tomas:
             sos = butter(4, fc_hz / (toma.sr / 2), btype="high", output="sos")
-            toma.signal_ref = sosfiltfilt(sos, toma.signal_ref).astype(np.float32)
+            toma.signal = sosfiltfilt(sos, toma.signal).astype(np.float32)
 
-    # ── Paso 2: Detección de onset (gruesa) ───────────────────────────────────
+    # ── Paso 2: Detección de onset ────────────────────────────────────────────
 
     def detectar_onsets(
         self,
         margen_db: float = 12.0,
         ruido_seg: float = 3.0,
-        frame_ms: float = 20.0,
+        frame_ms:  float = 20.0,
         log_cb=None,
     ):
         _log(log_cb, f"  Umbral adaptivo: piso + {margen_db} dB")
         for toma in self.tomas:
-            sig  = toma.signal_ref
-            sr   = toma.sr
-            fn   = max(1, int(sr * frame_ms / 1000))
-            nf   = len(sig) // fn
+            sig = toma.signal
+            sr  = toma.sr
+            fn  = max(1, int(sr * frame_ms / 1000))
+            nf  = len(sig) // fn
 
-            niveles = np.array([_rms_db(sig[i*fn:(i+1)*fn]) for i in range(nf)])
+            niveles      = np.array([_rms_db(sig[i*fn:(i+1)*fn]) for i in range(nf)])
             frames_ruido = min(int(ruido_seg * sr / fn), nf)
-            piso_db  = float(np.median(niveles[:frames_ruido]))
-            umbral   = piso_db + margen_db
+            piso_db      = float(np.median(niveles[:frames_ruido]))
+            umbral       = piso_db + margen_db
 
-            sobre = np.where(niveles > umbral)[0]
+            sobre      = np.where(niveles > umbral)[0]
             toma.onset = int(sobre[0]) * fn if len(sobre) else 0
             _log(log_cb,
-                 f"  {toma.ang:>4}°  piso={piso_db:.1f} dB  "
+                 f"  {toma.nombre:<45}  piso={piso_db:.1f} dB  "
                  f"onset={toma.onset/sr:.3f} s")
 
-    # ── Paso 3: Alineación por onset mediano ──────────────────────────────────
+    # ── Paso 3a: Alineación por onset individual ──────────────────────────────
 
     def alinear_por_onset(self, log_cb=None):
-        """
-        Alinea todas las tomas usando el onset detectado individualmente.
-        start_aligned_i = onset_i
-        """
-        _log(log_cb, "  Alineación por onset individual:")
+        """Cada archivo alinea su propio onset a t=0."""
+        _log(log_cb, "  Modo: onset individual")
         for toma in self.tomas:
             toma.lag           = 0
             toma.start_aligned = toma.onset
+            _log(log_cb, f"  {toma.nombre:<45}  onset={toma.onset/toma.sr:.3f} s")
+
+    # ── Paso 3b: Alineación por GCC-PHAT vs referencia ───────────────────────
+
+    def alinear_por_gcc(self, log_cb=None):
+        """
+        Alinea todos los archivos respecto al archivo de referencia (self.ref_idx)
+        usando GCC-PHAT en una ventana alrededor de los onsets.
+
+        Útil cuando las grabaciones son SIMULTÁNEAS (múltiples micrófonos del
+        mismo evento) o cuando hay diferencias de inicio conocidas.
+        """
+        if not self.tomas:
+            return
+        ref   = self.tomas[self.ref_idx]
+        sr    = ref.sr
+        _log(log_cb, f"  Referencia: '{ref.nombre}'")
+
+        ref.lag           = 0
+        ref.start_aligned = ref.onset
+
+        # Ventana de análisis: onset_ref ± 3 s (o lo que haya disponible)
+        ventana_n = int(3.0 * sr)
+        ini_ref   = max(0, ref.onset - ventana_n // 4)
+        fin_ref   = min(len(ref.signal), ini_ref + ventana_n)
+        seg_ref   = ref.signal[ini_ref:fin_ref]
+
+        max_lag = int(2.0 * sr)   # ±2 s máximo de lag
+
+        for i, toma in enumerate(self.tomas):
+            if i == self.ref_idx:
+                continue
+            # Ventana centrada en el onset de esta toma
+            ini_t = max(0, toma.onset - ventana_n // 4)
+            fin_t = min(len(toma.signal), ini_t + ventana_n)
+            seg_t = toma.signal[ini_t:fin_t]
+
+            # Asegurar misma longitud antes de GCC-PHAT
+            n = min(len(seg_ref), len(seg_t))
+            lag_relativo = _gcc_phat(seg_t[:n], seg_ref[:n], max_lag)
+
+            # lag_relativo > 0: toma está retrasada respecto a la ref
+            # start alineado = ajustar onset con el lag encontrado
+            toma.lag           = lag_relativo
+            toma.start_aligned = max(0, toma.onset - lag_relativo +
+                                     (ini_t - ini_ref))
             _log(log_cb,
-                 f"  {toma.ang:>4}°  onset={toma.onset/toma.sr:.3f} s")
+                 f"  {toma.nombre:<45}  "
+                 f"lag={lag_relativo/sr*1000:+.1f} ms  "
+                 f"start={toma.start_aligned/sr:.3f} s")
 
     # ── Paso 4: Detección de offset (fin de nota) ─────────────────────────────
 
@@ -222,38 +240,32 @@ class MotorAlineacion:
         self,
         margen_db: float = 12.0,
         ruido_seg: float = 3.0,
-        frame_ms: float = 20.0,
+        frame_ms:  float = 20.0,
         log_cb=None,
     ):
         """
-        Detecta el fin de nota en cada toma.
-
-        El piso de ruido se estima en la región ANTERIOR al onset alineado
-        (silencio antes de que empiece la nota), no en el comienzo de la nota.
-        Si no hay suficiente señal pre-onset, se usa un piso bajo fijo (-60 dB).
+        Detecta el fin del evento en cada toma.
+        Piso de ruido estimado en la región anterior al onset (silencio pre-evento).
         """
-        _log(log_cb, "  Buscando fin de nota desde start alineado...")
+        _log(log_cb, "  Buscando fin de evento desde start alineado...")
         for toma in self.tomas:
             sr  = toma.sr
             fn  = max(1, int(sr * frame_ms / 1000))
-            sig = toma.signal_ref
+            sig = toma.signal
 
-            # ── Piso de ruido: región antes del onset ──────────────────────────
-            pre_onset = sig[:toma.start]   # silencio antes de la nota
+            pre_onset = sig[:toma.start]
             n_pre     = len(pre_onset) // fn
-            if n_pre >= 3:                 # al menos 3 frames para mediana robusta
+            if n_pre >= 3:
                 niv_pre = np.array([_rms_db(pre_onset[i*fn:(i+1)*fn])
                                     for i in range(n_pre)])
                 piso_db = float(np.median(niv_pre))
             else:
-                piso_db = -60.0            # piso conservador si no hay silencio previo
+                piso_db = -60.0
             umbral = piso_db + margen_db
 
-            # ── Búsqueda de offset en la región de nota ────────────────────────
             seg = sig[toma.start:]
             if len(seg) == 0:
                 toma.offset = toma.start
-                _log(log_cb, f"  {toma.ang:>4}°  [sin segmento tras start]")
                 continue
 
             nf = len(seg) // fn
@@ -261,15 +273,15 @@ class MotorAlineacion:
                 toma.offset = toma.start + len(seg)
                 continue
 
-            niveles = np.array([_rms_db(seg[i*fn:(i+1)*fn]) for i in range(nf)])
-            sobre = np.where(niveles > umbral)[0]
+            niveles      = np.array([_rms_db(seg[i*fn:(i+1)*fn]) for i in range(nf)])
+            sobre        = np.where(niveles > umbral)[0]
             offset_frame = int(sobre[-1]) if len(sobre) else nf - 1
             toma.offset  = toma.start + (offset_frame + 1) * fn
 
             _log(log_cb,
-                 f"  {toma.ang:>4}°  piso={piso_db:.1f} dB  "
+                 f"  {toma.nombre:<45}  piso={piso_db:.1f} dB  "
                  f"offset={toma.offset/sr:.3f} s  "
-                 f"nota={toma.note_duration/sr:.3f} s")
+                 f"evento={toma.note_duration/sr:.3f} s")
 
     # ── Paso 5: Duración común ────────────────────────────────────────────────
 
@@ -277,27 +289,15 @@ class MotorAlineacion:
         if not self.tomas:
             return
         sr = self.tomas[0].sr
-
-        # ── Pre-roll común ────────────────────────────────────────────────────
-        # El pre-roll de cada toma es la cantidad de muestras disponibles ANTES
-        # del onset alineado (= start_aligned en el archivo original).
-        # El pre-roll común es el MÍNIMO: la toma más "ajustada" al inicio del
-        # archivo limita cuánto podemos retroceder sin perder información.
-        # Exportar TODOS desde (start_aligned - preroll_comun) garantiza que
-        # NINGUNA toma pierde contenido al inicio.
         self.preroll_comun  = min(t.start_aligned for t in self.tomas)
         self.duracion_comun = max(t.note_duration  for t in self.tomas)
-
-        dur_total_s   = (self.preroll_comun + self.duracion_comun) / sr
-        _log(log_cb, f"  Pre-roll común  : {self.preroll_comun/sr*1000:.0f} ms")
-        _log(log_cb, f"  Nota más larga  : {self.duracion_comun/sr:.3f} s")
-        _log(log_cb, f"  Duración export : {dur_total_s:.3f} s por toma")
-
+        _log(log_cb, f"  Pre-roll común   : {self.preroll_comun/sr*1000:.0f} ms")
+        _log(log_cb, f"  Evento más largo : {self.duracion_comun/sr:.3f} s")
         for toma in self.tomas:
             falta = self.duracion_comun - toma.note_duration
             if falta > 0:
                 _log(log_cb,
-                     f"  {toma.ang:>4}°  post-relleno ceros: {falta/sr:.3f} s")
+                     f"  {toma.nombre:<45}  +{falta/sr:.3f} s ceros al final")
 
     # ── Exportación ───────────────────────────────────────────────────────────
 
@@ -328,68 +328,41 @@ class MotorAlineacion:
         marg_fin_ms : float        Milisegundos de silencio después del fin de nota.
         """
         carpeta_salida.mkdir(parents=True, exist_ok=True)
-
-        total    = sum(1 + len(t.paths_mics) for t in self.tomas)
+        total    = len(self.tomas)
         guardado = 0
 
         for toma in self.tomas:
             sr     = toma.sr
             out_sr = target_sr if target_sr else sr
-            ini    = toma.start          # onset exacto — sin pre-roll de audio real
-            dur    = self.duracion_comun  # muestras de nota (en sr original)
+            ini    = toma.start
+            dur    = self.duracion_comun
 
-            # Ceros de margen calculados en el SR de salida
             n_pre = int(marg_ini_ms / 1000 * out_sr)
             n_pos = int(marg_fin_ms  / 1000 * out_sr)
 
-            def _cortar(sig: np.ndarray, sr_sig: int) -> np.ndarray:
-                # 1. Resamplear a toma.sr para cortar con ini/dur en escala correcta
-                work = sig
-                if sr_sig != sr:
-                    g    = gcd(sr, sr_sig)
-                    work = resample_poly(sig, sr // g, sr_sig // g).astype(np.float32)
-                seg = work[ini : ini + dur]
-                if len(seg) < dur:                           # nota más corta → ceros al final
-                    seg = np.pad(seg, (0, dur - len(seg)))
-                # 2. Resamplear a out_sr si el usuario eligió otro SR
-                if out_sr != sr:
-                    g   = gcd(sr, out_sr)
-                    seg = resample_poly(seg, out_sr // g, sr // g).astype(np.float32)
-                # 3. Añadir márgenes de silencio
-                return np.concatenate([
-                    np.zeros(n_pre, dtype=np.float32),
-                    seg.astype(np.float32),
-                    np.zeros(n_pos, dtype=np.float32),
-                ])
+            # Siempre exportar la señal ORIGINAL (sin filtrar)
+            work = toma.signal_orig
+            seg  = work[ini : ini + dur]
+            if len(seg) < dur:
+                seg = np.pad(seg, (0, dur - len(seg)))
+            if out_sr != sr:
+                g   = gcd(sr, out_sr)
+                seg = resample_poly(seg, out_sr // g, sr // g).astype(np.float32)
+            seg = np.concatenate([
+                np.zeros(n_pre, dtype=np.float32),
+                seg.astype(np.float32),
+                np.zeros(n_pos, dtype=np.float32),
+            ])
 
-            # — Referencia — exportar SIEMPRE el original sin filtrar
-            seg    = _cortar(toma.signal_ref_orig, sr)
-            nombre = toma.path_ref.stem + "_alineado.wav"
+            nombre = toma.path.stem + "_alineado.wav"
             sf.write(str(carpeta_salida / nombre), seg, out_sr, subtype=subtype)
             guardado += 1
             _log(log_cb, f"  [{guardado}/{total}] {nombre}")
 
-            # — Micrófonos —
-            for mic_num, mic_path in sorted(toma.paths_mics.items()):
-                try:
-                    sig_m, sr_m = sf.read(str(mic_path), dtype="float32")
-                    if sig_m.ndim > 1:
-                        sig_m = sig_m[:, 0]
-                    seg_m    = _cortar(sig_m, int(sr_m))
-                    nombre_m = mic_path.stem + "_alineado.wav"
-                    sf.write(str(carpeta_salida / nombre_m), seg_m, out_sr,
-                             subtype=subtype)
-                    guardado += 1
-                    if guardado % 40 == 0:
-                        _log(log_cb, f"  [{guardado}/{total}] ...")
-                except Exception as e:
-                    _log(log_cb, f"  [WARN] {mic_path.name}: {e}")
-
-        dur_total_s = (n_pre + int(dur * out_sr / sr) + n_pos) / out_sr
+        dur_s = (n_pre + int(dur * out_sr / max(sr, 1)) + n_pos) / max(out_sr, 1)
         _log(log_cb,
              f"  Exportación completa: {guardado} archivos · "
-             f"{dur_total_s:.3f} s por toma · {out_sr} Hz  [{subtype}]  "
-             f"→ {carpeta_salida}")
+             f"{dur_s:.3f} s/archivo · {out_sr} Hz [{subtype}] → {carpeta_salida}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -422,8 +395,13 @@ class ProcesadorWorker(QObject):
             m.detectar_onsets(p["margen_db"], log_cb=log)
             self.progreso.emit(45)
 
-            self.log.emit("── Alineación por onset ────────────────")
-            m.alinear_por_onset(log_cb=log)
+            metodo = p.get("metodo_alineacion", "onset")
+            if metodo == "gcc":
+                self.log.emit("── Alineación GCC-PHAT vs referencia ───")
+                m.alinear_por_gcc(log_cb=log)
+            else:
+                self.log.emit("── Alineación por onset individual ─────")
+                m.alinear_por_onset(log_cb=log)
             self.progreso.emit(65)
 
             self.log.emit("── Detección de offsets ────────────────")
@@ -622,8 +600,8 @@ class VisorOndasWidget(QWidget):
         sr = m.tomas[0].sr
 
         for i, toma in enumerate(m.tomas):
-            sig = toma.signal_ref_orig if toma.signal_ref_orig is not None \
-                  else toma.signal_ref
+            sig = toma.signal_orig if toma.signal_orig is not None \
+                  else toma.signal
             col = self.COLORES[i % len(self.COLORES)]
             sep = float(i * 2.2)
 
@@ -686,8 +664,8 @@ class VisorOndasWidget(QWidget):
                         pen=pg.mkPen(col, width=0.8,
                                      style=Qt.PenStyle.DotLine)))
 
-            # Etiqueta de ángulo — al inicio del fragmento visible
-            lbl = pg.TextItem(f"{toma.ang}°", color=col, anchor=(0.0, 0.5))
+            # Etiqueta — nombre de archivo al inicio del fragmento visible
+            lbl = pg.TextItem(toma.nombre, color=col, anchor=(0.0, 0.5))
             lbl.setPos(float(t_env[0]), sep)
             pi.addItem(lbl)
 
@@ -735,6 +713,7 @@ class AlineadorWindow(QMainWindow):
         self._thread: QThread | None = None
         self._playback_sig: np.ndarray | None = None
         self._playback_sr:  int = 44100
+        self._archivos_seleccionados: list[Path] = []   # WAVs elegidos por el usuario
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -760,47 +739,55 @@ class AlineadorWindow(QMainWindow):
     # ── Construcción UI ───────────────────────────────────────────────────────
 
     def _barra_superior(self) -> QWidget:
-        """Toolbar superior: carga de archivos, acción principal y exportación."""
+        """Toolbar superior: carga de archivos, referencia, acción y exportación."""
         bar = QWidget()
         bar.setObjectName("barraSuperior")
         lay = QVBoxLayout(bar)
         lay.setSpacing(5)
         lay.setContentsMargins(10, 8, 10, 6)
 
-        # ── Fila 1: carpeta · plantilla · dinámica · cargar ──────────────────
+        # ── Fila 1: selección de archivos WAV · referencia · cargar ─────────
         f1 = QHBoxLayout(); f1.setSpacing(6)
 
-        f1.addWidget(QLabel("📁 Carpeta:"))
-        self._campo_carpeta = QLineEdit()
-        self._campo_carpeta.setPlaceholderText("Carpeta con los WAVs de medición…")
-        f1.addWidget(self._campo_carpeta, stretch=3)
+        f1.addWidget(QLabel("📄 WAVs:"))
 
-        btn_dir = QPushButton("…")
-        btn_dir.setFixedWidth(32)
+        # Campo de sólo lectura — muestra un resumen de los archivos elegidos
+        self._campo_archivos = QLineEdit()
+        self._campo_archivos.setReadOnly(True)
+        self._campo_archivos.setPlaceholderText("Ningún archivo seleccionado…")
+        self._campo_archivos.setToolTip(
+            "Archivos WAV seleccionados para alinear.\n"
+            "Usá los botones de la derecha para agregar o limpiar.")
+        f1.addWidget(self._campo_archivos, stretch=3)
+
+        btn_add = QPushButton("＋ Archivos…")
+        btn_add.setObjectName("btnBrowse")
+        btn_add.setToolTip("Seleccionar uno o más archivos WAV individualmente")
+        btn_add.clicked.connect(self._agregar_archivos)
+        f1.addWidget(btn_add)
+
+        btn_dir = QPushButton("📁 Carpeta…")
         btn_dir.setObjectName("btnBrowse")
-        btn_dir.setToolTip("Explorar carpeta de mediciones")
-        btn_dir.clicked.connect(self._explorar_carpeta)
+        btn_dir.setToolTip("Agregar todos los WAVs de una carpeta")
+        btn_dir.clicked.connect(self._agregar_carpeta)
         f1.addWidget(btn_dir)
 
-        f1.addSpacing(10)
-        f1.addWidget(QLabel("Plantilla:"))
-        self._campo_tmpl_refs = QLineEdit("mic_ref_ang_{DIN}_{ANG}.wav")
-        self._campo_tmpl_refs.setMinimumWidth(190)
-        self._campo_tmpl_refs.setToolTip("Tokens: {DIN} = dinámica  {ANG} = ángulo")
-        f1.addWidget(self._campo_tmpl_refs, stretch=2)
+        btn_clear = QPushButton("✕")
+        btn_clear.setObjectName("btnBrowse")
+        btn_clear.setFixedWidth(28)
+        btn_clear.setToolTip("Limpiar lista de archivos")
+        btn_clear.clicked.connect(self._limpiar_archivos)
+        f1.addWidget(btn_clear)
 
-        f1.addSpacing(10)
-        f1.addWidget(QLabel("Dinámica:"))
-        # Editable: se auto-completa al cargar la carpeta
-        self._combo_din = QComboBox()
-        self._combo_din.setEditable(True)
-        self._combo_din.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self._combo_din.lineEdit().setPlaceholderText("ej: forte, piano…")
-        self._combo_din.setMinimumWidth(110)
-        self._combo_din.setToolTip(
-            "Se detecta automáticamente al abrir la carpeta.\n"
-            "También podés escribir el nombre de la dinámica.")
-        f1.addWidget(self._combo_din)
+        f1.addSpacing(12)
+        f1.addWidget(QLabel("Referencia:"))
+        self._combo_ref = QComboBox()
+        self._combo_ref.setMinimumWidth(220)
+        self._combo_ref.setToolTip(
+            "Archivo WAV usado como referencia para alineación GCC-PHAT.\n"
+            "Se actualiza automáticamente al agregar archivos.")
+        self._combo_ref.currentIndexChanged.connect(self._on_cambio_ref)
+        f1.addWidget(self._combo_ref, stretch=2)
 
         btn_cargar = QPushButton("⬇  Cargar")
         btn_cargar.setObjectName("btnCargar")
@@ -880,17 +867,26 @@ class AlineadorWindow(QMainWindow):
         gl_hp.addWidget(self._spin_fc,     1, 1)
         lay.addWidget(gb_hp)
 
-        # ── Detección de onset ────────────────────────────────────────────────
-        gb_onset = QGroupBox("Detección de onset")
+        # ── Detección de onset + método de alineación ────────────────────────
+        gb_onset = QGroupBox("Detección y alineación")
         gl_on = QGridLayout(gb_onset); gl_on.setSpacing(6)
 
         self._spin_margen = QDoubleSpinBox()
         self._spin_margen.setRange(3, 40); self._spin_margen.setValue(12)
         self._spin_margen.setSuffix(" dB")
 
-        lbl_margen = QLabel("Umbral:")
-        gl_on.addWidget(lbl_margen,        0, 0)
-        gl_on.addWidget(self._spin_margen, 0, 1)
+        self._combo_metodo = QComboBox()
+        self._combo_metodo.addItem("Onset individual",           "onset")
+        self._combo_metodo.addItem("Cross-corr. vs referencia",  "gcc")
+        self._combo_metodo.setToolTip(
+            "Onset: cada archivo alinea su propio onset a t=0.\n"
+            "Cross-corr.: alineación fina respecto al archivo de referencia\n"
+            "(ideal para grabaciones simultáneas con múltiples micrófonos).")
+
+        gl_on.addWidget(QLabel("Umbral onset:"), 0, 0)
+        gl_on.addWidget(self._spin_margen,       0, 1)
+        gl_on.addWidget(QLabel("Método:"),       1, 0)
+        gl_on.addWidget(self._combo_metodo,      1, 1)
         lay.addWidget(gb_onset)
 
         # ── Vista de ondas ────────────────────────────────────────────────────
@@ -1008,48 +1004,74 @@ class AlineadorWindow(QMainWindow):
 
     # ── Handlers ──────────────────────────────────────────────────────────────
 
-    def _detectar_dinamicas(self, carpeta: Path):
-        """
-        Escanea los WAVs de la carpeta y extrae los valores únicos de {DIN}
-        según la plantilla de referencia actual. Rellena el combo de dinámica.
-        """
-        try:
-            re_refs = _compilar_template(self._campo_tmpl_refs.text())
-        except Exception:
+    # ── Selección de archivos ─────────────────────────────────────────────────
+
+    def _agregar_archivos(self):
+        """Diálogo de selección de archivos WAV individuales (multi-select)."""
+        archivos, _ = QFileDialog.getOpenFileNames(
+            self, "Seleccionar archivos WAV", "", "WAV Files (*.wav *.WAV)")
+        if not archivos:
             return
+        nuevos   = [Path(a) for a in archivos]
+        conocidos = {p for p in self._archivos_seleccionados}
+        for p in nuevos:
+            if p not in conocidos:
+                self._archivos_seleccionados.append(p)
+                conocidos.add(p)
+        self._archivos_seleccionados.sort(key=lambda p: p.name)
+        self._actualizar_campo_archivos()
+        # Auto-sugerir carpeta de exportación si aún está vacía
+        if self._archivos_seleccionados and not self._campo_export.text().strip():
+            self._campo_export.setText(
+                str(self._archivos_seleccionados[0].parent / "_alineado"))
 
-        dins: set[str] = set()
-        for wav in carpeta.glob("*.wav"):
-            m = re_refs.match(wav.name)
-            if m:
-                try:
-                    dins.add(m.group("din"))
-                except IndexError:
-                    pass
-
-        if not dins:
+    def _agregar_carpeta(self):
+        """Agrega todos los WAVs de una carpeta a la lista."""
+        ruta = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta con WAVs")
+        if not ruta:
             return
-
-        actual = self._combo_din.currentText()
-        self._combo_din.blockSignals(True)
-        self._combo_din.clear()
-        for d in sorted(dins):
-            self._combo_din.addItem(d)
-        # Mantener la selección previa si sigue siendo válida
-        if actual in dins:
-            self._combo_din.setCurrentText(actual)
-        else:
-            self._combo_din.setCurrentIndex(0)
-        self._combo_din.blockSignals(False)
-
-    def _explorar_carpeta(self):
-        ruta = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta de mediciones")
-        if ruta:
-            self._campo_carpeta.setText(ruta)
-            # Sugerir carpeta de exportación
+        nuevos   = sorted(Path(ruta).glob("*.wav"), key=lambda p: p.name)
+        conocidos = {p for p in self._archivos_seleccionados}
+        for p in nuevos:
+            if p not in conocidos:
+                self._archivos_seleccionados.append(p)
+        self._archivos_seleccionados.sort(key=lambda p: p.name)
+        self._actualizar_campo_archivos()
+        # Auto-sugerir carpeta de exportación si aún está vacía
+        if not self._campo_export.text().strip():
             self._campo_export.setText(str(Path(ruta) / "_alineado"))
-            # Auto-detectar dinámica desde los nombres de archivo
-            self._detectar_dinamicas(Path(ruta))
+
+    def _limpiar_archivos(self):
+        """Vacía la lista de archivos seleccionados."""
+        self._archivos_seleccionados.clear()
+        self._actualizar_campo_archivos()
+
+    def _actualizar_campo_archivos(self):
+        """Actualiza el campo de texto resumen y el combo de referencia."""
+        n = len(self._archivos_seleccionados)
+        if n == 0:
+            self._campo_archivos.clear()
+        elif n == 1:
+            self._campo_archivos.setText(self._archivos_seleccionados[0].name)
+        else:
+            muestra = ", ".join(p.name for p in self._archivos_seleccionados[:3])
+            extra   = f"  (+{n - 3} más)" if n > 3 else ""
+            self._campo_archivos.setText(f"{n} archivos: {muestra}{extra}")
+        self._actualizar_lista_wavs()
+
+    def _actualizar_lista_wavs(self):
+        """Rellena el combo de referencia con los archivos actualmente seleccionados."""
+        self._combo_ref.blockSignals(True)
+        self._combo_ref.clear()
+        for wav in self._archivos_seleccionados:
+            self._combo_ref.addItem(wav.name, wav)
+        self._combo_ref.blockSignals(False)
+        self._combo_ref.setEnabled(bool(self._archivos_seleccionados))
+        self._motor.ref_idx = 0
+
+    def _on_cambio_ref(self, idx: int):
+        """Sincroniza el índice de referencia en el motor."""
+        self._motor.ref_idx = max(0, idx)
 
     def _explorar_export(self):
         ruta = QFileDialog.getExistingDirectory(self, "Carpeta de exportación")
@@ -1057,27 +1079,22 @@ class AlineadorWindow(QMainWindow):
             self._campo_export.setText(ruta)
 
     def _on_cargar(self):
-        carpeta = Path(self._campo_carpeta.text().strip())
-        if not carpeta.exists():
-            self._agregar_log("[ERROR] La carpeta no existe.")
+        if not self._archivos_seleccionados:
+            self._agregar_log("[ERROR] No hay archivos WAV seleccionados.\n"
+                              "        Usá '＋ Archivos…' o '📁 Carpeta…' primero.")
             return
-        self._agregar_log(f"── Cargando '{self._combo_din.currentText()}' ──")
+        n_sel = len(self._archivos_seleccionados)
+        self._agregar_log(f"── Cargando {n_sel} archivos WAV ──────────────────")
         try:
-            self._motor.cargar(
-                carpeta,
-                self._combo_din.currentText(),
-                template_mics = "mic_{MIC}_ang_{DIN}_{ANG}.wav",  # default fijo
-                template_refs = self._campo_tmpl_refs.text(),
-                log_cb=self._agregar_log,
-            )
+            self._motor.cargar(self._archivos_seleccionados, log_cb=self._agregar_log)
             n = len(self._motor.tomas)
-            self._agregar_log(f"[OK] {n} tomas cargadas.")
+            self._agregar_log(f"[OK] {n} archivos cargados.")
             self._btn_analizar.setEnabled(True)
             self._visor.set_motor(self._motor)
-            self._visor.mostrar("original")   # rápido: señales decimadas a 3000 pts
+            self._visor.mostrar("original")
             self._btn_orig.setEnabled(True)
             self._actualizar_combo_canal()
-            self._agregar_log("[OK] Presioná 'Detectar y alinear' para continuar.")
+            self._agregar_log("[OK] Elegí la referencia y presioná 'Detectar y alinear'.")
         except Exception as e:
             self._agregar_log(f"[ERROR] {e}")
 
@@ -1086,9 +1103,10 @@ class AlineadorWindow(QMainWindow):
             return
 
         pasos = {
-            "filtrar":   self._chk_filtrar.isChecked(),
-            "fc_hz":     self._spin_fc.value(),
-            "margen_db": self._spin_margen.value(),
+            "filtrar":            self._chk_filtrar.isChecked(),
+            "fc_hz":              self._spin_fc.value(),
+            "margen_db":          self._spin_margen.value(),
+            "metodo_alineacion":  self._combo_metodo.currentData(),
         }
 
         self._btn_analizar.setEnabled(False)
@@ -1141,13 +1159,8 @@ class AlineadorWindow(QMainWindow):
         self._btn_alin.setEnabled(True)
         self._agregar_log("[OK] Análisis completado. Graficando...")
         self._actualizar_tabla()
-        # Ajustar spinbox de inicio al pre-roll calculado (mínimo garantizado)
-        if self._motor.tomas:
-            sr = self._motor.tomas[0].sr
-            preroll_ms = self._motor.preroll_comun / sr * 1000
-            self._spin_marg_ini.blockSignals(True)
-            self._spin_marg_ini.setValue(max(preroll_ms, self._spin_marg_ini.value()))
-            self._spin_marg_ini.blockSignals(False)
+        # Los márgenes (Inicio / Final) NO se tocan: el usuario los definió
+        # y deben conservarse entre análisis.
         self._mostrar_alineado()
         self._agregar_log("[OK] Listo. Usá 'Original' / 'Alineado' para comparar.")
 
@@ -1207,7 +1220,7 @@ class AlineadorWindow(QMainWindow):
         if idx < 0 or idx >= len(self._motor.tomas):
             return
         toma = self._motor.tomas[idx]
-        sig  = toma.signal_ref
+        sig  = toma.signal_orig if toma.signal_orig is not None else toma.signal
         sr   = toma.sr
 
         if self._chk_alineado_play.isChecked() and self._motor.duracion_comun > 0:
@@ -1230,6 +1243,10 @@ class AlineadorWindow(QMainWindow):
     def _actualizar_tabla(self):
         m = self._motor
         self._tabla.setRowCount(len(m.tomas))
+        # Actualizar encabezado para reflejar que ya no hay "ángulo"
+        self._tabla.setHorizontalHeaderLabels(
+            ["Archivo", "Onset (s)", "Offset (s)", "Nota (s)",
+             "Start export (s)", "Estado"])
         sr = m.tomas[0].sr if m.tomas else 44100
 
         for i, toma in enumerate(m.tomas):
@@ -1238,7 +1255,7 @@ class AlineadorWindow(QMainWindow):
             color   = QColor("#2a5c2a") if relleno <= 0 else QColor("#5c3a1a")
 
             valores = [
-                f"{toma.ang}°",
+                toma.nombre,
                 f"{toma.onset/sr:.3f}",
                 f"{toma.offset/sr:.3f}",
                 f"{toma.note_duration/sr:.3f}",
@@ -1254,7 +1271,7 @@ class AlineadorWindow(QMainWindow):
     def _actualizar_combo_canal(self):
         self._combo_canal.clear()
         for toma in self._motor.tomas:
-            self._combo_canal.addItem(f"{toma.ang}°")
+            self._combo_canal.addItem(toma.nombre)
 
     def _agregar_log(self, msg: str):
         self._log.append(msg)
@@ -1324,28 +1341,6 @@ def _rms_db(frame: np.ndarray) -> float:
 def _log(cb, msg: str):
     if cb:
         cb(msg)
-
-
-def _compilar_template(template: str) -> re.Pattern:
-    MARCADORES = {
-        "{MIC}": r"(?P<mic>\d+)",
-        "{DIN}": r"(?P<din>[^_]+)",
-        "{ANG}": r"(?P<ang>\d+)",
-    }
-    marcadores = sorted(MARCADORES.keys(), key=len, reverse=True)
-    partes, resto = [], template
-    while resto:
-        encontrado = False
-        for m in marcadores:
-            if resto.startswith(m):
-                partes.append(MARCADORES[m])
-                resto = resto[len(m):]
-                encontrado = True
-                break
-        if not encontrado:
-            partes.append(re.escape(resto[0]))
-            resto = resto[1:]
-    return re.compile("".join(partes) + "$", re.IGNORECASE)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
