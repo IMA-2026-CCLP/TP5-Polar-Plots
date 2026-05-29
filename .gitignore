@@ -3,3 +3,11 @@ __pycache__/
 .venv
 Medicion_Cristian
 Medicion_Juli
+
+
+# PyInstaller
+alineador/build/
+alineador/dist/
+*.spec
+*.exe
+*.pkg
