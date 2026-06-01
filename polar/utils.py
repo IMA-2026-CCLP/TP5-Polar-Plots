@@ -30,7 +30,7 @@ def hpf(signal, sr, frecuencia_corte=200):
     return sosfilt(sos, signal)
 
 
-def detectar_onsets(datos, sr=44100, ventana_ms=50, segundos_ruido=2, margen_db=10, pre_onset_ms=100, etiquetas=None):
+def detectar_onsets(datos, sr=44100, ventana_ms=50, segundos_ruido=2, margen_db=10, pre_onset_ms=50, etiquetas=None):
     """
     Detecta el onset de cada fila de `datos` midiendo el ruido de fondo
     en los primeros segundos y aplicando un umbral relativo a ese nivel.
@@ -92,18 +92,23 @@ def detectar_onsets(datos, sr=44100, ventana_ms=50, segundos_ruido=2, margen_db=
 
 def alinear(tensor, onsets_mic10, onsets_ref=None, i_ref=0, sr=44100, gap_ms=0):
     """
-    Alinea el tensor completo usando los onsets del mic_10.
-    El mic_ref se alinea usando sus propios onsets (independiente del mic_10).
+    Alinea el tensor completo.
+
+    - mic_1 a mic_19: grabados en la misma sesión → se cortan todos desde
+                      onsets_mic10 (el onset del array) y quedan en gap_samples.
+    - mic_ref:        grabado en sesión aparte → se corta desde su propio onset
+                      (onsets_ref) y también queda en gap_samples.
 
     Parámetros
     ----------
     tensor       : np.ndarray 3D  (n_angulos x n_mics x n_samples)
-    onsets_mic10 : np.ndarray 1D  (n_angulos,)  onset por toma del mic_10
-    onsets_ref   : np.ndarray 1D  (n_angulos,)  onset por toma del mic_ref
-                                                 si es None no se corrige el ref
+    onsets_mic10 : np.ndarray 1D  (n_angulos,)  onset del array por ángulo
+    onsets_ref   : np.ndarray 1D  (n_angulos,)  onset del mic_ref por ángulo
+                                                 si es None el ref se trata como
+                                                 el resto del array
     i_ref        : int            índice del mic_ref en el tensor (default: 0)
     sr           : int            sample rate (Hz)
-    gap_ms       : float          ms de silencio a dejar antes de cada onset
+    gap_ms       : float          ms de silencio a dejar antes del onset
 
     Retorna
     -------
@@ -112,7 +117,7 @@ def alinear(tensor, onsets_mic10, onsets_ref=None, i_ref=0, sr=44100, gap_ms=0):
     n_angulos, n_mics, n_samples = tensor.shape
     gap_samples = int(gap_ms / 1000 * sr)
 
-    # Largo final basado en el onset más tardío del mic_10
+    # Largo final determinado por el onset más tardío del array
     onset_max = onsets_mic10.max()
     largo     = n_samples - onset_max + gap_samples
 
@@ -120,24 +125,25 @@ def alinear(tensor, onsets_mic10, onsets_ref=None, i_ref=0, sr=44100, gap_ms=0):
 
     for i_az in range(n_angulos):
 
-        # -- Todos los mics (incluido ref por ahora): onset del mic_10 -----
-        inicio     = max(0, onsets_mic10[i_az] - gap_samples)
-        disponible = n_samples - inicio
-        if disponible >= largo:
-            tensor_alineado[i_az, :, :] = tensor[i_az, :, inicio:inicio + largo]
-        else:
-            tensor_alineado[i_az, :, :disponible] = tensor[i_az, :, inicio:]
+        # -- Mics del array (1-19): corte desde el onset del array -----------
+        inicio_array = int(onsets_mic10[i_az])
+        kopiar_array = min(n_samples - inicio_array, largo - gap_samples)
 
-        # -- Solo el ref: reemplazamos con su propio onset -----------------
+        for i_mic in range(n_mics):
+            if i_mic == i_ref:
+                continue
+            tensor_alineado[i_az, i_mic, gap_samples:gap_samples + kopiar_array] = \
+                tensor[i_az, i_mic, inicio_array:inicio_array + kopiar_array]
+
+        # -- Mic ref: corte desde su propio onset (sesión independiente) -----
         if onsets_ref is not None:
-            inicio_ref = max(0, onsets_ref[i_az] - gap_samples)
-            tensor_alineado[i_az, i_ref, :] = 0  # borramos lo que se copió antes
-
-            disponible_ref = n_samples - inicio_ref
-            if disponible_ref >= largo:
-                tensor_alineado[i_az, i_ref, :] = tensor[i_az, i_ref, inicio_ref:inicio_ref + largo]
+            inicio_ref = int(onsets_ref[i_az])
+            kopiar_ref = min(n_samples - inicio_ref, largo - gap_samples)
+            if kopiar_ref > 0:
+                tensor_alineado[i_az, i_ref, gap_samples:gap_samples + kopiar_ref] = \
+                    tensor[i_az, i_ref, inicio_ref:inicio_ref + kopiar_ref]
             else:
-                tensor_alineado[i_az, i_ref, :disponible_ref] = tensor[i_az, i_ref, inicio_ref:]
+                print(f"  [WARN] ang {i_az}: onset del ref fuera del rango, quedará en cero")
 
     print(f"  Tensor alineado.")
     print(f"  Shape original  : {tensor.shape}")
