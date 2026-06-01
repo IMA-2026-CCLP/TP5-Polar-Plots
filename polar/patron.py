@@ -251,3 +251,156 @@ def graficar_patron_ref(polar_alineado, segmentos_por_toma, nombres_notas, mics,
         height     = height,
     )
     fig.show()
+
+
+def graficar_balloon_ref(polar_alineado, segmentos_por_toma, nombres_notas, mics, angulos,
+                         nota=None, rango_db=(-20, 6), titulo=None, width=800, height=800):
+    """
+    Visualización 3D tipo balloon del patrón polar.
+
+    Convención de coordenadas (frame de la cantante):
+      - Elevación: 0° (frente horizontal) → 90° (arriba) → 180° (atrás horizontal)
+      - Azimut:    0°→360°  (medido 0°→180°, espejado por simetría)
+      - Radio:     lineal re 0°  (1.0 = 0 dB)
+      - Color:     dB re 0°
+
+    Parámetros
+    ----------
+    polar_alineado     : np.ndarray 3D  (n_angulos x n_mics x n_samples)
+    segmentos_por_toma : list[dict]
+    nombres_notas      : list[str]
+    mics               : list           ['ref', 1, ..., 19]
+    angulos            : list[int]      [0, 10, ..., 180]
+    nota               : str o None     si None grafica todas las notas (figuras separadas)
+    rango_db           : tuple          rango de color y clip del radio (dB)
+    titulo             : str o None
+    width, height      : int
+    """
+    paso      = angulos[1] - angulos[0]
+    n_az_med  = len(angulos)           # 19: tomas 0°→180°
+    n_el      = len(mics) - 1          # 19: mic_1→mic_19
+
+    az_deg    = np.array(list(range(0, 361, paso)))        # 37 pts: [0, 10, ..., 360]
+    n_az      = len(az_deg)                                # 37
+    el_deg    = np.array([i * paso for i in range(n_el)])  # [0, 10, ..., 180]
+
+    # Índice de toma para cada punto del azimut completo (37 valores)
+    # [0, 1, ..., 18,  17, ..., 1,  0]
+    az_take_idx = list(range(n_az_med)) + list(range(n_az_med - 2, 0, -1)) + [0]
+
+    EL, AZ = np.meshgrid(np.deg2rad(el_deg), np.deg2rad(az_deg), indexing='ij')  # (19, 37)
+
+    notas_plot = [nota] if nota else nombres_notas
+    cols       = [f"{a}°" for a in angulos]
+
+    for nom in notas_plot:
+        # --- RMS en dBFS ---
+        datos = {}
+        for I_AZ, col in enumerate(cols):
+            seg = segmentos_por_toma[I_AZ].get(nom)
+            if seg is None:
+                datos[col] = [np.nan] * len(mics)
+                continue
+            ventana    = polar_alineado[I_AZ, :, seg['inicio_sample']:seg['fin_sample']]
+            rms        = np.sqrt(np.mean(ventana ** 2, axis=1))
+            datos[col] = 20 * np.log10(rms + 1e-12)
+
+        df = pd.DataFrame(datos, index=[f"mic_{m}" for m in mics])
+
+        # --- Normalización ---
+        variacion = df.loc['mic_ref'] - df.loc['mic_ref'].max()
+        df_norm   = df.copy()
+        df_norm.loc['mic_ref'] = variacion
+        for idx in df_norm.index[1:]:
+            df_norm.loc[idx] = df.loc[idx] - variacion
+        for idx in df_norm.index[1:]:
+            df_norm.loc[idx] = df_norm.loc[idx] - df_norm.loc[idx, '0°']
+
+        # --- Grilla (n_el × n_az) ---
+        vals_db = np.full((n_el, n_az), np.nan)
+        for i_el in range(n_el):
+            row = df_norm.loc[f"mic_{mics[i_el + 1]}"].values
+            for i_az in range(n_az):
+                vals_db[i_el, i_az] = row[az_take_idx[i_az]]
+
+        # --- Cartesianas: x=frente/atrás, y=lateral, z=arriba ---
+        r = 10 ** (np.clip(vals_db, rango_db[0], None) / 20)
+        X = r * np.cos(EL) * np.cos(AZ)
+        Y = r * np.cos(EL) * np.sin(AZ)
+        Z = r * np.sin(EL)
+
+        # Wireframe esfera de referencia en r=1 (0 dB)
+        esfera_traces = []
+        az_linspace = np.linspace(0, 2 * np.pi, 120)
+        el_linspace = np.linspace(0, np.pi, 120)
+
+        # Meridianos (az fijo, el varía 0→π)
+        for az_f in np.deg2rad(range(0, 360, 30)):
+            xs = np.cos(el_linspace) * np.cos(az_f)
+            ys = np.cos(el_linspace) * np.sin(az_f)
+            zs = np.sin(el_linspace)
+            esfera_traces.append(go.Scatter3d(
+                x=xs, y=ys, z=zs, mode='lines',
+                line=dict(color='lightgray', width=1),
+                showlegend=False, hoverinfo='skip',
+            ))
+
+        # Paralelos (el fijo, az varía 0→2π)
+        for el_f in np.deg2rad(range(0, 181, 30)):
+            xs = np.cos(el_f) * np.cos(az_linspace)
+            ys = np.cos(el_f) * np.sin(az_linspace)
+            zs = np.full_like(az_linspace, np.sin(el_f))
+            esfera_traces.append(go.Scatter3d(
+                x=xs, y=ys, z=zs, mode='lines',
+                line=dict(color='lightgray', width=1),
+                showlegend=False, hoverinfo='skip',
+            ))
+
+        # Ejes de referencia: frente, atrás, arriba
+        L = 1.35  # largo del eje (un poco fuera de la esfera)
+        ejes = [
+            ([0, L],  [0, 0], [0, 0], 'Frente 0°',   'red'),
+            ([0, -L], [0, 0], [0, 0], 'Atrás 180°',  'steelblue'),
+            ([0, 0],  [0, 0], [0, L], 'Arriba 90°',  'green'),
+        ]
+        for xe, ye, ze, label, color in ejes:
+            # Línea del eje
+            esfera_traces.append(go.Scatter3d(
+                x=xe, y=ye, z=ze, mode='lines',
+                line=dict(color=color, width=3),
+                showlegend=False, hoverinfo='skip',
+            ))
+            # Etiqueta al final del eje
+            esfera_traces.append(go.Scatter3d(
+                x=[xe[-1]], y=[ye[-1]], z=[ze[-1]],
+                mode='text', text=[label],
+                textfont=dict(color=color, size=12),
+                showlegend=False, hoverinfo='skip',
+            ))
+
+        fig = go.Figure(data=esfera_traces + [go.Surface(
+            x=X, y=Y, z=Z,
+            surfacecolor=vals_db,
+            colorscale='RdBu_r',
+            cmid=0,
+            cmin=rango_db[0], cmax=rango_db[1],
+            colorbar=dict(title='dB re 0°'),
+        )])
+
+        axis_clean = dict(
+            showgrid=False, zeroline=False,
+            showticklabels=False, showbackground=False,
+            showaxeslabels=False, visible=False,
+        )
+        fig.update_layout(
+            title=titulo or f"Balloon 3D — {nom}",
+            scene=dict(
+                xaxis=axis_clean,
+                yaxis=axis_clean,
+                zaxis=axis_clean,
+                aspectmode='data',
+                bgcolor='white',
+            ),
+            width=width, height=height,
+        )
+        fig.show()
