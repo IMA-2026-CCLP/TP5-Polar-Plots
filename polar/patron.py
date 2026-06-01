@@ -19,6 +19,7 @@ Uso desde un notebook:
 """
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 
 
@@ -167,4 +168,86 @@ def graficar_patron(patron, nombres_notas, mics, angulos, i_mic=None,
         height      = height,
     )
 
+    fig.show()
+
+
+def graficar_patron_ref(polar_alineado, segmentos_por_toma, nombres_notas, mics, angulos,
+                        i_mic=None, rango_db=(-20, 6), titulo=None, width=700, height=700):
+    """
+    Calcula y grafica el patrón polar normalizando por mic_ref.
+
+    Para cada nota:
+      1. Calcula RMS en dBFS por mic y ángulo.
+      2. Corrige variación de nivel entre tomas usando mic_ref.
+      3. Normaliza a 0°.
+    Grafica todas las notas en un mismo plot polar.
+
+    Parámetros
+    ----------
+    polar_alineado     : np.ndarray 3D  (n_angulos x n_mics x n_samples)
+    segmentos_por_toma : list[dict]     salida de tensor_notas
+    nombres_notas      : list[str]      lista de nombres de notas
+    mics               : list           etiquetas de mics  (ej: ['ref', 1, ..., 19])
+    angulos            : list[int]      ángulos medidos    (ej: [0, 10, ..., 180])
+    i_mic              : int o None     índice del mic a graficar. None → mic 1
+    titulo             : str o None     título del gráfico
+    width, height      : int            tamaño en píxeles
+    """
+    if i_mic is None:
+        i_mic = mics.index(1) if 1 in mics else 1
+
+    label_mic = f"mic_{mics[i_mic]}"
+    titulo    = titulo or f"Patrón polar — {label_mic}"
+
+    paso  = angulos[1] - angulos[0]
+    theta = list(range(0, 361, paso))
+    cols  = [f"{a}°" for a in angulos]
+
+    fig = go.Figure()
+
+    for nota in nombres_notas:
+        datos = {}
+        for I_AZ, col in enumerate(cols):
+            seg = segmentos_por_toma[I_AZ].get(nota)
+            if seg is None:
+                datos[col] = [np.nan] * len(mics)
+                continue
+            ventana    = polar_alineado[I_AZ, :, seg['inicio_sample']:seg['fin_sample']]
+            rms        = np.sqrt(np.mean(ventana ** 2, axis=1))
+            datos[col] = 20 * np.log10(rms + 1e-12)
+
+        df = pd.DataFrame(datos, index=[f"mic_{m}" for m in mics])
+
+        variacion = df.loc['mic_ref'] - df.loc['mic_ref'].max()
+        df_norm   = df.copy()
+        df_norm.loc['mic_ref'] = variacion
+        for idx in df_norm.index[1:]:
+            df_norm.loc[idx] = df.loc[idx] - variacion
+        for idx in df_norm.index[1:]:
+            df_norm.loc[idx] = df_norm.loc[idx] - df_norm.loc[idx, '0°']
+
+        r_mitad = df_norm.loc[label_mic].values
+        if np.all(np.isnan(r_mitad)):
+            continue
+
+        r_full = np.concatenate([r_mitad, r_mitad[-2:0:-1], [r_mitad[0]]])
+        fig.add_trace(go.Scatterpolar(
+            r=r_full, theta=theta, mode='lines+markers', name=nota, line=dict(width=2)
+        ))
+
+    fig.add_trace(go.Scatterpolar(
+        r=[0] * len(theta), theta=theta, mode='lines',
+        line=dict(color='black', dash='dash', width=1.5), showlegend=False, hoverinfo='skip',
+    ))
+
+    fig.update_layout(
+        title      = titulo,
+        polar      = dict(
+            angularaxis = dict(direction='clockwise', rotation=90),
+            radialaxis  = dict(title='dB re 0°', range=list(rango_db), autorange=False),
+        ),
+        showlegend = True,
+        width      = width,
+        height     = height,
+    )
     fig.show()
