@@ -323,12 +323,14 @@ def graficar_balloon_ref(polar_alineado, segmentos_por_toma, nombres_notas, mics
             for i_az in range(n_az):
                 vals_db[i_el, i_az] = row[az_take_idx[i_az]]
 
-        # --- Interpolación para superficie más suave ---
-        from scipy.ndimage import zoom
-        factor      = 4
-        vals_interp = zoom(vals_db, factor, order=3)
-        el_interp   = np.linspace(np.deg2rad(el_deg[0]),  np.deg2rad(el_deg[-1]),  vals_interp.shape[0])
-        az_interp   = np.linspace(np.deg2rad(az_deg[0]),  np.deg2rad(az_deg[-1]),  vals_interp.shape[1])
+        # --- Interpolación esférica con RectBivariateSpline ---
+        from scipy.interpolate import RectBivariateSpline
+        interp      = RectBivariateSpline(el_deg, az_deg, vals_db, kx=3, ky=3)
+        el_fine     = np.linspace(el_deg[0],  el_deg[-1],  76)
+        az_fine     = np.linspace(az_deg[0],  az_deg[-1],  148)
+        vals_interp = interp(el_fine, az_fine)
+        el_interp   = np.deg2rad(el_fine)
+        az_interp   = np.deg2rad(az_fine)
         EL, AZ      = np.meshgrid(el_interp, az_interp, indexing='ij')
 
         # --- Cartesianas: x=frente/atrás, y=lateral, z=arriba ---
@@ -396,6 +398,173 @@ def graficar_balloon_ref(polar_alineado, segmentos_por_toma, nombres_notas, mics
                 zaxis=axis_clean,
                 aspectmode='data',
                 bgcolor='white',
+                camera=dict(eye=dict(x=1.6, y=1.2, z=0.8)),
+            ),
+            width=width, height=height,
+        )
+        fig.show()
+
+
+def graficar_directividad_esfera(polar_alineado, segmentos_por_toma, nombres_notas, mics, angulos,
+                                  nota=None, rango_db=(-20, 6), suavizado=0, interpolar=True,
+                                  titulo=None, width=800, height=800):
+    """
+    Mapa de directividad sobre una semiesfera de radio fijo.
+    El nivel (dB) se muestra como color — la forma siempre es una semiesfera.
+
+    Mismos parámetros que graficar_balloon_ref.
+    """
+    from scipy.interpolate import RectBivariateSpline
+
+    paso     = angulos[1] - angulos[0]
+    n_az_med = len(angulos)
+    n_el     = len(mics) - 1
+
+    el_deg = np.array([i * paso for i in range(n_el)])
+    az_deg = np.array(list(range(0, 361, paso)))
+    n_az   = len(az_deg)
+
+    az_take_idx = list(range(n_az_med)) + list(range(n_az_med - 2, 0, -1)) + [0]
+    cols        = [f"{a}°" for a in angulos]
+
+    # Semiesfera fija r=1 (interpolada a grilla fina)
+    el_fine = np.linspace(el_deg[0], el_deg[-1], 200)
+    az_fine = np.linspace(az_deg[0], az_deg[-1], 360)
+    EL, AZ  = np.meshgrid(np.deg2rad(el_fine), np.deg2rad(az_fine), indexing='ij')
+    X = np.cos(EL) * np.cos(AZ)
+    Y = np.cos(EL) * np.sin(AZ)
+    Z = np.sin(EL)
+
+    notas_plot = [nota] if nota else nombres_notas
+
+    for nom in notas_plot:
+        # --- RMS dBFS y normalización (igual que graficar_balloon_ref) ---
+        datos = {}
+        for I_AZ, col in enumerate(cols):
+            seg = segmentos_por_toma[I_AZ].get(nom)
+            if seg is None:
+                datos[col] = [np.nan] * len(mics)
+                continue
+            ventana    = polar_alineado[I_AZ, :, seg['inicio_sample']:seg['fin_sample']]
+            rms        = np.sqrt(np.mean(ventana ** 2, axis=1))
+            datos[col] = 20 * np.log10(rms + 1e-12)
+
+        df = pd.DataFrame(datos, index=[f"mic_{m}" for m in mics])
+
+        variacion = df.loc['mic_ref'] - df.loc['mic_ref'].max()
+        df_norm   = df.copy()
+        df_norm.loc['mic_ref'] = variacion
+        for idx in df_norm.index[1:]:
+            df_norm.loc[idx] = df.loc[idx] - variacion
+        for idx in df_norm.index[1:]:
+            df_norm.loc[idx] = df_norm.loc[idx] - df_norm.loc[idx, '0°']
+
+        # --- Paso 1: datos crudos y espejo a 360° (ANTES de interpolar) ---
+        # Convención CCW: take ang=10° → az=350° en el frame del cantante.
+        # take_ang=0°→az=0°, take_ang=10°→az=350°, take_ang=180°→az=180°.
+        # Por simetría: az=10° == az=350° (misma toma).
+        #
+        # az_full (37 pts, paso 10°):
+        #   az=0°..180°  → toma idx 0..18  (simetría de la derecha)
+        #   az=190°..350° → toma idx 17..1  (directo: take ang=360-az)
+        #   az=360°       → toma idx 0
+        az_full_10   = np.array(list(range(0, 361, paso)))  # [0,10,...,360], 37 pts
+        take_idx_360 = (list(range(n_az_med)) +
+                        list(range(n_az_med - 2, 0, -1)) + [0])  # [0..18, 17..1, 0]
+        vals_full = np.zeros((n_el, len(az_full_10)))
+        for i_el in range(n_el):
+            row = df_norm.loc[f"mic_{mics[i_el + 1]}"].values
+            for i_az, t_idx in enumerate(take_idx_360):
+                vals_full[i_el, i_az] = row[t_idx]
+
+        # Polo: forzar valor uniforme en el=90° (todos los azimuts convergen)
+        i_polo = np.argmin(np.abs(el_deg - 90))
+        vals_full[i_polo, :] = vals_full[i_polo, :].mean()
+
+        # --- Paso 2: interpolar o NN sobre la esfera completa ---
+        el_fine_g    = np.linspace(float(el_deg[0]), float(el_deg[-1]), 200)
+        az_full_fine = np.linspace(0., 360., 361)
+
+        if interpolar:
+            from scipy.ndimage import gaussian_filter
+            n_wrap       = 6
+            az_w  = np.concatenate([az_full_10[-n_wrap-1:-1] - 360,
+                                    az_full_10,
+                                    az_full_10[1:n_wrap+1] + 360])
+            vals_w = np.concatenate([vals_full[:, -n_wrap-1:-1],
+                                     vals_full,
+                                     vals_full[:, 1:n_wrap+1]], axis=1)
+            interp = RectBivariateSpline(el_deg, az_w, vals_w, kx=3, ky=3, s=suavizado)
+            color  = gaussian_filter(interp(el_fine_g, az_full_fine),
+                                     sigma=3, mode=['reflect', 'wrap'])
+            color  = np.clip(color, rango_db[0], rango_db[1])
+        else:
+            el_nn = np.clip(np.round(el_fine_g / paso).astype(int), 0, n_el - 1)
+            az_nn = np.clip(np.round(az_full_fine / paso).astype(int), 0, len(az_full_10) - 1)
+            EN, AN = np.meshgrid(el_nn, az_nn, indexing='ij')
+            color  = np.clip(vals_full[EN, AN], rango_db[0], rango_db[1])
+
+        # Geometría de la esfera completa
+        EL_G, AZ_G = np.meshgrid(np.deg2rad(el_fine_g), np.deg2rad(az_full_fine), indexing='ij')
+        X = np.cos(EL_G) * np.cos(AZ_G)
+        Y = np.cos(EL_G) * np.sin(AZ_G)
+        Z = np.sin(EL_G)
+
+        # --- Referencias ---
+        ref_traces = []
+        t = np.linspace(0, 2 * np.pi, 120)
+        ref_traces.append(go.Scatter3d(
+            x=np.cos(t), y=np.sin(t), z=np.zeros(120),
+            mode='lines', line=dict(color='gray', width=1.5, dash='dash'),
+            showlegend=False, hoverinfo='skip',
+        ))
+        el_arc = np.linspace(0, np.pi, 100)
+        ref_traces.append(go.Scatter3d(
+            x=np.cos(el_arc), y=np.zeros(100), z=np.sin(el_arc),
+            mode='lines', line=dict(color='gray', width=1.5, dash='dash'),
+            showlegend=False, hoverinfo='skip',
+        ))
+        L = 1.25
+        for lx, ly, lz, txt, col in [
+            (L,  0, 0, 'Frente 0°',  '#e63946'),
+            (-L, 0, 0, 'Atrás 180°', '#457b9d'),
+            (0,  0, L, 'Arriba 90°', '#2a9d8f'),
+        ]:
+            ref_traces.append(go.Scatter3d(
+                x=[0, lx], y=[0, ly], z=[0, lz], mode='lines',
+                line=dict(color=col, width=3), showlegend=False, hoverinfo='skip',
+            ))
+            ref_traces.append(go.Scatter3d(
+                x=[lx], y=[ly], z=[lz], mode='text', text=[txt],
+                textfont=dict(color=col, size=13), showlegend=False, hoverinfo='skip',
+            ))
+
+        contours_off = dict(x=dict(show=False, highlight=False),
+                            y=dict(show=False, highlight=False),
+                            z=dict(show=False, highlight=False))
+        lighting = (dict(ambient=0.9, diffuse=0.5, roughness=0.4, specular=0.1)
+                    if interpolar else
+                    dict(ambient=1.0, diffuse=0, specular=0, roughness=1))
+
+        surface = go.Surface(
+            x=X, y=Y, z=Z,
+            surfacecolor=color,
+            colorscale='RdBu_r', cmid=0,
+            cmin=rango_db[0], cmax=rango_db[1],
+            colorbar=dict(title='dB re 0°'),
+            contours=contours_off,
+            lighting=lighting,
+        )
+
+        fig = go.Figure(data=ref_traces + [surface])
+
+        axis_clean = dict(showgrid=False, zeroline=False, showticklabels=False,
+                          showbackground=False, showaxeslabels=False, visible=False)
+        fig.update_layout(
+            title=titulo or f"Directividad — {nom}",
+            scene=dict(
+                xaxis=axis_clean, yaxis=axis_clean, zaxis=axis_clean,
+                aspectmode='data', bgcolor='white',
                 camera=dict(eye=dict(x=1.6, y=1.2, z=0.8)),
             ),
             width=width, height=height,
