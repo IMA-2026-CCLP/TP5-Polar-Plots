@@ -323,64 +323,60 @@ def graficar_balloon_ref(polar_alineado, segmentos_por_toma, nombres_notas, mics
             for i_az in range(n_az):
                 vals_db[i_el, i_az] = row[az_take_idx[i_az]]
 
+        # --- Interpolación para superficie más suave ---
+        from scipy.ndimage import zoom
+        factor      = 4
+        vals_interp = zoom(vals_db, factor, order=3)
+        el_interp   = np.linspace(np.deg2rad(el_deg[0]),  np.deg2rad(el_deg[-1]),  vals_interp.shape[0])
+        az_interp   = np.linspace(np.deg2rad(az_deg[0]),  np.deg2rad(az_deg[-1]),  vals_interp.shape[1])
+        EL, AZ      = np.meshgrid(el_interp, az_interp, indexing='ij')
+
         # --- Cartesianas: x=frente/atrás, y=lateral, z=arriba ---
-        r = 10 ** (np.clip(vals_db, rango_db[0], None) / 20)
+        r = 10 ** (np.clip(vals_interp, rango_db[0], None) / 20)
         X = r * np.cos(EL) * np.cos(AZ)
         Y = r * np.cos(EL) * np.sin(AZ)
         Z = r * np.sin(EL)
 
-        # Wireframe esfera de referencia en r=1 (0 dB)
-        esfera_traces = []
-        az_linspace = np.linspace(0, 2 * np.pi, 120)
-        el_linspace = np.linspace(0, np.pi, 120)
+        # Referencias visuales
+        ref_traces = []
+        t = np.linspace(0, 2 * np.pi, 120)
 
-        # Meridianos (az fijo, el varía 0→π)
-        for az_f in np.deg2rad(range(0, 360, 30)):
-            xs = np.cos(el_linspace) * np.cos(az_f)
-            ys = np.cos(el_linspace) * np.sin(az_f)
-            zs = np.sin(el_linspace)
-            esfera_traces.append(go.Scatter3d(
-                x=xs, y=ys, z=zs, mode='lines',
-                line=dict(color='lightgray', width=1),
+        # Círculo horizontal (plano z=0): marca el nivel de los mics 0° y 180°
+        ref_traces.append(go.Scatter3d(
+            x=np.cos(t), y=np.sin(t), z=np.zeros(120),
+            mode='lines', line=dict(color='gray', width=1.5, dash='dash'),
+            showlegend=False, hoverinfo='skip',
+        ))
+
+        # Arco de elevación en el plano y=0 (frente→arriba→atrás)
+        el_arc = np.linspace(0, np.pi, 100)
+        ref_traces.append(go.Scatter3d(
+            x=np.cos(el_arc), y=np.zeros(100), z=np.sin(el_arc),
+            mode='lines', line=dict(color='gray', width=1.5, dash='dash'),
+            showlegend=False, hoverinfo='skip',
+        ))
+
+        # Ejes con etiquetas
+        L = 1.25
+        for lx, ly, lz, txt, col in [
+            (L,  0, 0,  'Frente 0°',  '#e63946'),
+            (-L, 0, 0,  'Atrás 180°', '#457b9d'),
+            (0,  0, L,  'Arriba 90°', '#2a9d8f'),
+        ]:
+            ref_traces.append(go.Scatter3d(
+                x=[0, lx], y=[0, ly], z=[0, lz], mode='lines',
+                line=dict(color=col, width=3),
+                showlegend=False, hoverinfo='skip',
+            ))
+            ref_traces.append(go.Scatter3d(
+                x=[lx], y=[ly], z=[lz], mode='text', text=[txt],
+                textfont=dict(color=col, size=13),
                 showlegend=False, hoverinfo='skip',
             ))
 
-        # Paralelos (el fijo, az varía 0→2π)
-        for el_f in np.deg2rad(range(0, 181, 30)):
-            xs = np.cos(el_f) * np.cos(az_linspace)
-            ys = np.cos(el_f) * np.sin(az_linspace)
-            zs = np.full_like(az_linspace, np.sin(el_f))
-            esfera_traces.append(go.Scatter3d(
-                x=xs, y=ys, z=zs, mode='lines',
-                line=dict(color='lightgray', width=1),
-                showlegend=False, hoverinfo='skip',
-            ))
-
-        # Ejes de referencia: frente, atrás, arriba
-        L = 1.35  # largo del eje (un poco fuera de la esfera)
-        ejes = [
-            ([0, L],  [0, 0], [0, 0], 'Frente 0°',   'red'),
-            ([0, -L], [0, 0], [0, 0], 'Atrás 180°',  'steelblue'),
-            ([0, 0],  [0, 0], [0, L], 'Arriba 90°',  'green'),
-        ]
-        for xe, ye, ze, label, color in ejes:
-            # Línea del eje
-            esfera_traces.append(go.Scatter3d(
-                x=xe, y=ye, z=ze, mode='lines',
-                line=dict(color=color, width=3),
-                showlegend=False, hoverinfo='skip',
-            ))
-            # Etiqueta al final del eje
-            esfera_traces.append(go.Scatter3d(
-                x=[xe[-1]], y=[ye[-1]], z=[ze[-1]],
-                mode='text', text=[label],
-                textfont=dict(color=color, size=12),
-                showlegend=False, hoverinfo='skip',
-            ))
-
-        fig = go.Figure(data=esfera_traces + [go.Surface(
+        fig = go.Figure(data=ref_traces + [go.Surface(
             x=X, y=Y, z=Z,
-            surfacecolor=vals_db,
+            surfacecolor=vals_interp,
             colorscale='RdBu_r',
             cmid=0,
             cmin=rango_db[0], cmax=rango_db[1],
@@ -400,6 +396,7 @@ def graficar_balloon_ref(polar_alineado, segmentos_por_toma, nombres_notas, mics
                 zaxis=axis_clean,
                 aspectmode='data',
                 bgcolor='white',
+                camera=dict(eye=dict(x=1.6, y=1.2, z=0.8)),
             ),
             width=width, height=height,
         )
