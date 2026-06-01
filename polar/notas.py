@@ -15,6 +15,7 @@ Uso desde un notebook:
 """
 
 import numpy as np
+import pandas as pd
 import librosa
 from IPython.display import Audio
 
@@ -31,18 +32,20 @@ NOTAS_FA_MAYOR = {
 }
 
 
-def detectar_notas_pyin(signal, sr, notas=None, min_duracion_ms=300, margen_fin_ms=50, umbral_confianza=0.2):
+def detectar_notas_pyin(signal, sr, notas=None, min_duracion_ms=300,
+                        margen_inicio_ms=50, margen_fin_ms=50, umbral_confianza=0.2):
     """
     Detecta el F0 de una señal 1D y asigna cada frame a la nota más cercana.
 
     Parámetros
     ----------
-    signal           : np.ndarray 1D  señal de audio
-    sr               : int            sample rate (Hz)
-    notas            : dict           {nombre: freq_Hz}. Default: NOTAS_FA_MAYOR
-    min_duracion_ms  : float          duración mínima de un segmento en ms
-    margen_fin_ms    : float          ms a recortar antes del fin del segmento
-    umbral_confianza : float          umbral mínimo de probabilidad voiced
+    signal            : np.ndarray 1D  señal de audio
+    sr                : int            sample rate (Hz)
+    notas             : dict           {nombre: freq_Hz}. Default: NOTAS_FA_MAYOR
+    min_duracion_ms   : float          duración mínima de un segmento en ms
+    margen_inicio_ms  : float          ms a recortar al inicio del segmento (evita el ataque)
+    margen_fin_ms     : float          ms a recortar al final del segmento (evita la transición)
+    umbral_confianza  : float          umbral mínimo de probabilidad voiced
 
     Retorna
     -------
@@ -62,8 +65,9 @@ def detectar_notas_pyin(signal, sr, notas=None, min_duracion_ms=300, margen_fin_
 
     voiced_flag = voiced_flag & (voiced_prob >= umbral_confianza)
 
-    hop_length         = 512
-    nombres_notas      = list(notas.keys())
+    hop_length             = 512
+    nombres_notas          = list(notas.keys())
+    margen_inicio_samples  = int(margen_inicio_ms / 1000 * sr)
     freqs_notas        = np.array(list(notas.values()))
     min_frames         = int(min_duracion_ms / 1000 * sr / hop_length)
     margen_fin_samples = int(margen_fin_ms   / 1000 * sr)
@@ -115,26 +119,29 @@ def detectar_notas_pyin(signal, sr, notas=None, min_duracion_ms=300, margen_fin_
         candidatos = [s for s in segmentos_validos if s['nota'] == nombre]
         if candidatos:
             mejor = max(candidatos, key=lambda s: s['duracion'])
-            fin   = max(mejor['inicio_sample'], mejor['fin_sample'] - margen_fin_samples)
-            resultado[nombre] = {
-                'inicio_sample': mejor['inicio_sample'],
-                'fin_sample'   : fin,
-            }
+            ini   = mejor['inicio_sample'] + margen_inicio_samples
+            fin   = mejor['fin_sample'] - margen_fin_samples
+            if ini < fin:
+                resultado[nombre] = {
+                    'inicio_sample': ini,
+                    'fin_sample'   : fin,
+                }
 
     return resultado
 
 
-def tensor_notas(polar_alineado, i_ref=0, sr=44100, notas=None, angulos=None, **kwargs):
+def tensor_notas(polar_alineado, i_ref=10, sr=44100, notas=None, angulos=None, **kwargs):
     """
-    Construye un tensor máscara de notas usando el mic de referencia.
+    Construye un tensor máscara de notas usando mic_10 para la detección de F0.
 
-    Para cada ángulo (toma), corre pyin sobre el mic_ref y marca qué muestras
-    corresponden a cada nota.
+    mic_10 está a 90° de elevación (directamente sobre la cabeza de la cantante),
+    lo que da una señal más estable y una detección de notas más precisa que el
+    mic_ref externo.
 
     Parámetros
     ----------
     polar_alineado : np.ndarray 3D  (n_angulos x n_mics x n_samples)
-    i_ref          : int            índice del mic_ref en el eje de mics (default: 0)
+    i_ref          : int            índice del mic para pyin (default: 10 → mic_10)
     sr             : int            sample rate (Hz)
     notas          : dict           {nombre: freq_Hz}. Default: NOTAS_FA_MAYOR
     angulos        : list           etiquetas de ángulo para el print
@@ -186,6 +193,89 @@ def tensor_notas(polar_alineado, i_ref=0, sr=44100, notas=None, angulos=None, **
     print(f"  Notas detectadas en al menos una toma: {n_detectadas}/{n_notas}")
 
     return N, nombres_notas, segmentos_por_toma
+
+
+def validar_deteccion(polar_alineado, segmentos_por_toma, nombres_notas,
+                      i_mic=10, sr=44100, notas=None, angulos=None, tolerancia_cents=50):
+    """
+    Valida la detección de notas comparando el pico FFT de cada segmento
+    con la frecuencia esperada de la nota. Devuelve un DataFrame con los resultados.
+
+    Parámetros
+    ----------
+    polar_alineado     : np.ndarray 3D  (n_angulos x n_mics x n_samples)
+    segmentos_por_toma : list[dict]     salida de tensor_notas
+    nombres_notas      : list[str]      lista de nombres de notas
+    i_mic              : int            mic a usar para la validación (default: 10)
+    sr                 : int            sample rate (Hz)
+    notas              : dict           {nombre: freq_Hz}. Default: NOTAS_FA_MAYOR
+    angulos            : list           etiquetas de ángulo para el print
+    tolerancia_cents   : float          margen aceptable en cents (default: 50)
+
+    Retorna
+    -------
+    df : pd.DataFrame  filas=notas, columnas=ángulos, valores=cents de error
+                       NaN donde la nota no fue detectada
+    """
+    if notas is None:
+        notas = NOTAS_FA_MAYOR
+
+    n_angulos  = polar_alineado.shape[0]
+    etiquetas  = [f"{a}°" for a in angulos] if angulos else [str(i) for i in range(n_angulos)]
+    datos      = {et: {} for et in etiquetas}
+
+    for i_az in range(n_angulos):
+        et = etiquetas[i_az]
+        for nombre in nombres_notas:
+            seg = segmentos_por_toma[i_az].get(nombre)
+            if seg is None:
+                datos[et][nombre] = float('nan')
+                continue
+
+            ini    = seg['inicio_sample']
+            fin    = seg['fin_sample']
+            signal = polar_alineado[i_az, i_mic, ini:fin]
+
+            freqs  = np.fft.rfftfreq(len(signal), d=1/sr)
+            mag    = np.abs(np.fft.rfft(signal))
+
+            # Buscar el pico dentro de ±300 cents de la frecuencia esperada
+            # para evitar que los armónicos superiores dominen el argmax
+            f_esp   = notas[nombre]
+            f_min   = f_esp * 2 ** (-300 / 1200)
+            f_max   = f_esp * 2 ** ( 300 / 1200)
+            mascara = (freqs >= f_min) & (freqs <= f_max)
+            if mascara.any():
+                f_pico = freqs[mascara][np.argmax(mag[mascara])]
+            else:
+                f_pico = freqs[np.argmax(mag)]  # fallback
+
+            cents  = 1200 * np.log2(f_pico / f_esp) if f_pico > 0 else float('nan')
+            datos[et][nombre] = round(cents, 1)
+
+    df = pd.DataFrame(datos, index=nombres_notas)
+
+    # Imprimir resumen con OK / WARN
+    print(f"Validación detección pyin — mic_{i_mic}  (tolerancia ±{tolerancia_cents} cents)\n")
+    ok = warn = ausente = 0
+    for et in etiquetas:
+        problemas = []
+        for nombre in nombres_notas:
+            c = datos[et][nombre]
+            if np.isnan(c):
+                ausente += 1
+                problemas.append(f"{nombre}:NaN")
+            elif abs(c) > tolerancia_cents:
+                warn += 1
+                problemas.append(f"{nombre}:{c:+.0f}¢")
+            else:
+                ok += 1
+        estado = "✓" if not problemas else "✗  " + "  ".join(problemas)
+        print(f"  {et:>6}  {estado}")
+
+    total = ok + warn + ausente
+    print(f"\n  OK: {ok}/{total}   WARN: {warn}   NaN: {ausente}")
+    return df
 
 
 def escuchar(polar_alineado, segmentos_por_toma, nota, i_az, i_mic, sr=44100, mics=None, angulos=None):
