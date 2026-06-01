@@ -4,10 +4,17 @@ polar/patron.py
 
 Cálculo y visualización del patrón polar por nota.
 
+Normalización:
+  - Paso 1: divide por RMS(mic_10) en cada toma → mic_10 está a 90° de elevación
+            (siempre sobre la cabeza de la cantante) y su nivel es constante
+            ante cualquier rotación azimutal.
+  - Paso 2: divide por el valor en 0° → patrón relativo al frente.
+
 Uso desde un notebook:
     from polar.patron import calcular_patron, graficar_patron
 
-    patron = calcular_patron(polar_alineado, segmentos_por_toma, nombres_notas, i_ref=i_ref)
+    i_mic10 = mics.index(10)
+    patron = calcular_patron(polar_alineado, segmentos_por_toma, nombres_notas, i_ref=i_mic10)
     graficar_patron(patron, nombres_notas, mics=mics, angulos=angulos)
 """
 
@@ -15,19 +22,21 @@ import numpy as np
 import plotly.graph_objects as go
 
 
-def calcular_patron(polar_alineado, segmentos_por_toma, nombres_notas, i_ref=0, i_az_ref=0):
+def calcular_patron(polar_alineado, segmentos_por_toma, nombres_notas, i_ref=10, i_az_ref=0):
     """
     Calcula el RMS de cada mic normalizado en dos pasos:
 
-      1. Divide por RMS(mic_ref) en la misma toma → corrige nivel de la cantante
-      2. Divide por el valor en i_az_ref (ej: 0°)  → patrón relativo al frente
+      1. Divide por RMS(mic_10) en la misma toma → mic_10 está a 90° de elevación,
+         siempre sobre la cabeza de la cantante; su nivel es constante ante rotaciones
+         azimutales y compensa variaciones de nivel entre notas y entre tomas.
+      2. Divide por el valor en i_az_ref (ej: 0°) → patrón relativo al frente.
 
     Parámetros
     ----------
     polar_alineado     : np.ndarray 3D  (n_angulos x n_mics x n_samples)
     segmentos_por_toma : list[dict]     salida de tensor_notas — uno por ángulo
     nombres_notas      : list[str]      lista de nombres de notas (eje 0)
-    i_ref              : int            índice del mic_ref en el tensor (default: 0)
+    i_ref              : int            índice del mic normalizador (default: 10 → mic_10)
     i_az_ref           : int            índice del ángulo de referencia (default: 0 → 0°)
 
     Retorna
@@ -62,10 +71,12 @@ def calcular_patron(polar_alineado, segmentos_por_toma, nombres_notas, i_ref=0, 
 
             patron[i_nota, i_az, :] = rms / rms_ref              # paso 1
 
-        # Paso 2: normalizar por el valor en el ángulo de referencia (0°)
-        val_0 = patron[i_nota, i_az_ref, :].copy()                # (n_mics,)
-        val_0[np.isnan(val_0) | (val_0 < 1e-10)] = np.nan
-        patron[i_nota] = patron[i_nota] / val_0[np.newaxis, :]    # broadcast sobre ángulos
+    # Paso 2: normalizar por la media de todas las notas en el ángulo de referencia.
+    # Usar una sola referencia global mantiene las notas comparables entre sí:
+    # 0 dB = nivel promedio en 0° a través de todas las notas.
+    val_0_global = np.nanmean(patron[:, i_az_ref, :], axis=0)     # (n_mics,)
+    val_0_global[np.isnan(val_0_global) | (val_0_global < 1e-10)] = np.nan
+    patron = patron / val_0_global[np.newaxis, np.newaxis, :]
 
     return patron
 
