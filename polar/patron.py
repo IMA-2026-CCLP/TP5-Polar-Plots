@@ -63,15 +63,15 @@ def calcular_patron(polar_alineado, segmentos_por_toma, nombres_notas, i_ref=0, 
             patron[i_nota, i_az, :] = rms / rms_ref              # paso 1
 
         # Paso 2: normalizar por el valor en el ángulo de referencia (0°)
-        val_0 = patron[i_nota, i_az_ref, :]                       # (n_mics,)
-        valido = ~np.isnan(val_0) & (val_0 > 1e-10)
-        patron[i_nota, :, valido] /= val_0[valido]
+        val_0 = patron[i_nota, i_az_ref, :].copy()                # (n_mics,)
+        val_0[np.isnan(val_0) | (val_0 < 1e-10)] = np.nan
+        patron[i_nota] = patron[i_nota] / val_0[np.newaxis, :]    # broadcast sobre ángulos
 
     return patron
 
 
 def graficar_patron(patron, nombres_notas, mics, angulos, i_mic=None,
-                    en_db=True, titulo=None, width=700, height=700):
+                    en_db=True, rango_db=(-10, 6), titulo=None, width=700, height=700):
     """
     Grafica el patrón polar normalizado.
 
@@ -95,20 +95,21 @@ def graficar_patron(patron, nombres_notas, mics, angulos, i_mic=None,
     label_mic = f"mic_{mics[i_mic]}" if mics else f"mic {i_mic}"
     titulo    = titulo or f"Patrón polar — {label_mic}"
 
-    # Espejamos 0–180 a 0–360 para que quede circular
-    angulos_full = angulos + angulos[::-1]
-    theta        = angulos_full  # Plotly acepta grados directamente
+    # theta: 0, 10, ..., 350  (36 puntos, paso 10°)
+    # El espejo correcto es: [0..180, 190..350] = [r[0..18], r[17..1]]
+    paso   = angulos[1] - angulos[0]                      # normalmente 10°
+    theta  = list(range(0, 361, paso))                    # 37 puntos (cierra en 360°=0°)
 
     fig = go.Figure()
 
     for i_nota, nombre in enumerate(nombres_notas):
-        r_mitad = patron[i_nota, :, i_mic]  # (n_angulos,)
+        r_mitad = patron[i_nota, :, i_mic]  # (n_angulos,)  0°→180°
 
         if np.all(np.isnan(r_mitad)):
             continue  # nota no detectada en ninguna toma
 
-        # Espejo: lado derecho = misma magnitud en sentido inverso
-        r_full = np.concatenate([r_mitad, r_mitad[::-1]])
+        # Espejo: 190°→350° es el reverso de 170°→10°, más cierre en 360°=0°
+        r_full = np.concatenate([r_mitad, r_mitad[-2:0:-1], [r_mitad[0]]])
 
         if en_db:
             with np.errstate(divide='ignore', invalid='ignore'):
@@ -129,12 +130,25 @@ def graficar_patron(patron, nombres_notas, mics, angulos, i_mic=None,
             line  = dict(width=2),
         ))
 
+    # Círculo de referencia en 0 dB — fuera de la leyenda para que siempre sea visible
+    r_ref = 0 if en_db else 1
+    fig.add_trace(go.Scatterpolar(
+        r          = [r_ref] * len(theta),
+        theta      = theta,
+        mode       = 'lines',
+        line       = dict(color='black', width=1.5, dash='dash'),
+        showlegend = False,
+        hoverinfo  = 'skip',
+    ))
+
     fig.update_layout(
         title       = titulo,
         polar       = dict(
             angularaxis = dict(direction='clockwise', rotation=90),
             radialaxis  = dict(
-                title = "dB re 0°" if en_db else "RMS relativo a 0°",
+                title    = "dB re 0°" if en_db else "RMS relativo a 0°",
+                range    = list(rango_db) if en_db else None,
+                autorange= False if en_db else True,
             ),
         ),
         showlegend  = True,
