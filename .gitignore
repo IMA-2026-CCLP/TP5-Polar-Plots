@@ -3,3 +3,10 @@ __pycache__/
 .venv
 Medicion_Cristian
 Medicion_Juli
+*.wav
+*.npz
+*.npy
+*.csv
+*.rar
+*.ini
+*.reapeaks
