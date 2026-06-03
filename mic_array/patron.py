@@ -627,7 +627,8 @@ class MicArray:
     # ──────────────────────────────────────────────────────────────────────────
 
     def detect_notes(self, scale=None, elevation='ref', hop_length=512,
-                     tolerance_cents=50, min_purity=0.8):
+                     tolerance_cents=50, min_purity=0.8, confidence=None,
+                     start_s=0.0):
         """
         Detects the interval (start/end in samples) of each note of a scale
         in every take, using pyin on the specified elevation.
@@ -643,12 +644,17 @@ class MicArray:
         tolerance_cents : float          max deviation in cents to assign a frame (default: 50)
         min_purity      : float          minimum fraction of correctly assigned frames
                                          within a segment to accept it (default: 0.8)
+        confidence      : float or None  alias for min_purity — overrides it when provided
+        start_s         : float          skip this many seconds at the start of each take (default: 0.0)
         Returns
         -------
         segmentos : list of dicts  (one per azimuth take)
             segmentos[i_az][note_name] = {'start': int, 'end': int, 'purity': float}
         """
         import librosa
+
+        if confidence is not None:
+            min_purity = confidence
 
         scale = scale or self.scale
         if scale is None:
@@ -659,6 +665,7 @@ class MicArray:
         note_freqs = np.array(list(scale.values()))
         fmin       = min(note_freqs) * 0.9
         fmax       = max(note_freqs) * 1.1
+        start_sample = int(start_s * self.sr)
 
         col_w  = 8
         header = f"{'Toma':>6}  " + "  ".join(f"{n:<{col_w}}" for n in note_names)
@@ -668,7 +675,7 @@ class MicArray:
         segmentos = []
 
         for i_az in range(self.n_angles):
-            signal = self.tensor[i_az, i_el, :].astype(np.float32)
+            signal = self.tensor[i_az, i_el, start_sample:].astype(np.float32)
 
             f0, _, _ = librosa.pyin(
                 signal, fmin=fmin, fmax=fmax,
@@ -714,8 +721,8 @@ class MicArray:
 
                 if purity >= min_purity:
                     segs[note] = {
-                        'start' : seg_start * hop_length,
-                        'end'   : min(seg_end * hop_length, self.n_samples),
+                        'start' : seg_start * hop_length + start_sample,
+                        'end'   : min(seg_end * hop_length + start_sample, self.n_samples),
                         'purity': purity,
                     }
 
@@ -1204,7 +1211,8 @@ class MicArray:
         )
         fig.show()
 
-    def plot_f0(self, azimuth, scale=None, elevation='ref', hop_length=512, band_cents=50):
+    def plot_f0(self, azimuth, scale=None, elevation='ref', hop_length=512,
+                band_cents=50, segments=None):
         """
         Plots the pyin f0 tracking for a specific take against the scale notes.
 
@@ -1215,6 +1223,8 @@ class MicArray:
         elevation  : int or 'ref'    elevation to use (default: 'ref')
         hop_length : int             pyin hop length in samples (default: 512)
         band_cents : float           half-width of shaded band per note (default: 50)
+        segments   : list or None    output of detect_notes(); if provided, draws vertical
+                                     lines at the start/end of each detected note segment
         """
         import librosa
 
@@ -1260,6 +1270,20 @@ class MicArray:
             line=dict(color='crimson', width=1.5),
             name='f0 detectada',
         ))
+
+        if segments is not None:
+            i_az = self._az_to_row(azimuth)
+            segs_az = segments[i_az]
+            for i, (name, seg) in enumerate(segs_az.items()):
+                color = palette[list(scale.keys()).index(name) % len(palette)]
+                for edge in (seg['start'], seg['end']):
+                    t_edge = edge / self.sr
+                    fig.add_vline(
+                        x=t_edge,
+                        line=dict(color='black', width=1.5, dash='dash'),
+                        annotation_text=name if edge == seg['start'] else '',
+                        annotation_position='top',
+                    )
 
         label = "ref" if elevation == 'ref' else f"{elevation}°"
         fig.update_layout(
