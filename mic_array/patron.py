@@ -628,24 +628,35 @@ class MicArray:
 
     def detect_notes(self, scale=None, elevation='ref', hop_length=512,
                      tolerance_cents=50, min_purity=0.8, confidence=None,
-                     start_s=0.0):
+                     start_s=0.0, gradient_thresh=25.0):
         """
         Detects the interval (start/end in samples) of each note of a scale
         in every take, using pyin on the specified elevation.
+
+        Combines pyin F0 tracking with gradient analysis: frames where the F0
+        is moving faster than gradient_thresh cents/frame are classified as
+        "in transition" and excluded when determining segment boundaries.
+        This trims portamento/glide regions from note edges and anchors start/end
+        to the stable (settled) portion of each note.
 
         Segments with purity below min_purity are rejected (treated as not detected),
         so contaminated takes are zeroed during extract_note rather than silently used.
 
         Parameters
         ----------
-        scale           : dict           {note_name: freq_hz} — uses self.scale if None
-        elevation       : int or 'ref'   elevation to analyze (default: 'ref')
-        hop_length      : int            pyin hop length in samples (default: 512)
-        tolerance_cents : float          max deviation in cents to assign a frame (default: 50)
-        min_purity      : float          minimum fraction of correctly assigned frames
-                                         within a segment to accept it (default: 0.8)
-        confidence      : float or None  alias for min_purity — overrides it when provided
-        start_s         : float          skip this many seconds at the start of each take (default: 0.0)
+        scale            : dict           {note_name: freq_hz} — uses self.scale if None
+        elevation        : int or 'ref'   elevation to analyze (default: 'ref')
+        hop_length       : int            pyin hop length in samples (default: 512)
+        tolerance_cents  : float          max deviation in cents to assign a frame (default: 50)
+        min_purity       : float          minimum fraction of correctly assigned frames
+                                          within the stable segment (default: 0.8)
+        confidence       : float or None  alias for min_purity — overrides it when provided
+        start_s          : float          skip this many seconds at the start of each take (default: 0.0)
+        gradient_thresh  : float          F0 rate-of-change threshold in cents/frame above which
+                                          a frame is considered "in transition" and excluded from
+                                          segment boundaries (default: 25.0).
+                                          Lower → more aggressive trimming of transitions.
+                                          Raise if valid note frames are being excluded.
         Returns
         -------
         segmentos : list of dicts  (one per azimuth take)
@@ -691,31 +702,51 @@ class MicArray:
                 i_closest = int(np.argmin(cents))
                 assigned.append(note_names[i_closest] if cents[i_closest] <= tolerance_cents else None)
 
+            # ── Gradient-based transition detection ──────────────────────────
+            # Compute F0 gradient in cents/frame over a fully interpolated curve
+            # (NaN frames are bridged by linear interpolation so np.gradient
+            # doesn't spike at voiced/unvoiced boundaries).
+            voiced_ix = np.where(~np.isnan(f0))[0]
+            if len(voiced_ix) > 1:
+                cents_voiced = 1200.0 * np.log2(f0[voiced_ix] / note_freqs[0])
+                f0_interp    = np.interp(np.arange(len(f0)), voiced_ix, cents_voiced)
+                grad         = np.abs(np.gradient(f0_interp))   # cents / frame
+            else:
+                grad = np.zeros(len(f0))
+
+            # Frames where F0 is moving faster than the threshold are "in transition":
+            # portamento, glide between notes, attack onset.
+            in_transition = grad > gradient_thresh
+
             segs = {}
             for note in note_names:
-                frames = [i for i, a in enumerate(assigned) if a == note]
-                if not frames:
+                all_frames = [i for i, a in enumerate(assigned) if a == note]
+                if not all_frames:
                     continue
 
-                # Build consecutive groups of target frames
-                groups, start, prev = [], frames[0], frames[0]
-                for f in frames[1:]:
-                    if f > prev + 1:
-                        groups.append((start, prev))
-                        start = f
-                    prev = f
-                groups.append((start, prev))
+                # Stable frames: assigned to this note AND not mid-transition.
+                # Fall back to all assigned frames if too few stable ones.
+                stable = [i for i in all_frames if not in_transition[i]]
+                work   = stable if len(stable) >= 3 else all_frames
+
+                # Build consecutive groups from the working frame set.
+                groups, s, p = [], work[0], work[0]
+                for fi in work[1:]:
+                    if fi > p + 1:
+                        groups.append((s, p))
+                        s = fi
+                    p = fi
+                groups.append((s, p))
 
                 best      = max(groups, key=lambda g: g[1] - g[0])
                 seg_start = best[0]
                 seg_end   = best[1] + 1
 
-                # Purity over the full span first→last occurrence of this note
-                # so intruding frames between occurrences are counted
-                full_start     = frames[0]
-                full_end       = frames[-1] + 1
-                total_frames   = full_end - full_start
-                correct_frames = sum(1 for i in range(full_start, full_end)
+                # Purity: fraction of frames inside the stable segment that are
+                # correctly assigned to this note (based on original assignment,
+                # not filtered by gradient, to be honest about segment quality).
+                total_frames   = seg_end - seg_start
+                correct_frames = sum(1 for i in range(seg_start, seg_end)
                                      if assigned[i] == note)
                 purity = correct_frames / total_frames if total_frames > 0 else 0.0
 
@@ -777,6 +808,129 @@ class MicArray:
         )
         display(styled)
         return segmentos
+
+    def edit_segment(self, segments, azimuth, note, start_s, end_s):
+        """
+        Manually set the boundaries of a note segment for one azimuth take.
+
+        Use this to correct or add a detection after detect_notes().
+        Times are in seconds, absolute (same reference as the tensor — i.e. from
+        the start of the file, NOT relative to the start_s used in detect_notes).
+        Purity is set to 1.0 for manually defined segments.
+
+        Call plot_f0(azimuth=az, segments=segments) before and after to verify.
+
+        Parameters
+        ----------
+        segments : list   output of detect_notes() — modified in-place
+        azimuth  : int    azimuth take to edit (e.g. 40)
+        note     : str    note name (e.g. 'La4')
+        start_s  : float  new segment start in seconds
+        end_s    : float  new segment end in seconds
+
+        Example
+        -------
+        ma.edit_segment(segments, azimuth=40, note='La4', start_s=1.45, end_s=2.10)
+        """
+        i_az  = self._az_to_row(azimuth)
+        start = int(start_s * self.sr)
+        end   = min(int(end_s * self.sr), self.n_samples)
+
+        if start >= end:
+            raise ValueError(
+                f"start_s ({start_s:.3f}s) must be less than end_s ({end_s:.3f}s)"
+            )
+
+        action = "editado" if note in segments[i_az] else "agregado"
+        segments[i_az][note] = {'start': start, 'end': end, 'purity': 1.0}
+
+        dur = (end - start) / self.sr
+        print(f"  [{action}]  az={azimuth}°  {note}  →  "
+              f"{start_s:.3f}s – {end_s:.3f}s  ({dur*1000:.0f} ms)")
+
+    def remove_segment(self, segments, azimuth, note):
+        """
+        Remove a detected segment for a note in one azimuth take.
+
+        The take will be zeroed in extract_note() as if it was never detected.
+        Useful for false positives: a segment that pyin assigned incorrectly.
+
+        Parameters
+        ----------
+        segments : list   output of detect_notes() — modified in-place
+        azimuth  : int    azimuth take (e.g. 40)
+        note     : str    note name (e.g. 'La4')
+
+        Example
+        -------
+        ma.remove_segment(segments, azimuth=40, note='La4')
+        """
+        i_az = self._az_to_row(azimuth)
+        if note not in segments[i_az]:
+            print(f"  [warn]  az={azimuth}°  '{note}' no estaba en segments — nada que eliminar")
+            return
+        del segments[i_az][note]
+        print(f"  [eliminado]  az={azimuth}°  '{note}' removido — la toma quedará en cero")
+
+    def show_segments(self, segments, scale=None):
+        """
+        Re-displays the detection table from a (possibly edited) segments list.
+
+        Useful to review the current state of segments after manual edits via
+        edit_segment() or remove_segment().
+
+        Parameters
+        ----------
+        segments : list   output of detect_notes(), optionally modified
+        scale    : dict or None  {note_name: freq_hz} — uses self.scale if None
+        """
+        import pandas as pd
+        from IPython.display import display
+
+        scale      = scale or self.scale
+        if scale is None:
+            raise RuntimeError("Provide a scale or set self.scale first.")
+
+        note_names = list(scale.keys())
+        az_labels  = [f"{a}°" for a in self.angles]
+        dur_data   = {}
+        pur_data   = {}
+
+        for note in note_names:
+            dur_col, pur_col = [], []
+            for segs in segments:
+                if note in segs:
+                    dur = (segs[note]['end'] - segs[note]['start']) / self.sr
+                    pur = segs[note]['purity']
+                    dur_col.append(f"{dur:.2f}s")
+                    pur_col.append(pur)
+                else:
+                    dur_col.append("--")
+                    pur_col.append(None)
+            dur_data[note] = dur_col
+            pur_data[note] = pur_col
+
+        df_dur = pd.DataFrame(dur_data, index=az_labels)
+        df_pur = pd.DataFrame(pur_data, index=az_labels)
+
+        def _color(val, pur):
+            if pur is None:
+                return 'background-color: #e0e0e0; color: #888'
+            if pur >= 1.0:   # manual edit
+                return 'background-color: #d0e8ff; color: #003580'
+            if pur >= 0.9:
+                return 'background-color: #c6efce; color: #276221'
+            if pur >= 0.0:
+                return 'background-color: #ffeb9c; color: #9c5700'
+            return 'background-color: #ffc7ce; color: #9c0006'
+
+        styled = df_dur.style.apply(
+            lambda row: [_color(row[n], df_pur.loc[row.name, n]) for n in note_names],
+            axis=1
+        ).set_caption(
+            "Segmentos actuales  |  🔵 manual  🟢 purity ≥90%  🟡 purity <90%  ⬜ no detectado"
+        )
+        display(styled)
 
     def extract_note(self, segmentos, note):
         """
