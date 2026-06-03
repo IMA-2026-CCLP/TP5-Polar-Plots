@@ -18,24 +18,25 @@ class MicArray:
 
     Attributes
     ----------
-    tensor : np.ndarray  shape (n_angles, n_mics, n_samples)
-    sr     : int         sample rate in Hz
+    tensor     : np.ndarray  shape (n_angles, n_elevations, n_samples)
+    sr         : int         sample rate in Hz
+    angles     : list        azimuth angles in degrees  [0, 10, ..., 180]
+    elevations : list        elevation labels — 'ref' or degrees [0, 10, ..., 180]
     """
 
-    def __init__(self, tensor, sr=44100, angles=None, mics=None):
-        self.tensor = tensor   # (n_angles, n_mics, n_samples)
+    def __init__(self, tensor, sr=44100, angles=None, elevations=None):
+        self.tensor = tensor   # (n_angles, n_elevations, n_samples)
         self.sr     = sr
 
-        # Derived from tensor shape
-        self.n_angles, self.n_mics, self.n_samples = tensor.shape
+        self.n_angles, self.n_elevations, self.n_samples = tensor.shape
 
-        # Angle values: [0, 10, 20, ..., 180] by default
+        # Azimuth values: [0, 10, ..., 180] by default
         self.angles = angles if angles is not None \
                       else list(range(0, self.n_angles * 10, 10))
 
-        # Mic labels: ['ref', 1, 2, ..., 19] by default
-        self.mics = mics if mics is not None \
-                    else ['ref'] + list(range(1, self.n_mics))
+        # Elevation labels: ['ref', 0, 10, ..., 180] by default
+        self.elevations = elevations if elevations is not None \
+                          else ['ref'] + list(range(0, (self.n_elevations - 1) * 10, 10))
 
         # Downsampling factor for plots (1 = no downsampling)
         self.downsampling_graph = 10
@@ -54,17 +55,13 @@ class MicArray:
         """
         Load a MicArray from a .npy or .npz file.
 
-        .npz files also restore sr, angles and mics saved by save().
+        .npz files also restore sr, angles and elevations saved by save().
         For .npy files, sr must be provided manually.
 
         Parameters
         ----------
         path : str or Path   path to the .npy or .npz file
         sr   : int           sample rate in Hz, only used for .npy (default: 44100)
-
-        Returns
-        -------
-        MicArray instance
 
         Example
         -------
@@ -73,12 +70,12 @@ class MicArray:
         """
         path = Path(path)
         if path.suffix == '.npz':
-            data   = np.load(path, allow_pickle=True)
-            tensor = data['tensor']
-            sr     = int(data['sr'])
-            angles = data['azimuth'].tolist()
-            mics   = data['elevation'].tolist()
-            return cls(tensor, sr=sr, angles=angles, mics=mics)
+            data       = np.load(path, allow_pickle=True)
+            tensor     = data['tensor']
+            sr         = int(data['sr'])
+            angles     = data['azimuth'].tolist()
+            elevations = data['elevation'].tolist()
+            return cls(tensor, sr=sr, angles=angles, elevations=elevations)
         else:
             tensor = np.load(path, mmap_mode='r')
             return cls(tensor, sr)
@@ -89,53 +86,46 @@ class MicArray:
         Load a MicArray from a flat directory of WAV files.
 
         Uses regex patterns to identify array mic files and optionally the
-        reference mic files. {H} captures the azimuth angle and {V} captures
-        the elevation angle (array mics only).
+        reference mic files. {H} captures the azimuth angle.
+
+        Vertical axis convention (auto-detected from array_pattern):
+          {MIC} → mic number (1–19), converted to elevation angle: (mic-1)*10
+          {V}   → elevation angle in degrees (0, 10 .. 180), used directly
 
         Parameters
         ----------
         path          : str or Path   directory containing the WAV files
-        array_pattern : str           pattern for array mic files, must contain
-                                      {H} (azimuth) and {V} (elevation)
-                                      e.g. 'mic_{H:03d}_{V:03d}_forte.wav'
-        ref_pattern   : str or None   pattern for reference mic files, must
-                                      contain {H} (azimuth)
-                                      e.g. 'ref_{H:03d}_forte.wav'
-                                      None if there is no reference mic.
-
-        Vertical axis convention (auto-detected from array_pattern):
-          {MIC} → mic number directly (1–19)
-          {V}   → elevation angle in degrees (0,10..180), converted to mic number
-
-        Returns
-        -------
-        MicArray instance
+        array_pattern : str           pattern with {H} and {MIC} or {V}
+                                      e.g. 'mic_{MIC}_ang_forte_{H}.wav'
+                                           'mic_{V}_ang_forte_{H}.wav'
+        ref_pattern   : str or None   pattern with {H} for reference mic
+                                      e.g. 'mic_ref_ang_forte_{H}.wav'
 
         Example
         -------
         ma = MicArray.from_audio(
             "data/audio/forte",
-            array_pattern = "mic_{H:03d}_{V:03d}_forte.wav",
-            ref_pattern   = "ref_{H:03d}_forte.wav",
+            array_pattern = "mic_{MIC}_ang_forte_{H}.wav",
+            ref_pattern   = "mic_ref_ang_forte_{H}.wav",
         )
         """
-        path       = Path(path)
-        arr_regex  = _pattern_to_regex(array_pattern)
-        ref_regex  = _pattern_to_regex(ref_pattern) if ref_pattern else None
+        path      = Path(path)
+        arr_regex = _pattern_to_regex(array_pattern)
+        ref_regex = _pattern_to_regex(ref_pattern) if ref_pattern else None
 
-        azimuths   = set()
-        elevations = set()
-        sr         = None
-
-        # ── Step 1: discover azimuths, elevations and sr ─────────────────────
         v_key      = 'MIC' if '{MIC' in array_pattern else 'V'
         v_is_angle = v_key == 'V'
 
+        azimuths = set()
+        v_values = set()
+        sr       = None
+
+        # ── Step 1: discover azimuths, elevations and sr ─────────────────────
         for f in sorted(path.glob("*.wav")):
             m = arr_regex.search(f.name)
             if m:
                 azimuths.add(int(m.group('H')))
-                elevations.add(int(m.group(v_key)))
+                v_values.add(int(m.group(v_key)))
                 if sr is None:
                     _, sr = sf.read(f)
                 continue
@@ -146,14 +136,14 @@ class MicArray:
                     if sr is None:
                         _, sr = sf.read(f)
 
-        v_is_angle = v_key == 'V'
-        azimuths   = sorted(azimuths)
-        mic_nums   = [e // 10 + 1 for e in sorted(elevations)] if v_is_angle \
-                     else sorted(elevations)
-        mics       = (['ref'] if ref_regex else []) + mic_nums
+        azimuths    = sorted(azimuths)
+        # Convert v_values to elevation angles
+        el_angles   = sorted(v_values) if v_is_angle \
+                      else sorted((v - 1) * 10 for v in v_values)
+        elevations  = (['ref'] if ref_regex else []) + el_angles
 
         print(f"  Azimuths   : {azimuths}")
-        print(f"  Mics       : {mics}")
+        print(f"  Elevations : {elevations}")
         print(f"  Sample rate: {sr} Hz")
 
         # ── Step 2: find max length ───────────────────────────────────────────
@@ -166,79 +156,73 @@ class MicArray:
         print(f"  Max length : {max_len} samples  ({max_len / sr:.2f} s)")
 
         # ── Step 3: build tensor (zero-padded) ────────────────────────────────
-        data = np.zeros((len(azimuths), len(mics), max_len), dtype=np.float32)
+        data = np.zeros((len(azimuths), len(elevations), max_len), dtype=np.float32)
 
         print(f"\n  Building tensor {data.shape} ...")
         for f in sorted(path.glob("*.wav")):
             m = arr_regex.search(f.name)
             if m:
-                i_az  = azimuths.index(int(m.group('H')))
-                v     = int(m.group('MIC') if not v_is_angle else m.group('V'))
-                i_mic = mics.index(v // 10 + 1 if v_is_angle else v)
+                i_az = azimuths.index(int(m.group('H')))
+                v    = int(m.group(v_key))
+                el   = v if v_is_angle else (v - 1) * 10
+                i_el = elevations.index(el)
                 sig, _ = sf.read(f)
-                data[i_az, i_mic, :len(sig)] = sig
+                data[i_az, i_el, :len(sig)] = sig
                 continue
             if ref_regex:
                 m = ref_regex.search(f.name)
                 if m:
-                    i_az  = azimuths.index(int(m.group('H')))
-                    i_mic = mics.index('ref')
+                    i_az = azimuths.index(int(m.group('H')))
+                    i_el = elevations.index('ref')
                     sig, _ = sf.read(f)
-                    data[i_az, i_mic, :len(sig)] = sig
+                    data[i_az, i_el, :len(sig)] = sig
 
-        for i_az, az in enumerate(azimuths):
+        for az in azimuths:
             print(f"    {az:>4}° → OK")
 
         print(f"\n  Done. Shape: {data.shape}  ({data.nbytes/1024/1024:.1f} MB)")
 
-        return cls(data, sr, angles=azimuths, mics=mics)
+        return cls(data, sr, angles=azimuths, elevations=elevations)
 
     @classmethod
     def from_export(cls, path, pattern='mic_{H}_{V}.wav'):
         """
-        Load a MicArray from a flat folder of WAV files.
+        Load a MicArray from a flat folder of WAV files exported by export_wavs().
 
-        The filename pattern uses {H} for the horizontal (azimuth) angle and
-        {V} for the vertical (elevation) angle. Format specs are supported.
+        {H} = azimuth angle, {V} = elevation angle in degrees.
 
         Parameters
         ----------
         path    : str or Path   folder containing the WAV files
-        pattern : str           filename pattern with {H} and {V} placeholders
+        pattern : str           filename pattern with {H} and {V}
                                 e.g. 'mic_{H:03d}_ang_forte_{V:03d}.wav'
-                                     'mic_{H}_{V}_Fa4.wav'
-
-        Returns
-        -------
-        MicArray instance
 
         Example
         -------
-        ma = MicArray.from_export("data/audio/forte_export",
-                                   pattern="mic_{H:03d}_ang_forte_{V:03d}.wav")
+        ma = MicArray.from_export("data/export/fa4",
+                                   pattern="mic_{H}_{V}_Fa4.wav")
         """
         path  = Path(path)
         regex = _pattern_to_regex(pattern)
 
-        azimuths   = set()
-        elevations = set()
-        sr         = None
+        azimuths = set()
+        el_set   = set()
+        sr       = None
 
         for f in sorted(path.glob("*.wav")):
             m = regex.search(f.name)
             if not m:
                 continue
             azimuths.add(int(m.group('H')))
-            elevations.add(int(m.group('V')))
+            el_set.add(int(m.group('V')))
             if sr is None:
                 _, sr = sf.read(f)
 
         azimuths   = sorted(azimuths)
-        elevations = sorted(elevations)
-        mics       = [e // 10 + 1 for e in elevations]
+        elevations = sorted(el_set)   # V is already elevation angle
 
         print(f"  Azimuths   : {azimuths}")
-        print(f"  Elevations : {elevations}  → mics: {mics}")
+        print(f"  Elevations : {elevations}")
         print(f"  Sample rate: {sr} Hz")
 
         max_len = 0
@@ -249,21 +233,21 @@ class MicArray:
 
         print(f"  Max length : {max_len} samples  ({max_len / sr:.2f} s)")
 
-        data = np.zeros((len(azimuths), len(mics), max_len), dtype=np.float32)
+        data = np.zeros((len(azimuths), len(elevations), max_len), dtype=np.float32)
 
         print(f"\n  Building tensor {data.shape} ...")
         for f in sorted(path.glob("*.wav")):
             m = regex.search(f.name)
             if not m:
                 continue
-            i_az  = azimuths.index(int(m.group('H')))
-            i_mic = elevations.index(int(m.group('V')))
+            i_az = azimuths.index(int(m.group('H')))
+            i_el = elevations.index(int(m.group('V')))
             sig, _ = sf.read(f)
-            data[i_az, i_mic, :len(sig)] = sig
+            data[i_az, i_el, :len(sig)] = sig
 
         print(f"  Done. Shape: {data.shape}  ({data.nbytes/1024/1024:.1f} MB)")
 
-        return cls(data, sr, angles=azimuths, mics=mics)
+        return cls(data, sr, angles=azimuths, elevations=elevations)
 
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -276,11 +260,11 @@ class MicArray:
             raise ValueError(f"Azimuth {azimuth}° not found. Available: {self.angles}")
         return self.angles.index(azimuth)
 
-    def _mic_to_col(self, mic):
-        """Maps a mic label to its column index in the tensor."""
-        if mic not in self.mics:
-            raise ValueError(f"Mic '{mic}' not found. Available: {self.mics}")
-        return self.mics.index(mic)
+    def _el_to_col(self, elevation):
+        """Maps an elevation label to its column index in the tensor."""
+        if elevation not in self.elevations:
+            raise ValueError(f"Elevation '{elevation}' not found. Available: {self.elevations}")
+        return self.elevations.index(elevation)
 
     def _prepare(self, signal, envelope):
         """
@@ -294,8 +278,6 @@ class MicArray:
 
         if envelope:
             s = np.abs(hilbert(signal))
-
-            # Apply moving average smoothing if smoothing_ms > 0
             window = int(self.smoothing_ms / 1000 * self.sr)
             if window > 1:
                 kernel = np.ones(window) / window
@@ -310,27 +292,24 @@ class MicArray:
     # ──────────────────────────────────────────────────────────────────────────
 
     def copy(self):
-        """
-        Returns a new MicArray with an independent copy of the tensor.
-        Changes to the copy do not affect the original.
-        """
+        """Returns a new MicArray with an independent copy of the tensor."""
         return MicArray(
-            tensor = self.tensor.copy(),   # .copy() garantiza array nuevo e independiente
-            sr     = self.sr,
-            angles = self.angles.copy(),
-            mics   = self.mics.copy(),
+            tensor     = self.tensor.copy(),
+            sr         = self.sr,
+            angles     = self.angles.copy(),
+            elevations = self.elevations.copy(),
         )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Export / Save
+    # ──────────────────────────────────────────────────────────────────────────
 
     def export_wavs(self, path, nota=''):
         """
-        Exports all mics and takes as individual WAV files to a directory.
+        Exports all elevations and takes as individual WAV files.
 
         File naming: mic_{azimuth}_{elevation}_{nota}.wav
-          azimuth   : take angle in degrees (0–180)
-          elevation : mic elevation in degrees — mic_1=0°, mic_2=10°, ..., mic_19=180°
-          nota      : note name passed as parameter (e.g. 'Fa4')
-
-        mic_ref is skipped (no elevation mapping).
+        elevation 'ref' is skipped.
 
         Parameters
         ----------
@@ -342,12 +321,11 @@ class MicArray:
 
         count = 0
         for i_az, azimuth in enumerate(self.angles):
-            for i_mic, mic in enumerate(self.mics):
-                if mic == 'ref':
+            for i_el, el in enumerate(self.elevations):
+                if el == 'ref':
                     continue
-                elevation = (mic - 1) * 10
-                filename  = f"mic_{azimuth}_{elevation}_{nota}.wav"
-                signal    = self.tensor[i_az, i_mic, :].astype(np.float32)
+                filename = f"mic_{azimuth}_{el}_{nota}.wav"
+                signal   = self.tensor[i_az, i_el, :].astype(np.float32)
                 sf.write(out / filename, signal, self.sr)
                 count += 1
 
@@ -355,7 +333,7 @@ class MicArray:
 
     def save(self, path):
         """
-        Saves the tensor and metadata (sr, angles, mics) to a .npz file.
+        Saves the tensor and metadata to a .npz file.
 
         Parameters
         ----------
@@ -367,90 +345,133 @@ class MicArray:
                  tensor    = self.tensor,
                  sr        = np.array(self.sr),
                  azimuth   = np.array(self.angles),
-                 elevation = np.array(self.mics, dtype=object),
+                 elevation = np.array(self.elevations, dtype=object),
         )
         print(f"  Saved: {path}  {self.tensor.shape}  ({self.tensor.nbytes/1024**2:.1f} MB)")
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Alignment methods
+    # Alignment / Processing methods
     # ──────────────────────────────────────────────────────────────────────────
 
-    def align_ref(self, mic='ref'):
+    def align_takes(self, target_onset=1.0, elevation='ref', threshold_db=-40):
         """
-        Aligns the reference mic to the array mics using GCC-PHAT.
+        Aligns all azimuth takes so their onset lands at target_onset seconds.
 
-        For each azimuth take:
-          1. Computes GCC-PHAT(mic_ref, mic_i) for each array mic i → TDOA τᵢ
-          2. Averages all τᵢ → τ_mean
-          3. Shifts mic_ref by τ_mean samples
+        For each take, detects the onset of the specified elevation and shifts
+        ALL elevations of that take by the same amount, so all takes share
+        a common absolute time position.
 
-        τ > 0 means mic_ref arrives later than the array → shift left (advance).
-        τ < 0 means mic_ref arrives earlier than the array → shift right (delay).
-        Only mic_ref is moved; all other mics remain untouched.
-
-        Modifies the tensor in-place.
+        Run this BEFORE align_ref. Modifies the tensor in-place.
 
         Parameters
         ----------
-        mic : int or 'ref'   reference mic label to align (default: 'ref')
+        target_onset  : float          desired onset time in seconds (default: 1.0)
+        elevation     : int or 'ref'   elevation used to detect onset (default: 'ref')
+        threshold_db  : float          RMS level in dBFS that defines the onset
+                                       (default: -40). Lower → more sensitive.
         """
         if not self.tensor.flags['WRITEABLE']:
             self.tensor = np.array(self.tensor, dtype=np.float32)
 
-        i_ref    = self._mic_to_col(mic)
-        other_ix = [i for i in range(self.n_mics) if i != i_ref]
+        i_el           = self._el_to_col(elevation)
+        target_samples = int(target_onset * self.sr)
+        el_label       = 'ref' if elevation == 'ref' else f'{elevation}°'
 
-        print(f"  Aligning mic_{mic} against {len(other_ix)} mics...\n")
+        print(f"  Target onset : {target_onset:.2f} s  ({target_samples} smp)")
+        print(f"  Ref elevation: {el_label}  |  threshold = {threshold_db} dBFS\n")
+
+        for i_az in range(self.n_angles):
+            signal = self.tensor[i_az, i_el, :].astype(np.float64)
+            onset  = _detect_onset(signal, self.sr, threshold_db=threshold_db)
+            shift  = target_samples - onset  # >0 → retrasa  |  <0 → adelanta
+
+            if shift != 0:
+                tmp = np.zeros((self.n_elevations, self.n_samples), dtype=np.float32)
+                if shift > 0:
+                    tmp[:, shift:] = self.tensor[i_az, :, :self.n_samples - shift]
+                else:
+                    tmp[:, :self.n_samples + shift] = self.tensor[i_az, :, -shift:]
+                self.tensor[i_az] = tmp
+
+            print(f"  {self.angles[i_az]:>4}°  onset = {onset:>6} smp"
+                  f"  ({onset / self.sr * 1000:.0f} ms)"
+                  f"  shift = {shift:+d} smp  ({shift / self.sr * 1000:+.0f} ms)")
+
+        print("\n  Take alignment done.")
+
+    def align_to_ref(self, elevation='ref'):
+        """
+        Aligns each elevation to the reference using GCC-PHAT.
+
+        For each azimuth take and each non-ref elevation:
+          1. Computes GCC-PHAT(ref, el_i) → TDOA τᵢ
+          2. Shifts el_i by τᵢ so it aligns temporally with ref
+
+        The reference elevation is left untouched.
+        Modifies the tensor in-place.
+
+        Parameters
+        ----------
+        elevation : int or 'ref'   reference elevation label (default: 'ref')
+        """
+        if not self.tensor.flags['WRITEABLE']:
+            self.tensor = np.array(self.tensor, dtype=np.float32)
+
+        i_ref    = self._el_to_col(elevation)
+        other_ix = [i for i in range(self.n_elevations) if i != i_ref]
+
+        print(f"  Aligning {len(other_ix)} elevations to '{elevation}'...\n")
 
         for i_az in range(self.n_angles):
             ref_sig = self.tensor[i_az, i_ref, :].astype(np.float64)
 
-            tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_m, :].astype(np.float64))
-                     for i_m in other_ix]
+            tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_e, :].astype(np.float64))
+                     for i_e in other_ix]
 
             tau = int(np.round(np.mean(tdoas)))
 
-            shifted = np.zeros(self.n_samples, dtype=np.float64)
+            # shift all elevations by the same tau — ref stays untouched
+            tmp = np.zeros((len(other_ix), self.n_samples), dtype=np.float32)
             if tau > 0:
-                shifted[:-tau] = ref_sig[tau:]      # advance: remove first τ samples
+                tmp[:, tau:] = self.tensor[i_az][other_ix, :-tau]
             elif tau < 0:
-                shifted[-tau:] = ref_sig[:tau]      # delay:   pad τ zeros at front
+                tmp[:, :self.n_samples + tau] = self.tensor[i_az][other_ix, -tau:]
             else:
-                shifted = ref_sig.copy()
+                tmp = self.tensor[i_az][other_ix, :].copy()
+            self.tensor[i_az][other_ix] = tmp
 
-            self.tensor[i_az, i_ref, :] = shifted.astype(np.float32)
-
-            print(f"  {self.angles[i_az]:>4}°  τ = {tau:>6} smp"
-                  f"  ({tau / self.sr * 1000:.1f} ms)"
+            print(f"  {self.angles[i_az]:>4}°  τ = {tau:+d} smp"
+                  f"  ({tau / self.sr * 1000:+.2f} ms)"
                   f"  std = {np.std(tdoas):.1f} smp")
 
         print("\n  Alignment done.")
 
-    def normalize_takes(self, mic='ref', ref_azimuth=0):
+    def normalize_takes(self, elevation='ref', ref_azimuth=0):
         """
         Normalizes the level of all takes relative to a reference take.
 
-        Computes the global RMS of the specified mic in each take and scales
-        ALL mics in that take so its RMS matches the reference take.
+        Computes the global RMS of the specified elevation in each take and
+        scales ALL elevations in that take to match the reference.
 
         Parameters
         ----------
-        mic         : int or 'ref'   mic used to measure level (default: 'ref')
+        elevation   : int or 'ref'   elevation used to measure level (default: 'ref')
         ref_azimuth : int            azimuth of the reference take (default: 0)
         """
         if not self.tensor.flags['WRITEABLE']:
             self.tensor = np.array(self.tensor, dtype=np.float32)
 
-        i_mic    = self._mic_to_col(mic)
+        i_el     = self._el_to_col(elevation)
         i_ref_az = self._az_to_row(ref_azimuth)
 
-        rms_ref = np.sqrt(np.mean(self.tensor[i_ref_az, i_mic, :] ** 2))
+        rms_ref = np.sqrt(np.mean(self.tensor[i_ref_az, i_el, :] ** 2))
 
-        print(f"  Reference: mic_{mic} at {ref_azimuth}°  RMS = {20*np.log10(rms_ref):.1f} dBFS\n")
+        print(f"  Reference: elevation '{elevation}' at {ref_azimuth}°"
+              f"  RMS = {20*np.log10(rms_ref):.1f} dBFS\n")
 
         for i_az in range(self.n_angles):
-            rms_i = np.sqrt(np.mean(self.tensor[i_az, i_mic, :] ** 2))
-            gain  = rms_ref / (rms_i + 1e-12)
+            rms_i  = np.sqrt(np.mean(self.tensor[i_az, i_el, :] ** 2))
+            gain   = rms_ref / (rms_i + 1e-12)
             self.tensor[i_az, :, :] *= gain
 
             diff_db = 20 * np.log10(gain)
@@ -462,8 +483,8 @@ class MicArray:
 
     def hpf(self, cutoff_hz):
         """
-        Applies a 4th-order Butterworth high-pass filter to every mic of every
-        take in the tensor. Modifies the tensor in-place.
+        Applies a 4th-order Butterworth high-pass filter to every elevation
+        of every take. Modifies the tensor in-place.
 
         Parameters
         ----------
@@ -477,61 +498,29 @@ class MicArray:
         sos = butter(4, cutoff_hz, btype='high', fs=self.sr, output='sos')
 
         for i_az in range(self.n_angles):
-            for i_m in range(self.n_mics):
-                self.tensor[i_az, i_m, :] = sosfilt(
-                    sos, self.tensor[i_az, i_m, :]
+            for i_el in range(self.n_elevations):
+                self.tensor[i_az, i_el, :] = sosfilt(
+                    sos, self.tensor[i_az, i_el, :]
                 ).astype(np.float32)
 
         print(f"  HPF applied — {cutoff_hz} Hz, 4th-order Butterworth"
-              f"  ({self.n_angles} takes × {self.n_mics} mics)")
+              f"  ({self.n_angles} takes × {self.n_elevations} elevations)")
 
-    def plot_rms_takes(self, mic='ref', floor_db=-60, yrange=None):
-        """
-        Plots the RMS level (dBFS) of a mic across all takes as a VU-meter style
-        bar chart: bars rise from floor_db up to the dBFS value of each take.
+    # ──────────────────────────────────────────────────────────────────────────
+    # Note detection methods
+    # ──────────────────────────────────────────────────────────────────────────
 
-        Parameters
-        ----------
-        mic      : int or 'ref'        mic to measure (default: 'ref')
-        floor_db : float               bottom of the y-axis in dBFS (default: -60)
-        yrange   : [float, float]      optional y-axis zoom, e.g. [-40, -20]
-        """
-        i_mic = self._mic_to_col(mic)
-
-        rms_db = [
-            20 * np.log10(np.sqrt(np.mean(self.tensor[i_az, i_mic, :] ** 2)) + 1e-12)
-            for i_az in range(self.n_angles)
-        ]
-
-        fig = go.Figure(go.Bar(
-            x=[f"{a}°" for a in self.angles],
-            y=[r - floor_db for r in rms_db],
-            base=floor_db,
-            marker_color='steelblue',
-            text=[f"{r:.1f}" for r in rms_db],
-            textposition='outside',
-        ))
-        fig.update_layout(
-            title=f"RMS por toma — mic_{mic}",
-            xaxis_title="Azimut",
-            yaxis=dict(title="dBFS", range=yrange if yrange else [floor_db, 0], gridcolor='lightgrey'),
-            plot_bgcolor='white',
-            xaxis=dict(gridcolor='lightgrey'),
-            width=900, height=400,
-        )
-        fig.show()
-
-    def detect_notes(self, scale, mic='ref', hop_length=512, tolerance_cents=50):
+    def detect_notes(self, scale, elevation='ref', hop_length=512, tolerance_cents=50):
         """
         Detects the interval (start/end in samples) of each note of a scale
-        in every take, using pyin on the specified mic.
+        in every take, using pyin on the specified elevation.
 
         Parameters
         ----------
-        scale           : dict   {note_name: freq_hz}, e.g. FA_MAYOR
-        mic             : int or 'ref'   mic to analyze (default: 'ref')
-        hop_length      : int    pyin hop length in samples (default: 512)
-        tolerance_cents : float  max deviation in cents to assign a frame to a note (default: 50)
+        scale           : dict           {note_name: freq_hz}
+        elevation       : int or 'ref'   elevation to analyze (default: 'ref')
+        hop_length      : int            pyin hop length in samples (default: 512)
+        tolerance_cents : float          max deviation in cents to assign a frame
 
         Returns
         -------
@@ -540,13 +529,13 @@ class MicArray:
         """
         import librosa
 
-        i_mic       = self._mic_to_col(mic)
-        note_names  = list(scale.keys())
-        note_freqs  = np.array(list(scale.values()))
-        fmin        = min(note_freqs) * 0.9
-        fmax        = max(note_freqs) * 1.1
+        i_el       = self._el_to_col(elevation)
+        note_names = list(scale.keys())
+        note_freqs = np.array(list(scale.values()))
+        fmin       = min(note_freqs) * 0.9
+        fmax       = max(note_freqs) * 1.1
 
-        col_w = 6
+        col_w  = 6
         header = f"{'Toma':>6}  " + "  ".join(f"{n:<{col_w}}" for n in note_names)
         print(header)
         print("─" * len(header))
@@ -554,14 +543,13 @@ class MicArray:
         segmentos = []
 
         for i_az in range(self.n_angles):
-            signal = self.tensor[i_az, i_mic, :].astype(np.float32)
+            signal = self.tensor[i_az, i_el, :].astype(np.float32)
 
             f0, _, _ = librosa.pyin(
                 signal, fmin=fmin, fmax=fmax,
                 sr=self.sr, hop_length=hop_length, fill_na=np.nan,
             )
 
-            # Assign each voiced frame to the closest note within tolerance
             assigned = []
             for freq in f0:
                 if np.isnan(freq):
@@ -571,7 +559,6 @@ class MicArray:
                 i_closest = int(np.argmin(cents))
                 assigned.append(note_names[i_closest] if cents[i_closest] <= tolerance_cents else None)
 
-            # Extract the longest contiguous segment per note
             segs = {}
             for note in note_names:
                 frames = [i for i, a in enumerate(assigned) if a == note]
@@ -607,7 +594,7 @@ class MicArray:
     def extract_note(self, segmentos, note):
         """
         Returns a new MicArray containing only the audio of a given note,
-        cropped from each take. Takes with missing note detection are zeroed.
+        cropped from each take. Takes with missing detection are zeroed.
 
         Parameters
         ----------
@@ -616,7 +603,7 @@ class MicArray:
 
         Returns
         -------
-        MicArray with shape (n_angles, n_mics, max_note_length)
+        MicArray with shape (n_angles, n_elevations, max_note_length)
         """
         lengths = [
             seg[note]['end'] - seg[note]['start']
@@ -626,7 +613,7 @@ class MicArray:
             raise ValueError(f"Note '{note}' not found in any take.")
 
         max_len = max(lengths)
-        data    = np.zeros((self.n_angles, self.n_mics, max_len), dtype=np.float32)
+        data    = np.zeros((self.n_angles, self.n_elevations, max_len), dtype=np.float32)
 
         for i_az, seg in enumerate(segmentos):
             if note not in seg:
@@ -639,30 +626,8 @@ class MicArray:
         print(f"  extract_note('{note}')  shape: {data.shape}"
               f"  ({max_len / self.sr * 1000:.0f} ms max)")
 
-        return MicArray(data, sr=self.sr, angles=self.angles.copy(), mics=self.mics.copy())
-
-    def listen(self, azimuth, mic):
-        """
-        Returns an IPython Audio widget to listen to a specific take and mic.
-
-        Parameters
-        ----------
-        azimuth : int          azimuth angle value (e.g. 0, 90, 180)
-        mic     : int or 'ref' mic label (e.g. 1, 10, 'ref')
-        """
-        from IPython.display import Audio, display
-
-        i_az   = self._az_to_row(azimuth)
-        i_mic  = self._mic_to_col(mic)
-        signal = self.tensor[i_az, i_mic, :].astype(np.float32)
-
-        # Trim trailing zeros (from extract_note padding)
-        nonzero = np.nonzero(signal)[0]
-        if len(nonzero):
-            signal = signal[:nonzero[-1] + 1]
-
-        print(f"  mic_{mic}  |  {azimuth}°  |  {len(signal)/self.sr:.2f}s")
-        display(Audio(signal, rate=self.sr))
+        return MicArray(data, sr=self.sr, angles=self.angles.copy(),
+                        elevations=self.elevations.copy())
 
     def extract_all_notes(self, segmentos, scale):
         """
@@ -679,79 +644,143 @@ class MicArray:
         """
         return {note: self.extract_note(segmentos, note) for note in scale}
 
-    def plot_tune(self, scale, azimuth, mic='ref', hop_length=512, confidence_threshold=0.5):
-        """
-        Plots the tuning deviation (in cents) of each note in a scale for a given take.
+    # ──────────────────────────────────────────────────────────────────────────
+    # Listen
+    # ──────────────────────────────────────────────────────────────────────────
 
-        For each note, computes the mean and std of the pyin f0 deviation
-        relative to the theoretical frequency. Shows ±50 cent tolerance bands.
+    def listen(self, azimuth, elevation):
+        """
+        Returns an IPython Audio widget to listen to a specific take and elevation.
 
         Parameters
         ----------
-        scale                : dict   {note_name: freq_hz}
-        azimuth              : int    azimuth take to analyze
-        mic                  : int or 'ref'   mic to use (default: 'ref')
-        hop_length           : int    pyin hop length in samples (default: 512)
-        confidence_threshold : float  min pyin confidence to accept a frame (default: 0.5)
+        azimuth   : int              azimuth angle value (e.g. 0, 90, 180)
+        elevation : int or 'ref'     elevation label (e.g. 0, 90, 'ref')
+        """
+        from IPython.display import Audio, display
+
+        i_az   = self._az_to_row(azimuth)
+        i_el   = self._el_to_col(elevation)
+        signal = self.tensor[i_az, i_el, :].astype(np.float32)
+
+        # Trim trailing zeros (from extract_note padding)
+        nonzero = np.nonzero(signal)[0]
+        if len(nonzero):
+            signal = signal[:nonzero[-1] + 1]
+
+        label = f"ref" if elevation == 'ref' else f"{elevation}°"
+        print(f"  elevation {label}  |  {azimuth}°  |  {len(signal)/self.sr:.2f}s")
+        display(Audio(signal, rate=self.sr))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Analysis plots
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def plot_rms_takes(self, elevation='ref', floor_db=-60, yrange=None):
+        """
+        Plots the RMS level (dBFS) of an elevation across all takes as a
+        VU-meter style bar chart.
+
+        Parameters
+        ----------
+        elevation : int or 'ref'       elevation to measure (default: 'ref')
+        floor_db  : float              bottom of the y-axis in dBFS (default: -60)
+        yrange    : [float, float]     optional y-axis zoom, e.g. [-40, -20]
+        """
+        i_el = self._el_to_col(elevation)
+
+        rms_db = [
+            20 * np.log10(np.sqrt(np.mean(self.tensor[i_az, i_el, :] ** 2)) + 1e-12)
+            for i_az in range(self.n_angles)
+        ]
+
+        label = "ref" if elevation == 'ref' else f"{elevation}°"
+        fig = go.Figure(go.Bar(
+            x=[f"{a}°" for a in self.angles],
+            y=[r - floor_db for r in rms_db],
+            base=floor_db,
+            marker_color='steelblue',
+            text=[f"{r:.1f}" for r in rms_db],
+            textposition='outside',
+        ))
+        fig.update_layout(
+            title=f"RMS por toma — elevation {label}",
+            xaxis_title="Azimut",
+            yaxis=dict(title="dBFS", range=yrange if yrange else [floor_db, 0],
+                       gridcolor='lightgrey'),
+            plot_bgcolor='white',
+            xaxis=dict(gridcolor='lightgrey'),
+            width=900, height=400,
+        )
+        fig.show()
+
+    def plot_tune(self, scale, azimuth, elevation='ref', hop_length=512,
+                  confidence_threshold=0.5):
+        """
+        Plots the tuning deviation (cents) of each note for a given take.
+
+        Parameters
+        ----------
+        scale                : dict           {note_name: freq_hz}
+        azimuth              : int            azimuth take to analyze
+        elevation            : int or 'ref'   elevation to use (default: 'ref')
+        hop_length           : int            pyin hop length (default: 512)
+        confidence_threshold : float          min pyin confidence (default: 0.5)
         """
         import librosa
 
-        i_az  = self._az_to_row(azimuth)
-        i_mic = self._mic_to_col(mic)
+        i_az = self._az_to_row(azimuth)
+        i_el = self._el_to_col(elevation)
 
         note_names = list(scale.keys())
         note_freqs = np.array(list(scale.values()))
         fmin       = min(note_freqs) * 0.9
         fmax       = max(note_freqs) * 1.1
 
-        signal = self.tensor[i_az, i_mic, :].astype(np.float32)
+        signal = self.tensor[i_az, i_el, :].astype(np.float32)
 
         f0, _, voiced_prob = librosa.pyin(
             signal, fmin=fmin, fmax=fmax,
             sr=self.sr, hop_length=hop_length, fill_na=np.nan,
         )
 
-        # Group f0 frames by note
         cents_per_note = {n: [] for n in note_names}
         for freq, prob in zip(f0, voiced_prob):
             if np.isnan(freq) or prob < confidence_threshold:
                 continue
-            dists = np.abs(1200 * np.log2(freq / note_freqs))
+            dists     = np.abs(1200 * np.log2(freq / note_freqs))
             i_closest = int(np.argmin(dists))
-            if dists[i_closest] <= 100:   # within a semitone
+            if dists[i_closest] <= 100:
                 deviation = 1200 * np.log2(freq / note_freqs[i_closest])
                 cents_per_note[note_names[i_closest]].append(deviation)
 
-        means = [np.mean(cents_per_note[n]) if cents_per_note[n] else np.nan for n in note_names]
-        stds  = [np.std(cents_per_note[n])  if cents_per_note[n] else 0      for n in note_names]
+        means = [np.mean(cents_per_note[n]) if cents_per_note[n] else np.nan
+                 for n in note_names]
+        stds  = [np.std(cents_per_note[n])  if cents_per_note[n] else 0
+                 for n in note_names]
 
         colors = []
-        for m in means:
-            if np.isnan(m):       colors.append('lightgrey')
-            elif abs(m) <= 25:    colors.append('seagreen')
-            elif abs(m) <= 50:    colors.append('goldenrod')
+        for mv in means:
+            if np.isnan(mv):      colors.append('lightgrey')
+            elif abs(mv) <= 25:   colors.append('seagreen')
+            elif abs(mv) <= 50:   colors.append('goldenrod')
             else:                 colors.append('crimson')
 
+        label = "ref" if elevation == 'ref' else f"{elevation}°"
         fig = go.Figure()
-
-        # ±50 cent tolerance band
         fig.add_hrect(y0=-50, y1=50, fillcolor='lightgreen', opacity=0.1, line_width=0)
-
         fig.add_trace(go.Bar(
-            x=note_names,
-            y=means,
+            x=note_names, y=means,
             error_y=dict(type='data', array=stds, visible=True),
             marker_color=colors,
-            text=[f"{m:.1f}¢" if not np.isnan(m) else "—" for m in means],
+            text=[f"{mv:.1f}¢" if not np.isnan(mv) else "—" for mv in means],
             textposition='outside',
         ))
-
         fig.add_hline(y=0,   line=dict(color='black', width=1))
-        fig.add_hline(y=50,  line=dict(color='green',  width=1, dash='dash'))
-        fig.add_hline(y=-50, line=dict(color='green',  width=1, dash='dash'))
-
+        fig.add_hline(y=50,  line=dict(color='green', width=1, dash='dash'))
+        fig.add_hline(y=-50, line=dict(color='green', width=1, dash='dash'))
         fig.update_layout(
-            title=f"Afinación — mic_{mic}  |  {azimuth}°",
+            title=f"Afinación — elevation {label}  |  {azimuth}°",
             xaxis_title="Nota",
             yaxis_title="Desviación (cents)",
             plot_bgcolor='white',
@@ -761,56 +790,52 @@ class MicArray:
         )
         fig.show()
 
-    def plot_f0(self, scale, azimuth, mic='ref', hop_length=512, band_cents=50):
+    def plot_f0(self, scale, azimuth, elevation='ref', hop_length=512, band_cents=50):
         """
         Plots the pyin f0 tracking for a specific take against the scale notes.
 
-        Shows the detected fundamental frequency over time (in cents relative to
-        the lowest note), with horizontal bands marking each note's target position
-        and ±50 cent tolerance zones.
-
         Parameters
         ----------
-        scale      : dict          {note_name: freq_hz}
-        azimuth    : int           azimuth take to analyze
-        mic        : int or 'ref'  mic to use (default: 'ref')
-        hop_length : int           pyin hop length in samples (default: 512)
-        band_cents : float         half-width of the shaded band per note in cents (default: 50)
+        scale      : dict            {note_name: freq_hz}
+        azimuth    : int             azimuth take to analyze
+        elevation  : int or 'ref'    elevation to use (default: 'ref')
+        hop_length : int             pyin hop length in samples (default: 512)
+        band_cents : float           half-width of shaded band per note (default: 50)
         """
         import librosa
 
-        i_az  = self._az_to_row(azimuth)
-        i_mic = self._mic_to_col(mic)
+        i_az = self._az_to_row(azimuth)
+        i_el = self._el_to_col(elevation)
 
         note_names = list(scale.keys())
         note_freqs = np.array(list(scale.values()))
-        f_ref      = note_freqs[0]   # lowest note as cents reference
+        f_ref      = note_freqs[0]
         fmin       = note_freqs[0] * 0.9
         fmax       = note_freqs[-1] * 1.1
 
-        signal = self.tensor[i_az, i_mic, :].astype(np.float32)
+        signal = self.tensor[i_az, i_el, :].astype(np.float32)
 
         f0, voiced, _ = librosa.pyin(
             signal, fmin=fmin, fmax=fmax,
             sr=self.sr, hop_length=hop_length, fill_na=np.nan,
         )
 
-        t         = np.arange(len(f0)) * hop_length / self.sr
+        t          = np.arange(len(f0)) * hop_length / self.sr
         note_cents = {n: 1200 * np.log2(f / f_ref) for n, f in scale.items()}
-        f0_cents   = np.where(voiced, 1200 * np.log2(np.where(voiced, f0, f_ref) / f_ref), np.nan)
-
-        fig = go.Figure()
+        f0_cents   = np.where(voiced,
+                              1200 * np.log2(np.where(voiced, f0, f_ref) / f_ref),
+                              np.nan)
 
         import plotly.colors as pc
         palette = pc.qualitative.Plotly
 
+        fig = go.Figure()
         for i, (name, c) in enumerate(note_cents.items()):
             color = palette[i % len(palette)]
             fig.add_hrect(y0=c - band_cents, y1=c + band_cents,
                           fillcolor=color, opacity=0.15, line_width=0)
             fig.add_hline(y=c, line=dict(color=color, width=1.5))
 
-        # Detected f0
         fig.add_trace(go.Scatter(
             x=t, y=f0_cents,
             mode='lines',
@@ -818,8 +843,9 @@ class MicArray:
             name='f0 detectada',
         ))
 
+        label = "ref" if elevation == 'ref' else f"{elevation}°"
         fig.update_layout(
-            title=f"F0 tracking — mic_{mic}  |  {azimuth}°",
+            title=f"F0 tracking — elevation {label}  |  {azimuth}°",
             xaxis_title="Tiempo (s)",
             yaxis=dict(
                 title="Nota",
@@ -837,112 +863,88 @@ class MicArray:
     # Plotting methods
     # ──────────────────────────────────────────────────────────────────────────
 
-    def plot_takes(self, azimuth, mics="all", title=None, envelope=False):
+    def plot(self, azimuth=None, elevation=None, title=None,
+             envelope=True, db=False, floor_db=-80):
         """
-        For a single azimuth angle, plots the signal of each mic.
+        Plots time-domain signals from the tensor.
+
+        Dispatch rules:
+          azimuth + elevation  → single signal at that position
+          azimuth only         → all elevations for that azimuth
+          elevation only       → all azimuths for that elevation
 
         Parameters
         ----------
-        azimuth  : int              azimuth angle value (e.g. 0, 10, 90, 180)
-        mics     : "all" or list    mic labels to plot (e.g. [1, 5, 10, 'ref'])
-        title    : str or None      plot title, no title if None
-        envelope : bool             if True, shows abs envelope (default: True)
+        azimuth   : int or None           azimuth angle (e.g. 0, 90, 180)
+        elevation : int, 'ref', or None   elevation label (e.g. 0, 90, 'ref')
+        title     : str or None           plot title (auto-generated if None)
+        envelope  : bool                  if True, shows smooth abs envelope (default: False)
+        db        : bool                  if True, converts amplitude to dBFS (default: False)
+        floor_db  : float                 minimum dBFS value shown when db=True (default: -80)
         """
-        i_az  = self._az_to_row(azimuth)
-        mics_ = self.mics if mics == "all" else mics
+        if azimuth is None and elevation is None:
+            raise ValueError("Provide at least 'azimuth' or 'elevation'.")
+
+        def to_db(ds):
+            return np.maximum(20 * np.log10(np.abs(ds) + 1e-12), floor_db)
 
         fig = go.Figure()
-        for mic in mics_:
-            i_mic      = self._mic_to_col(mic)
-            signal     = self.tensor[i_az, i_mic, :]
+
+        if azimuth is not None and elevation is not None:
+            i_az       = self._az_to_row(azimuth)
+            i_el       = self._el_to_col(elevation)
+            signal     = self.tensor[i_az, i_el, :]
             ds, factor = self._prepare(signal, envelope)
+            if db: ds  = to_db(ds)
             t          = np.arange(len(ds)) * factor / self.sr
-            fig.add_trace(go.Scatter(
-                x=t, y=ds,
-                mode='lines', line=dict(width=1),
-                name=f"mic_{mic}",
-            ))
+            el_label   = "ref" if elevation == 'ref' else f"{elevation}°"
+            fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
+                                     line=dict(width=1),
+                                     name=f"{el_label} — {azimuth}°"))
+            auto_title = f"Elevación {el_label} dado el azimut {azimuth}°"
+            height     = 400
 
-        fig.update_layout(
-            title=title,
-            xaxis_title="Time (s)",
-            yaxis_title="Amplitude",
-            plot_bgcolor='white',
-            xaxis=dict(gridcolor='lightgrey'),
-            yaxis=dict(gridcolor='lightgrey'),
-            width=1200, height=500,
+        elif azimuth is not None:
+            i_az = self._az_to_row(azimuth)
+            for el in self.elevations:
+                i_el       = self._el_to_col(el)
+                signal     = self.tensor[i_az, i_el, :]
+                ds, factor = self._prepare(signal, envelope)
+                if db: ds  = to_db(ds)
+                t          = np.arange(len(ds)) * factor / self.sr
+                label      = "ref" if el == 'ref' else f"{el}°"
+                fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
+                                         line=dict(width=1), name=label))
+            auto_title = f"Elevaciones dado el azimut {azimuth}°"
+            height     = 500
+
+        else:
+            i_el     = self._el_to_col(elevation)
+            el_label = "ref" if elevation == 'ref' else f"{elevation}°"
+            for az in self.angles:
+                i_az       = self._az_to_row(az)
+                signal     = self.tensor[i_az, i_el, :]
+                ds, factor = self._prepare(signal, envelope)
+                if db: ds  = to_db(ds)
+                t          = np.arange(len(ds)) * factor / self.sr
+                fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
+                                         line=dict(width=1), name=f"{az}°"))
+            auto_title = f"Azimuts dada la elevación {el_label}"
+            height     = 500
+
+        axis_style = dict(
+            gridcolor='lightgrey',
+            showline=True, linecolor='black', linewidth=1,
+            mirror=False,
         )
-        fig.show()
-
-    def plot_mics(self, mic, azimuths="all", title=None, envelope=False):
-        """
-        For a single mic (elevation), plots the signal of each azimuth take.
-
-        Parameters
-        ----------
-        mic      : int or 'ref'    mic label (e.g. 1, 10, 'ref')
-        azimuths : "all" or list   azimuth values to plot (e.g. [0, 90, 180])
-        title    : str or None     plot title, no title if None
-        envelope : bool            if True, shows abs envelope (default: True)
-        """
-        i_mic     = self._mic_to_col(mic)
-        azimuths_ = self.angles if azimuths == "all" else azimuths
-
-        fig = go.Figure()
-        for az in azimuths_:
-            i_az       = self._az_to_row(az)
-            signal     = self.tensor[i_az, i_mic, :]
-            ds, factor = self._prepare(signal, envelope)
-            t          = np.arange(len(ds)) * factor / self.sr
-            fig.add_trace(go.Scatter(
-                x=t, y=ds,
-                mode='lines', line=dict(width=1),
-                name=f"{az}°",
-            ))
-
         fig.update_layout(
-            title=title,
+            title=title if title is not None else auto_title,
             xaxis_title="Time (s)",
-            yaxis_title="Amplitude",
+            yaxis_title="dBFS" if db else "Amplitude",
             plot_bgcolor='white',
-            xaxis=dict(gridcolor='lightgrey'),
-            yaxis=dict(gridcolor='lightgrey'),
-            width=1200, height=500,
-        )
-        fig.show()
-
-    def plot_take(self, azimuth, mic, title=None, envelope=False):
-        """
-        Plots the time-domain signal for a single azimuth and mic.
-
-        Parameters
-        ----------
-        azimuth  : int              azimuth angle value (e.g. 0, 90, 180)
-        mic      : int or 'ref'     mic label (e.g. 1, 10, 'ref')
-        title    : str or None      plot title, no title if None
-        envelope : bool             if True, shows abs envelope (default: False)
-        """
-        i_az       = self._az_to_row(azimuth)
-        i_mic      = self._mic_to_col(mic)
-        signal     = self.tensor[i_az, i_mic, :]
-        ds, factor = self._prepare(signal, envelope)
-        t          = np.arange(len(ds)) * factor / self.sr
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=t, y=ds,
-            mode='lines', line=dict(width=1),
-            name=f"mic_{mic} — {azimuth}°",
-        ))
-
-        fig.update_layout(
-            title=title,
-            xaxis_title="Time (s)",
-            yaxis_title="Amplitude",
-            plot_bgcolor='white',
-            xaxis=dict(gridcolor='lightgrey'),
-            yaxis=dict(gridcolor='lightgrey'),
-            width=1200, height=400,
+            xaxis=axis_style,
+            yaxis=dict(**axis_style, range=[floor_db, 0]) if db else axis_style,
+            width=1200, height=height,
         )
         fig.show()
 
@@ -953,63 +955,32 @@ def _gcc_phat(sig1, sig2):
     """
     Estimates the TDOA between sig1 and sig2 using GCC-PHAT.
 
-    Returns the delay in samples: positive means sig1 arrives later than sig2
-    (sig1 is delayed), negative means sig1 arrives earlier.
-
-    Parameters
-    ----------
-    sig1 : np.ndarray 1D   reference signal (e.g. mic_ref)
-    sig2 : np.ndarray 1D   array mic signal
-
-    Returns
-    -------
-    tau : int   delay in samples
+    Returns the delay in samples: positive means sig1 arrives later than sig2.
     """
     n     = len(sig1) + len(sig2) - 1
-    n_fft = 2 ** int(np.ceil(np.log2(n)))   # next power of 2 → fast FFT
+    n_fft = 2 ** int(np.ceil(np.log2(n)))
 
     S1 = np.fft.rfft(sig1, n=n_fft)
     S2 = np.fft.rfft(sig2, n=n_fft)
 
-    # Cross-spectrum with PHAT weighting (keep only phase)
     G      = S1 * np.conj(S2)
     G_phat = G / (np.abs(G) + 1e-10)
+    gcc    = np.fft.irfft(G_phat, n=n_fft)
 
-    # IFFT → GCC-PHAT function in the lag domain
-    gcc = np.fft.irfft(G_phat, n=n_fft)
-
-    # Find the lag with the highest peak
     tau = int(np.argmax(np.abs(gcc)))
-
-    # Convert to signed delay (lags > n_fft/2 are negative delays)
     if tau > n_fft // 2:
         tau -= n_fft
 
     return tau
 
 
-def _detect_onset(signal, sr, window_ms=50, noise_s=2.0, margin_db=10):
+def _detect_onset(signal, sr, window_ms=50, threshold_db=-40):
     """
-    Detects the onset of a signal using a threshold relative to the noise floor.
-
-    Parameters
-    ----------
-    signal    : np.ndarray   audio signal
-    sr        : int          sample rate
-    window_ms : float        RMS window size in ms
-    noise_s   : float        seconds at the start used to estimate noise floor
-    margin_db : float        dB above noise floor to set the threshold
-
-    Returns
-    -------
-    onset : int   sample index of the detected onset
+    Detects the onset of a signal using a fixed absolute RMS threshold in dBFS.
+    Returns the sample index of the first window that exceeds threshold_db.
     """
-    window      = int(window_ms / 1000 * sr)
-    noise_samps = int(noise_s * sr)
-
-    # Estimate noise floor from the first noise_s seconds
-    rms_noise = np.sqrt(np.mean(signal[:noise_samps] ** 2)) + 1e-12
-    threshold = rms_noise * 10 ** (margin_db / 20)
+    window    = int(window_ms / 1000 * sr)
+    threshold = 10 ** (threshold_db / 20)
 
     for i in range(0, len(signal) - window, window):
         rms = np.sqrt(np.mean(signal[i:i + window] ** 2))
@@ -1033,12 +1004,12 @@ def _find_wav(root, mic, angle, pat_file):
 
 def _pattern_to_regex(pattern):
     """
-    Converts a filename pattern with {H} and {V} placeholders to a regex
-    with named groups. Format specs (e.g. :03d) are ignored.
+    Converts a filename pattern with placeholders to a named-group regex.
+    Format specs (e.g. :03d) are ignored.
 
     Example
     -------
-    'mic_{H:03d}_ang_forte_{V:03d}.wav'  →  'mic_(?P<H>\\d+)_ang_forte_(?P<V>\\d+)\\.wav'
+    'mic_{MIC}_ang_forte_{H}.wav'  →  'mic_(?P<MIC>\\d+)_ang_forte_(?P<H>\\d+)\\.wav'
     """
     result = ''
     last   = 0
