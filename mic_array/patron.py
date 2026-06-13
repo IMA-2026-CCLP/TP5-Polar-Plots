@@ -18,25 +18,25 @@ class MicArray:
 
     Attributes
     ----------
-    tensor     : np.ndarray  shape (n_angles, n_elevations, n_samples)
+    tensor     : np.ndarray  shape (n_angles, n_thetas, n_samples)
     sr         : int         sample rate in Hz
     angles     : list        azimuth angles in degrees  [0, 10, ..., 180]
-    elevations : list        elevation labels — 'ref' or degrees [0, 10, ..., 180]
+    thetas : list        theta labels — 'ref' or degrees [0, 10, ..., 180]
     """
 
-    def __init__(self, tensor, sr=44100, angles=None, elevations=None):
-        self.tensor = tensor   # (n_angles, n_elevations, n_samples)
+    def __init__(self, tensor, sr=44100, angles=None, thetas=None):
+        self.tensor = tensor   # (n_angles, n_thetas, n_samples)
         self.sr     = sr
 
-        self.n_angles, self.n_elevations, self.n_samples = tensor.shape
+        self.n_angles, self.n_thetas, self.n_samples = tensor.shape
 
         # Azimuth values: [0, 10, ..., 180] by default
         self.angles = angles if angles is not None \
                       else list(range(0, self.n_angles * 10, 10))
 
-        # Elevation labels: ['ref', 0, 10, ..., 180] by default
-        self.elevations = elevations if elevations is not None \
-                          else ['ref'] + list(range(0, (self.n_elevations - 1) * 10, 10))
+        # Theta labels: ['ref', 0, 10, ..., 180] by default
+        self.thetas = thetas if thetas is not None \
+                          else ['ref'] + list(range(0, (self.n_thetas - 1) * 10, 10))
 
         # Downsampling factor for plots (1 = no downsampling)
         self.downsampling_graph = 10
@@ -44,15 +44,27 @@ class MicArray:
         # Smoothing window for envelope in ms (0 = no smoothing)
         self.smoothing_ms = 20
 
-        # Calibration factors in dB (K per elevation), None until calibrate() is called
-        self.calibration = None
-        self._is_spl     = False
+        # Calibration factors in dB (K per theta), None until calibrate() is called
+        self.calibration     = None
+        self._is_spl         = False
+        self._is_compensated = False
+        self._is_normalized  = False
 
         # Leq results, None until compute_leq() is called
         self.leq_freqs  = None
         self.leq_levels = None
         self.leq_bands  = None
         self.leq_global = None
+
+        # SPL results (RMS over active frames), None until compute_spl() is called
+        self.spl_freqs  = None
+        self.spl_levels = None
+        self.spl_global = None
+
+        # Directivity results (relative to ref mic per take), None until compute_directivity()
+        self.dir_freqs  = None
+        self.dir_levels = None
+        self.dir_global = None
 
         # Note segments, None until extract_all_notes() is called
         self.notes = None
@@ -71,7 +83,7 @@ class MicArray:
         """
         Load a MicArray from a .npy or .npz file.
 
-        .npz files also restore sr, angles and elevations saved by save().
+        .npz files also restore sr, angles and thetas saved by save().
         For .npy files, sr must be provided manually.
 
         Parameters
@@ -90,8 +102,10 @@ class MicArray:
             tensor     = data['tensor']
             sr         = int(data['sr'])
             angles     = data['azimuth'].tolist()
-            elevations = data['elevation'].tolist()
-            obj = cls(tensor, sr=sr, angles=angles, elevations=elevations)
+            # backward compat: archivos viejos guardaban la clave como 'elevation'
+            thetas = (data['theta'].tolist() if 'theta' in data
+                      else data['elevation'].tolist())
+            obj = cls(tensor, sr=sr, angles=angles, thetas=thetas)
             if 'calibration' in data:
                 obj.calibration = data['calibration']
             return obj
@@ -108,8 +122,8 @@ class MicArray:
         reference mic files. {H} captures the azimuth angle.
 
         Vertical axis convention (auto-detected from array_pattern):
-          {MIC} → mic number (1–19), converted to elevation angle: (mic-1)*10
-          {V}   → elevation angle in degrees (0, 10 .. 180), used directly
+          {MIC} → mic number (1–19), converted to theta angle: (mic-1)*10
+          {V}   → theta angle in degrees (0, 10 .. 180), used directly
 
         Parameters
         ----------
@@ -139,7 +153,7 @@ class MicArray:
         v_values = set()
         sr       = None
 
-        # ── Step 1: discover azimuths, elevations and sr ─────────────────────
+        # ── Step 1: discover azimuths, thetas and sr ─────────────────────
         for f in sorted(path.glob("*.wav")):
             m = arr_regex.search(f.name)
             if m:
@@ -156,13 +170,13 @@ class MicArray:
                         _, sr = sf.read(f)
 
         azimuths    = sorted(azimuths)
-        # Convert v_values to elevation angles
-        el_angles   = sorted(v_values) if v_is_angle \
+        # Convert v_values to theta angles
+        th_angles   = sorted(v_values) if v_is_angle \
                       else sorted((v - 1) * 10 for v in v_values)
-        elevations  = (['ref'] if ref_regex else []) + el_angles
+        thetas  = (['ref'] if ref_regex else []) + th_angles
 
         print(f"  Azimuths   : {azimuths}")
-        print(f"  Elevations : {elevations}")
+        print(f"  Thetas : {thetas}")
         print(f"  Sample rate: {sr} Hz")
 
         # ── Step 2: find max length ───────────────────────────────────────────
@@ -175,7 +189,7 @@ class MicArray:
         print(f"  Max length : {max_len} samples  ({max_len / sr:.2f} s)")
 
         # ── Step 3: build tensor (zero-padded) ────────────────────────────────
-        data = np.zeros((len(azimuths), len(elevations), max_len), dtype=np.float32)
+        data = np.zeros((len(azimuths), len(thetas), max_len), dtype=np.float32)
 
         print(f"\n  Building tensor {data.shape} ...")
         for f in sorted(path.glob("*.wav")):
@@ -184,31 +198,31 @@ class MicArray:
                 i_az = azimuths.index(int(m.group('H')))
                 v    = int(m.group(v_key))
                 el   = v if v_is_angle else (v - 1) * 10
-                i_el = elevations.index(el)
+                i_th = thetas.index(el)
                 sig, _ = sf.read(f)
-                data[i_az, i_el, :len(sig)] = sig
+                data[i_az, i_th, :len(sig)] = sig
                 continue
             if ref_regex:
                 m = ref_regex.search(f.name)
                 if m:
                     i_az = azimuths.index(int(m.group('H')))
-                    i_el = elevations.index('ref')
+                    i_th = thetas.index('ref')
                     sig, _ = sf.read(f)
-                    data[i_az, i_el, :len(sig)] = sig
+                    data[i_az, i_th, :len(sig)] = sig
 
         for az in azimuths:
             print(f"    {az:>4}° → OK")
 
         print(f"\n  Done. Shape: {data.shape}  ({data.nbytes/1024/1024:.1f} MB)")
 
-        return cls(data, sr, angles=azimuths, elevations=elevations)
+        return cls(data, sr, angles=azimuths, thetas=thetas)
 
     @classmethod
     def from_export(cls, path, pattern='mic_{H}_{V}.wav'):
         """
         Load a MicArray from a flat folder of WAV files exported by export_wavs().
 
-        {H} = azimuth angle, {V} = elevation angle in degrees.
+        {H} = azimuth angle, {V} = theta angle in degrees.
 
         Parameters
         ----------
@@ -238,10 +252,10 @@ class MicArray:
                 _, sr = sf.read(f)
 
         azimuths   = sorted(azimuths)
-        elevations = sorted(el_set)   # V is already elevation angle
+        thetas = sorted(el_set)   # V is already theta angle
 
         print(f"  Azimuths   : {azimuths}")
-        print(f"  Elevations : {elevations}")
+        print(f"  Thetas : {thetas}")
         print(f"  Sample rate: {sr} Hz")
 
         max_len = 0
@@ -252,7 +266,7 @@ class MicArray:
 
         print(f"  Max length : {max_len} samples  ({max_len / sr:.2f} s)")
 
-        data = np.zeros((len(azimuths), len(elevations), max_len), dtype=np.float32)
+        data = np.zeros((len(azimuths), len(thetas), max_len), dtype=np.float32)
 
         print(f"\n  Building tensor {data.shape} ...")
         for f in sorted(path.glob("*.wav")):
@@ -260,13 +274,13 @@ class MicArray:
             if not m:
                 continue
             i_az = azimuths.index(int(m.group('H')))
-            i_el = elevations.index(int(m.group('V')))
+            i_th = thetas.index(int(m.group('V')))
             sig, _ = sf.read(f)
-            data[i_az, i_el, :len(sig)] = sig
+            data[i_az, i_th, :len(sig)] = sig
 
         print(f"  Done. Shape: {data.shape}  ({data.nbytes/1024/1024:.1f} MB)")
 
-        return cls(data, sr, angles=azimuths, elevations=elevations)
+        return cls(data, sr, angles=azimuths, thetas=thetas)
 
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -279,11 +293,11 @@ class MicArray:
             raise ValueError(f"Azimuth {azimuth}° not found. Available: {self.angles}")
         return self.angles.index(azimuth)
 
-    def _el_to_col(self, elevation):
-        """Maps an elevation label to its column index in the tensor."""
-        if elevation not in self.elevations:
-            raise ValueError(f"Elevation '{elevation}' not found. Available: {self.elevations}")
-        return self.elevations.index(elevation)
+    def _th_to_col(self, theta):
+        """Maps an theta label to its column index in the tensor."""
+        if theta not in self.thetas:
+            raise ValueError(f"Theta '{theta}' not found. Available: {self.thetas}")
+        return self.thetas.index(theta)
 
     def _prepare(self, signal, envelope):
         """
@@ -316,7 +330,7 @@ class MicArray:
             tensor     = self.tensor.copy(),
             sr         = self.sr,
             angles     = self.angles.copy(),
-            elevations = self.elevations.copy(),
+            thetas = self.thetas.copy(),
         )
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -325,10 +339,10 @@ class MicArray:
 
     def export_wavs(self, path, nota=''):
         """
-        Exports all elevations and takes as individual WAV files.
+        Exports all thetas and takes as individual WAV files.
 
-        File naming: mic_{azimuth}_{elevation}_{nota}.wav
-        elevation 'ref' is skipped.
+        File naming: mic_{azimuth}_{theta}_{nota}.wav
+        theta 'ref' is skipped.
 
         Parameters
         ----------
@@ -340,11 +354,11 @@ class MicArray:
 
         count = 0
         for i_az, azimuth in enumerate(self.angles):
-            for i_el, el in enumerate(self.elevations):
+            for i_th, el in enumerate(self.thetas):
                 if el == 'ref':
                     continue
                 filename = f"mic_{azimuth}_{el}_{nota}.wav"
-                signal   = self.tensor[i_az, i_el, :].astype(np.float32)
+                signal   = self.tensor[i_az, i_th, :].astype(np.float32)
                 sf.write(out / filename, signal, self.sr)
                 count += 1
 
@@ -372,7 +386,7 @@ class MicArray:
             tensor    = tensor_to_save,
             sr        = np.array(self.sr),
             azimuth   = np.array(self.angles),
-            elevation = np.array(self.elevations, dtype=object),
+            theta = np.array(self.thetas, dtype=object),
         )
         if self.calibration is not None:
             kwargs['calibration'] = self.calibration
@@ -386,10 +400,10 @@ class MicArray:
 
     def calibrate(self, path, array_pattern, ref_pattern=None, spl_cal=94):
         """
-        Loads calibration WAV files and computes a K factor (dB) per elevation.
+        Loads calibration WAV files and computes a K factor (dB) per theta.
 
         Each file must contain a 1kHz tone recorded at spl_cal dB SPL.
-        K[i_el] = spl_cal - 20*log10(RMS_cal)  →  stored in self.calibration.
+        K[i_th] = spl_cal - 20*log10(RMS_cal)  →  stored in self.calibration.
 
         Parameters
         ----------
@@ -398,43 +412,47 @@ class MicArray:
         ref_pattern   : str or None   pattern for the reference mic (optional)
         spl_cal       : float         SPL level of the calibration tone (default: 94)
         """
+        if self.calibration is not None:
+            print("  [WARN] Already calibrated. Run calibrate() only once.")
+            return
+
         path      = Path(path)
         arr_regex = _pattern_to_regex(array_pattern)
         ref_regex = _pattern_to_regex(ref_pattern) if ref_pattern else None
         v_key     = 'MIC' if '{MIC' in array_pattern else 'V'
 
-        calibration = np.full(self.n_elevations, np.nan)
+        calibration = np.full(self.n_thetas, np.nan)
 
         for f in sorted(path.glob('*.wav')):
             m = arr_regex.search(f.name)
             if m:
                 v  = int(m.group(v_key))
                 el = v if v_key == 'V' else (v - 1) * 10
-                if el not in self.elevations:
+                if el not in self.thetas:
                     continue
-                i_el = self._el_to_col(el)
+                i_th = self._th_to_col(el)
                 sig, _ = sf.read(f)
                 rms    = np.sqrt(np.mean(np.asarray(sig, dtype=np.float64) ** 2))
-                calibration[i_el] = spl_cal - 20 * np.log10(rms + 1e-12)
+                calibration[i_th] = spl_cal - 20 * np.log10(rms + 1e-12)
                 continue
 
             if ref_regex:
                 m = ref_regex.search(f.name)
-                if m and 'ref' in self.elevations:
-                    i_el   = self._el_to_col('ref')
+                if m and 'ref' in self.thetas:
+                    i_th   = self._th_to_col('ref')
                     sig, _ = sf.read(f)
                     rms    = np.sqrt(np.mean(np.asarray(sig, dtype=np.float64) ** 2))
-                    calibration[i_el] = spl_cal - 20 * np.log10(rms + 1e-12)
+                    calibration[i_th] = spl_cal - 20 * np.log10(rms + 1e-12)
 
-        missing = [self.elevations[i] for i in range(self.n_elevations) if np.isnan(calibration[i])]
+        missing = [self.thetas[i] for i in range(self.n_thetas) if np.isnan(calibration[i])]
         if missing:
-            print(f"  [WARN] No calibration file found for elevations: {missing}")
+            print(f"  [WARN] No calibration file found for thetas: {missing}")
 
         self.calibration = calibration
-        print(f"\n  Calibration done — {np.sum(~np.isnan(calibration))} / {self.n_elevations} elevations")
-        for i_el, el in enumerate(self.elevations):
+        print(f"\n  Calibration done — {np.sum(~np.isnan(calibration))} / {self.n_thetas} thetas")
+        for i_th, el in enumerate(self.thetas):
             label = 'ref' if el == 'ref' else f'{el}°'
-            k     = calibration[i_el]
+            k     = calibration[i_th]
             print(f"    {label:>5}  K = {k:.2f} dB" if not np.isnan(k) else f"    {label:>5}  K = —")
 
     def to_spl(self):
@@ -462,19 +480,21 @@ class MicArray:
         P_REF = 20e-6
         scale = (P_REF * 10 ** (self.calibration / 20)).astype(np.float32)
         self.tensor *= scale[np.newaxis, :, np.newaxis]
-        self._is_spl = True
+        self._is_spl         = True
+        self._is_compensated = False
+        self._is_normalized  = False
         print("  Tensor converted to Pa (SPL units). Use save() safely — it undoes this before writing.")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Alignment / Processing methods
     # ──────────────────────────────────────────────────────────────────────────
 
-    def align_takes(self, target_onset=1.0, elevation='ref', threshold_dB=-40):
+    def align_takes(self, target_onset=1.0, theta='ref', threshold_dB=-40):
         """
         Aligns all azimuth takes so their onset lands at target_onset seconds.
 
-        For each take, detects the onset of the specified elevation and shifts
-        ALL elevations of that take by the same amount, so all takes share
+        For each take, detects the onset of the specified theta and shifts
+        ALL thetas of that take by the same amount, so all takes share
         a common absolute time position.
 
         Run this BEFORE align_ref. Modifies the tensor in-place.
@@ -482,27 +502,27 @@ class MicArray:
         Parameters
         ----------
         target_onset  : float          desired onset time in seconds (default: 1.0)
-        elevation     : int or 'ref'   elevation used to detect onset (default: 'ref')
+        theta     : int or 'ref'   theta used to detect onset (default: 'ref')
         threshold_dB  : float          RMS level in dBFS that defines the onset
                                        (default: -40). Lower → more sensitive.
         """
         if not self.tensor.flags['WRITEABLE']:
             self.tensor = np.array(self.tensor, dtype=np.float32)
 
-        i_el           = self._el_to_col(elevation)
+        i_th           = self._th_to_col(theta)
         target_samples = int(target_onset * self.sr)
-        el_label       = 'ref' if elevation == 'ref' else f'{elevation}°'
+        th_label       = 'ref' if theta == 'ref' else f'{theta}°'
 
         print(f"  Target onset : {target_onset:.2f} s  ({target_samples} smp)")
-        print(f"  Ref elevation: {el_label}  |  threshold = {threshold_dB} dBFS\n")
+        print(f"  Ref theta: {th_label}  |  threshold = {threshold_dB} dBFS\n")
 
         for i_az in range(self.n_angles):
-            signal = self.tensor[i_az, i_el, :].astype(np.float64)
+            signal = self.tensor[i_az, i_th, :].astype(np.float64)
             onset  = _detect_onset(signal, self.sr, threshold_dB=threshold_dB)
             shift  = target_samples - onset  # >0 → retrasa  |  <0 → adelanta
 
             if shift != 0:
-                tmp = np.zeros((self.n_elevations, self.n_samples), dtype=np.float32)
+                tmp = np.zeros((self.n_thetas, self.n_samples), dtype=np.float32)
                 if shift > 0:
                     tmp[:, shift:] = self.tensor[i_az, :, :self.n_samples - shift]
                 else:
@@ -515,28 +535,28 @@ class MicArray:
 
         print("\n  Take alignment done.")
 
-    def align_to_ref(self, elevation='ref'):
+    def align_to_ref(self, theta='ref'):
         """
-        Aligns each elevation to the reference using GCC-PHAT.
+        Aligns each theta to the reference using GCC-PHAT.
 
-        For each azimuth take and each non-ref elevation:
+        For each azimuth take and each non-ref theta:
           1. Computes GCC-PHAT(ref, el_i) → TDOA τᵢ
           2. Shifts el_i by τᵢ so it aligns temporally with ref
 
-        The reference elevation is left untouched.
+        The reference theta is left untouched.
         Modifies the tensor in-place.
 
         Parameters
         ----------
-        elevation : int or 'ref'   reference elevation label (default: 'ref')
+        theta : int or 'ref'   reference theta label (default: 'ref')
         """
         if not self.tensor.flags['WRITEABLE']:
             self.tensor = np.array(self.tensor, dtype=np.float32)
 
-        i_ref    = self._el_to_col(elevation)
-        other_ix = [i for i in range(self.n_elevations) if i != i_ref]
+        i_ref    = self._th_to_col(theta)
+        other_ix = [i for i in range(self.n_thetas) if i != i_ref]
 
-        print(f"  Aligning {len(other_ix)} elevations to '{elevation}'...\n")
+        print(f"  Aligning {len(other_ix)} thetas to '{theta}'...\n")
 
         for i_az in range(self.n_angles):
             ref_sig = self.tensor[i_az, i_ref, :].astype(np.float64)
@@ -546,7 +566,7 @@ class MicArray:
 
             tau = int(np.round(np.mean(tdoas)))
 
-            # shift all elevations by the same tau — ref stays untouched
+            # shift all thetas by the same tau — ref stays untouched
             tmp = np.zeros((len(other_ix), self.n_samples), dtype=np.float32)
             if tau > 0:
                 tmp[:, tau:] = self.tensor[i_az][other_ix, :-tau]
@@ -562,44 +582,55 @@ class MicArray:
 
         print("\n  Alignment done.")
 
-    def normalize_takes(self, elevation='ref', ref_azimuth=0):
+    def level_compensation(self, theta='ref', ref_azimuth=0):
         """
-        Normalizes the level of all takes relative to a reference take.
+        Equalizes the level of all azimuth takes on the tensor in-place.
 
-        Computes the global RMS of the specified elevation in each take and
-        scales ALL elevations in that take to match the reference.
+        Computes the RMS of the specified theta in each take and applies a gain
+        to ALL thetas of that take so every take matches the reference level.
+        Compensates for the singer singing louder or softer on each rotation.
+
+        Must be called after to_spl() and before compute_leq() / compute_spl().
+        Resets any previously computed leq/spl results.
 
         Parameters
         ----------
-        elevation   : int or 'ref'   elevation used to measure level (default: 'ref')
-        ref_azimuth : int            azimuth of the reference take (default: 0)
+        theta       : int or 'ref'   theta used to measure level (default: 'ref')
+        ref_azimuth : int            azimuth take used as the reference (default: 0)
         """
+        if not self._is_spl:
+            raise RuntimeError("Run calibrate() + to_spl() first.")
+
         if not self.tensor.flags['WRITEABLE']:
             self.tensor = np.array(self.tensor, dtype=np.float32)
 
-        i_el     = self._el_to_col(elevation)
+        i_th     = self._th_to_col(theta)
         i_ref_az = self._az_to_row(ref_azimuth)
+        rms_ref  = np.sqrt(np.mean(self.tensor[i_ref_az, i_th, :] ** 2))
+        ref_spl  = 20 * np.log10(rms_ref / 20e-6)
 
-        rms_ref = np.sqrt(np.mean(self.tensor[i_ref_az, i_el, :] ** 2))
-
-        print(f"  Reference: elevation '{elevation}' at {ref_azimuth}°"
-              f"  RMS = {20*np.log10(rms_ref):.1f} dBFS\n")
+        print(f"  Reference: theta '{theta}' at {ref_azimuth}°"
+              f"  SPL = {ref_spl:.1f} dB SPL\n")
 
         for i_az in range(self.n_angles):
-            rms_i  = np.sqrt(np.mean(self.tensor[i_az, i_el, :] ** 2))
-            gain   = rms_ref / (rms_i + 1e-12)
+            rms_i   = np.sqrt(np.mean(self.tensor[i_az, i_th, :] ** 2))
+            gain    = rms_ref / (rms_i + 1e-12)
             self.tensor[i_az, :, :] *= gain
-
             diff_dB = 20 * np.log10(gain)
             marker  = "  ← ref" if i_az == i_ref_az else ""
-            print(f"  {self.angles[i_az]:>4}°  RMS = {20*np.log10(rms_i):.1f} dBFS"
-                  f"  gain = {diff_dB:+.1f} dB{marker}")
+            print(f"  {self.angles[i_az]:>4}°  {20*np.log10(rms_i/20e-6):.1f} → "
+                  f"{20*np.log10(rms_i*gain/20e-6):.1f} dB SPL"
+                  f"  Δ = {diff_dB:+.1f} dB{marker}")
 
-        print("\n  Normalization done.")
+        self._is_compensated = True
+        self._is_normalized  = False
+        self.leq_freqs  = self.leq_levels = self.leq_bands = self.leq_global = None
+        self.spl_freqs  = self.spl_levels = self.spl_global = None
+        print("\n  level_compensation done.")
 
     def hpf(self, cutoff_hz):
         """
-        Applies a 4th-order Butterworth high-pass filter to every elevation
+        Applies a 4th-order Butterworth high-pass filter to every theta
         of every take. Modifies the tensor in-place.
 
         Parameters
@@ -614,24 +645,24 @@ class MicArray:
         sos = butter(4, cutoff_hz, btype='high', fs=self.sr, output='sos')
 
         for i_az in range(self.n_angles):
-            for i_el in range(self.n_elevations):
-                self.tensor[i_az, i_el, :] = sosfilt(
-                    sos, self.tensor[i_az, i_el, :]
+            for i_th in range(self.n_thetas):
+                self.tensor[i_az, i_th, :] = sosfilt(
+                    sos, self.tensor[i_az, i_th, :]
                 ).astype(np.float32)
 
         print(f"  HPF applied — {cutoff_hz} Hz, 4th-order Butterworth"
-              f"  ({self.n_angles} takes × {self.n_elevations} elevations)")
+              f"  ({self.n_angles} takes × {self.n_thetas} thetas)")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Note detection methods
     # ──────────────────────────────────────────────────────────────────────────
 
-    def detect_notes(self, scale=None, elevation='ref', hop_length=512,
+    def detect_notes(self, scale=None, theta='ref', hop_length=512,
                      tolerance_cents=50, min_purity=0.8, confidence=None,
                      start_s=0.0, gradient_thresh=25.0):
         """
         Detects the interval (start/end in samples) of each note of a scale
-        in every take, using pyin on the specified elevation.
+        in every take, using pyin on the specified theta.
 
         Combines pyin F0 tracking with gradient analysis: frames where the F0
         is moving faster than gradient_thresh cents/frame are classified as
@@ -645,7 +676,7 @@ class MicArray:
         Parameters
         ----------
         scale            : dict           {note_name: freq_hz} — uses self.scale if None
-        elevation        : int or 'ref'   elevation to analyze (default: 'ref')
+        theta        : int or 'ref'   theta to analyze (default: 'ref')
         hop_length       : int            pyin hop length in samples (default: 512)
         tolerance_cents  : float          max deviation in cents to assign a frame (default: 50)
         min_purity       : float          minimum fraction of correctly assigned frames
@@ -671,7 +702,7 @@ class MicArray:
         if scale is None:
             raise RuntimeError("Provide a scale or set self.scale first.")
 
-        i_el       = self._el_to_col(elevation)
+        i_th       = self._th_to_col(theta)
         note_names = list(scale.keys())
         note_freqs = np.array(list(scale.values()))
         fmin       = min(note_freqs) * 0.9
@@ -686,7 +717,7 @@ class MicArray:
         segmentos = []
 
         for i_az in range(self.n_angles):
-            signal = self.tensor[i_az, i_el, start_sample:].astype(np.float32)
+            signal = self.tensor[i_az, i_th, start_sample:].astype(np.float32)
 
             f0, _, _ = librosa.pyin(
                 signal, fmin=fmin, fmax=fmax,
@@ -944,7 +975,7 @@ class MicArray:
 
         Returns
         -------
-        MicArray with shape (n_angles, n_elevations, max_note_length)
+        MicArray with shape (n_angles, n_thetas, max_note_length)
         """
         lengths = [
             seg[note]['end'] - seg[note]['start']
@@ -954,7 +985,7 @@ class MicArray:
             raise ValueError(f"Note '{note}' not found in any take.")
 
         max_len = max(lengths)
-        data    = np.zeros((self.n_angles, self.n_elevations, max_len), dtype=np.float32)
+        data    = np.zeros((self.n_angles, self.n_thetas, max_len), dtype=np.float32)
 
         for i_az, seg in enumerate(segmentos):
             if note not in seg:
@@ -968,7 +999,7 @@ class MicArray:
               f"  ({max_len / self.sr * 1000:.0f} ms max)")
 
         obj = MicArray(data, sr=self.sr, angles=self.angles.copy(),
-                       elevations=self.elevations.copy())
+                       thetas=self.thetas.copy())
         obj.calibration = self.calibration.copy() if self.calibration is not None else None
         obj._is_spl     = self._is_spl
         return obj
@@ -998,7 +1029,7 @@ class MicArray:
 
         Results are stored as attributes:
             self.leq_freqs   : np.ndarray  center frequencies  (n_bands,)
-            self.leq_levels  : np.ndarray  Leq in dB           (n_angles, n_elevations, n_bands)
+            self.leq_levels  : np.ndarray  Leq in dB           (n_angles, n_thetas, n_bands)
             self.leq_bands   : str         band resolution used ('1/3' or 'octave')
 
         Parameters
@@ -1015,18 +1046,18 @@ class MicArray:
 
         fb      = FilterBank(sr=self.sr, bands=bands)
         n_bands = len(fb.center_freqs_nominal)
-        levels  = np.zeros((self.n_angles, self.n_elevations, n_bands), dtype=np.float32)
+        levels  = np.zeros((self.n_angles, self.n_thetas, n_bands), dtype=np.float32)
 
-        total = self.n_angles * self.n_elevations
+        total = self.n_angles * self.n_thetas
         done  = 0
         for i_az in range(self.n_angles):
-            for i_el in range(self.n_elevations):
-                signal = self.tensor[i_az, i_el, :].astype(np.float64)
+            for i_th in range(self.n_thetas):
+                signal = self.tensor[i_az, i_th, :].astype(np.float64)
                 _, lev = fb.leq(signal, p_ref=p_ref, method=method)
-                levels[i_az, i_el, :] = lev
+                levels[i_az, i_th, :] = lev
                 done += 1
                 print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
-                      f"  el={self.elevations[i_el]}", end='')
+                      f"  el={self.thetas[i_th]}", end='')
 
         self.leq_freqs  = np.array(fb.center_freqs_nominal, dtype=float)
         self.leq_levels = levels
@@ -1056,23 +1087,197 @@ class MicArray:
 
         print(f"\n  compute_leq_notes done — {len(self.notes)} notas  |  bands={bands}  method={method}")
 
-    def plot_leq_global(self, elevation='ref', yrange=None, title=None):
+    def compute_directivity_notes(self, bands='1/3', threshold_spl=30,
+                                   ref_azimuth=0, ref_theta_plot=0):
         """
-        Bar chart of global Leq per azimuth for a given elevation.
+        Runs compute_directivity() on each note in self.notes.
+        Requires extract_all_notes() and to_spl() to have been called first.
 
         Parameters
         ----------
-        elevation : int or 'ref'          elevation to plot (default: 'ref')
+        bands          : str    '1/3' or 'octave'
+        threshold_spl  : float  VAD threshold in dB SPL (default 30)
+        ref_azimuth    : int    reference azimuth for normalization (default 0)
+        ref_theta_plot : int    reference theta for normalization (default 0)
+        """
+        if self.notes is None:
+            raise RuntimeError("Run extract_all_notes() first.")
+
+        for nota, ma_nota in self.notes.items():
+            print(f"  {nota} ...", end=' ')
+            ma_nota.compute_directivity(
+                bands=bands,
+                threshold_spl=threshold_spl,
+                ref_azimuth=ref_azimuth,
+                ref_theta_plot=ref_theta_plot,
+            )
+            print("OK")
+
+        print(f"\n  compute_directivity_notes done — {len(self.notes)} notas  |  bands={bands}")
+
+    def compute_spl(self, bands='1/3', threshold_spl=30, window_ms=50):
+        """
+        Computes RMS-based SPL over active frames (VAD) for every position.
+
+        Requires to_spl() to have been called first. Frames with short-term RMS
+        below threshold_spl are excluded so silence and pauses don't affect the result.
+
+        Per-band SPL uses FFT-based rectangular bands (same as method='fft' in
+        compute_leq). For the polar pattern this is sufficient.
+
+        Parameters
+        ----------
+        bands         : str   '1/3' or 'octave' (default: '1/3')
+        threshold_spl : float frames below this dB SPL are treated as silence (default: 30)
+        window_ms     : float VAD window length in ms (default: 50)
+
+        Stores
+        ------
+        self.spl_freqs   : np.ndarray  center frequencies         (n_bands,)
+        self.spl_levels  : np.ndarray  SPL per band in dB SPL     (n_angles, n_thetas, n_bands)
+        self.spl_global  : np.ndarray  broadband SPL in dB SPL    (n_angles, n_thetas)
+        """
+        if not self._is_spl:
+            raise RuntimeError("Run to_spl() first.")
+
+        from filterbank import FilterBank
+
+        P_REF   = 20e-6
+        fb      = FilterBank(sr=self.sr, bands=bands)
+        n_bands = len(fb.center_freqs_nominal)
+        levels  = np.zeros((self.n_angles, self.n_thetas, n_bands), dtype=np.float32)
+        global_ = np.zeros((self.n_angles, self.n_thetas), dtype=np.float32)
+
+        total = self.n_angles * self.n_thetas
+        done  = 0
+
+        for i_az in range(self.n_angles):
+            for i_th in range(self.n_thetas):
+                signal = self.tensor[i_az, i_th, :].astype(np.float64)
+                mask   = _vad_mask(signal, self.sr, threshold_spl, window_ms, P_REF)
+                active = signal[mask]
+
+                if len(active) >= 2:
+                    rms = np.sqrt(np.mean(active ** 2))
+                    global_[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
+                    _, band_levels = fb.leq(active, p_ref=P_REF, method='fft')
+                    levels[i_az, i_th, :] = band_levels
+
+                done += 1
+                print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
+                      f"  el={self.thetas[i_th]}", end='')
+
+        self.spl_freqs  = np.array(fb.center_freqs_nominal, dtype=float)
+        self.spl_levels = levels
+        self.spl_global = global_
+
+        print(f"\n  compute_spl done — {bands} octava  |  shape {levels.shape}"
+              f"  |  threshold {threshold_spl} dB SPL")
+
+    def compute_directivity(self, bands='1/3', threshold_spl=30, window_ms=50,
+                            ref_theta='ref', ref_azimuth=0, ref_theta_plot=0):
+        """
+        Computes directivity levels relative to the reference mic of each take,
+        then normalizes so that (ref_azimuth, ref_theta_plot) = 0 dB per band.
+
+        Two-step process:
+          1. Per-take cancellation:
+             dir[az, theta, band] = spl[az, theta, band] - spl[az, ref_theta, band]
+             Removes take-to-take spectral variability of the singer since both
+             mics record the same phonation simultaneously.
+
+          2. Per-band normalization to plot reference:
+             dir[az, theta, band] -= dir[ref_azimuth, ref_theta_plot, band]
+             Makes the chosen reference direction = 0 dB in every band.
+
+        Does NOT require level_compensation() or normalize().
+
+        Parameters
+        ----------
+        bands           : str          '1/3' or 'octave' (default: '1/3')
+        threshold_spl   : float        VAD threshold in dB SPL (default: 30)
+        window_ms       : float        VAD window in ms (default: 50)
+        ref_theta       : int or 'ref' mic used as per-take reference (default: 'ref')
+        ref_azimuth     : int          azimuth of the plot reference direction (default: 0)
+        ref_theta_plot  : int or 'ref' theta of the plot reference direction (default: 0)
+
+        Stores
+        ------
+        self.dir_freqs   : np.ndarray  center frequencies       (n_bands,)
+        self.dir_levels  : np.ndarray  directivity per band dB  (n_angles, n_thetas, n_bands)
+        self.dir_global  : np.ndarray  broadband directivity dB (n_angles, n_thetas)
+        """
+        if not self._is_spl:
+            raise RuntimeError("Run calibrate() + to_spl() first.")
+
+        from filterbank import FilterBank
+
+        P_REF   = 20e-6
+        fb      = FilterBank(sr=self.sr, bands=bands)
+        n_bands = len(fb.center_freqs_nominal)
+
+        spl_levels = np.zeros((self.n_angles, self.n_thetas, n_bands), dtype=np.float32)
+        spl_global = np.zeros((self.n_angles, self.n_thetas),          dtype=np.float32)
+
+        total = self.n_angles * self.n_thetas
+        done  = 0
+
+        for i_az in range(self.n_angles):
+            for i_th in range(self.n_thetas):
+                signal = self.tensor[i_az, i_th, :].astype(np.float64)
+                mask   = _vad_mask(signal, self.sr, threshold_spl, window_ms, P_REF)
+                active = signal[mask]
+
+                if len(active) >= 2:
+                    rms = np.sqrt(np.mean(active ** 2))
+                    spl_global[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
+                    _, band_levels = fb.leq(active, p_ref=P_REF, method='fft')
+                    spl_levels[i_az, i_th, :] = band_levels
+
+                done += 1
+                print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
+                      f"  el={self.thetas[i_th]}", end='')
+
+        # Step 1 — subtract ref mic per take (cancels singer's spectral variability)
+        i_ref      = self._th_to_col(ref_theta)
+        dir_levels = spl_levels - spl_levels[:, i_ref:i_ref+1, :]
+        dir_global = spl_global - spl_global[:, i_ref:i_ref+1]
+
+        # Step 2 — normalize to plot reference position per band
+        i_ref_az = self._az_to_row(ref_azimuth)
+        i_ref_th = self._th_to_col(ref_theta_plot)
+        self.dir_ref_spl        = spl_levels[i_ref_az, i_ref_th, :].copy()   # (n_bands,) dB SPL
+        self.dir_ref_spl_global = float(spl_global[i_ref_az, i_ref_th])
+        dir_levels -= dir_levels[i_ref_az, i_ref_th, :]          # (n_bands,) broadcasts
+        dir_global -= float(dir_global[i_ref_az, i_ref_th])
+
+        self.dir_freqs  = np.array(fb.center_freqs_nominal, dtype=float)
+        self.dir_levels = dir_levels
+        self.dir_global = dir_global
+        self._is_normalized = True
+
+        th_plot_label = 'ref' if ref_theta_plot == 'ref' else f'{ref_theta_plot}°'
+        print(f"\n  compute_directivity done — {bands} octava  |  shape {dir_levels.shape}"
+              f"  |  ref_mic='{ref_theta}'  |  ref_plot=({ref_azimuth}°, {th_plot_label})"
+              f"  |  threshold {threshold_spl} dB SPL")
+
+    def plot_leq_global(self, theta='ref', yrange=None, title=None):
+        """
+        Bar chart of global Leq per azimuth for a given theta.
+
+        Parameters
+        ----------
+        theta : int or 'ref'          theta to plot (default: 'ref')
         yrange    : [float, float] or None  y-axis range, e.g. [60, 100]
         title     : str or None             plot title (auto-generated if None)
         """
         if self.leq_global is None:
             raise RuntimeError("Run compute_leq() first.")
 
-        i_el     = self._el_to_col(elevation)
-        el_label = 'ref' if elevation == 'ref' else f'{elevation}°'
+        i_th     = self._th_to_col(theta)
+        th_label = 'ref' if theta == 'ref' else f'{theta}°'
         y_label  = 'dB SPL' if self._is_spl else 'dBFS'
-        levels   = self.leq_global[:, i_el]
+        levels   = self.leq_global[:, i_th]
         mean_e   = 10 * np.log10(np.mean(10 ** (levels / 10)))
 
         fig = go.Figure()
@@ -1089,7 +1294,7 @@ class MicArray:
                       annotation_text=f"media {mean_e:.1f} {y_label}",
                       annotation_position="top right")
         fig.update_layout(
-            title=title or f"Leq global — elevation {el_label}",
+            title=title or f"Leq global — theta {th_label}",
             xaxis_title="Azimut",
             yaxis=dict(title=y_label, range=yrange, gridcolor='lightgrey'),
             plot_bgcolor='white',
@@ -1098,14 +1303,14 @@ class MicArray:
         )
         fig.show()
 
-    def report_leq_global(self, elevation='ref'):
+    def report_leq_global(self, theta='ref'):
         """
         Returns a pandas DataFrame with the global Leq per azimuth for a given
-        elevation, plus an energy-averaged summary row.
+        theta, plus an energy-averaged summary row.
 
         Parameters
         ----------
-        elevation : int or 'ref'   elevation to report (default: 'ref')
+        theta : int or 'ref'   theta to report (default: 'ref')
         """
         import pandas as pd
         from IPython.display import display
@@ -1113,32 +1318,32 @@ class MicArray:
         if self.leq_global is None:
             raise RuntimeError("Run compute_leq() first.")
 
-        i_el     = self._el_to_col(elevation)
-        el_label = 'ref' if elevation == 'ref' else f'{elevation}°'
+        i_th     = self._th_to_col(theta)
+        th_label = 'ref' if theta == 'ref' else f'{theta}°'
         y_label  = 'dB SPL' if self._is_spl else 'dBFS'
-        levels   = self.leq_global[:, i_el]
+        levels   = self.leq_global[:, i_th]
         mean_e   = 10 * np.log10(np.mean(10 ** (levels / 10)))
 
         cols = {f"{az}°": round(float(lev), 1) for az, lev in zip(self.angles, levels)}
         cols['Media'] = round(float(mean_e), 1)
 
-        df = pd.DataFrame(cols, index=[f'Leq [{y_label}]  el: {el_label}'])
+        df = pd.DataFrame(cols, index=[f'Leq [{y_label}]  el: {th_label}'])
         display(df)
         return df
 
-    def plot_leq_by_note(self, elevation='ref', yrange=None, title=None):
+    def plot_leq_by_note(self, theta='ref', yrange=None, title=None):
         """
         For each note in self.notes, plots mean ± std of Leq global across azimuths.
 
-        Interpretation depends on elevation:
-          elevation='ref'  → level consistency of the singer between takes
-          elevation=N°     → directivity of the voice for that elevation angle
+        Interpretation depends on theta:
+          theta='ref'  → level consistency of the singer between takes
+          theta=N°     → directivity of the voice for that theta angle
 
         Requires extract_all_notes() and compute_leq_notes() first.
 
         Parameters
         ----------
-        elevation : int or 'ref'            elevation to analyze (default: 'ref')
+        theta : int or 'ref'            theta to analyze (default: 'ref')
         yrange    : [float, float] or None  y-axis range, e.g. [70, 100]
         title     : str or None             plot title (auto-generated if None)
         """
@@ -1147,14 +1352,14 @@ class MicArray:
         if next(iter(self.notes.values())).leq_global is None:
             raise RuntimeError("Run compute_leq_notes() first.")
 
-        i_el     = self._el_to_col(elevation)
-        el_label = 'ref' if elevation == 'ref' else f'{elevation}°'
+        i_th     = self._th_to_col(theta)
+        th_label = 'ref' if theta == 'ref' else f'{theta}°'
         y_label  = 'dB SPL' if self._is_spl else 'dBFS'
 
         note_names = list(self.notes.keys())
         means, stds = [], []
         for nota, ma_nota in self.notes.items():
-            levels = ma_nota.leq_global[:, i_el]
+            levels = ma_nota.leq_global[:, i_th]
             means.append(10 * np.log10(np.mean(10 ** (levels / 10))))
             stds.append(levels.std())
 
@@ -1169,7 +1374,7 @@ class MicArray:
             textposition='outside',
         ))
         fig.update_layout(
-            title=title or f"Leq global por nota — elevation {el_label}",
+            title=title or f"Leq global por nota — theta {th_label}",
             xaxis_title="Nota",
             yaxis=dict(title=y_label, range=yrange, gridcolor='lightgrey'),
             plot_bgcolor='white',
@@ -1178,7 +1383,7 @@ class MicArray:
         )
         fig.show()
 
-    def report_leq_by_note(self, elevation='ref'):
+    def report_leq_by_note(self, theta='ref'):
         """
         Returns a pandas DataFrame with mean, std, min and max Leq across
         azimuths for each note in self.notes.
@@ -1187,7 +1392,7 @@ class MicArray:
 
         Parameters
         ----------
-        elevation : int or 'ref'   elevation to analyze (default: 'ref')
+        theta : int or 'ref'   theta to analyze (default: 'ref')
         """
         import pandas as pd
         from IPython.display import display
@@ -1197,13 +1402,13 @@ class MicArray:
         if next(iter(self.notes.values())).leq_global is None:
             raise RuntimeError("Run compute_leq_notes() first.")
 
-        i_el     = self._el_to_col(elevation)
-        el_label = 'ref' if elevation == 'ref' else f'{elevation}°'
+        i_th     = self._th_to_col(theta)
+        th_label = 'ref' if theta == 'ref' else f'{theta}°'
         y_label  = 'dB SPL' if self._is_spl else 'dBFS'
 
         rows = []
         for nota, ma_nota in self.notes.items():
-            levels = ma_nota.leq_global[:, i_el]
+            levels = ma_nota.leq_global[:, i_th]
             rows.append({
                 'Nota'               : nota,
                 f'Media [{y_label}]' : round(float(10 * np.log10(np.mean(10 ** (levels / 10)))), 1),
@@ -1213,59 +1418,532 @@ class MicArray:
             })
 
         df = pd.DataFrame(rows).set_index('Nota')
-        df.index.name = f'Nota  —  el: {el_label}'
+        df.index.name = f'Nota  —  el: {th_label}'
         display(df)
         return df
 
     # ──────────────────────────────────────────────────────────────────────────
+    # Directivity normalization
+    # ──────────────────────────────────────────────────────────────────────────
 
-    def listen(self, azimuth, elevation):
+    def normalize(self, type='leq', ref_azimuth=0, ref_theta=0):
         """
-        Returns an IPython Audio widget to listen to a specific take and elevation.
+        Normalizes computed levels so that the reference position = 0 dB.
+
+        All other positions are expressed relative to (ref_azimuth, ref_theta),
+        giving negative values where the source is less directive. This is the
+        standard directivity normalization for polar patterns.
+
+        Must be called after compute_leq() or compute_spl() depending on type.
+
+        Parameters
+        ----------
+        type        : str            'leq' — normalize leq_levels / leq_global
+                                     'spl' — normalize spl_levels / spl_global
+        ref_azimuth : int            reference azimuth in degrees (default: 0)
+        ref_theta   : int or 'ref'   reference theta (default: 0)
+        """
+        if type == 'leq':
+            if self.leq_global is None:
+                raise RuntimeError("Run compute_leq() first.")
+            data_global = self.leq_global
+            data_levels = self.leq_levels
+        elif type == 'spl':
+            if self.spl_global is None:
+                raise RuntimeError("Run compute_spl() first.")
+            data_global = self.spl_global
+            data_levels = self.spl_levels
+        elif type == 'directivity':
+            if self.dir_global is None:
+                raise RuntimeError("Run compute_directivity() first.")
+            data_global = self.dir_global
+            data_levels = self.dir_levels
+        else:
+            raise ValueError("type must be 'leq', 'spl' or 'directivity'")
+
+        i_ref_az  = self._az_to_row(ref_azimuth)
+        i_ref_th  = self._th_to_col(ref_theta)
+        ref_val   = float(data_global[i_ref_az, i_ref_th])
+        th_label  = 'ref' if ref_theta == 'ref' else f'{ref_theta}°'
+
+        print(f"  Reference: az={ref_azimuth}°  theta={th_label}"
+              f"  level={ref_val:.1f} dB SPL\n")
+
+        data_global -= ref_val
+        if data_levels is not None:
+            # normalize each band by its own reference value so that
+            # the reference position is 0 dB in every band independently
+            ref_band_vals = data_levels[i_ref_az, i_ref_th, :].copy()  # (n_bands,)
+            data_levels  -= ref_band_vals  # broadcasts over (n_az, n_th, n_bands)
+
+        self._is_normalized = True
+        print(f"  normalize done — reference position set to 0 dB  [{type}]")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Directivity plots
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _check_ready_to_plot(self, source='leq'):
+        if not self._is_spl:
+            raise RuntimeError("Run calibrate() + to_spl() first.")
+        if source == 'directivity':
+            if self.dir_global is None:
+                raise RuntimeError("Run compute_directivity() first.")
+            return
+        if not self._is_compensated:
+            raise RuntimeError("Run level_compensation() first.")
+        if source == 'leq' and self.leq_global is None:
+            raise RuntimeError("Run compute_leq() first.")
+        if source == 'spl' and self.spl_global is None:
+            raise RuntimeError("Run compute_spl() first.")
+        if not self._is_normalized:
+            raise RuntimeError("Run normalize() first.")
+
+    def plot_polar_2d(self, theta=0, freq=None, title=None, source='leq',
+                      db_range=None, tick_step=None,
+                      interp_deg=1, interp_method='cubic'):
+        """
+        Plots a 2D polar directivity pattern at a given standard elevation.
+
+        Constructs a 360° azimuthal trace combining the front mic (θ) and its
+        paired back mic (180°−θ), with energy-averaged seams at φ=0° and φ=180°.
+
+        Special cases:
+          theta='ref'  → 19 direct values at φ=0°–180° (no pairing, half plot)
+          theta=90     → energy average of all 19 cenit readings (constant circle)
+
+        Parameters
+        ----------
+        theta          : int or 'ref'           theta 0°–90° or 'ref' (default: 0)
+        freq           : float or None          center frequency in Hz; None = broadband
+        title          : str or None            auto-generated if None
+        source         : str                    'leq' or 'spl' (default: 'leq')
+        range          : [float, float] or None dB range to display, e.g. [-30, 0].
+                                                None → auto (min to max of data)
+        db_range       : [float, float] or None dB range to display, e.g. [-30, 0].
+        tick_step      : float or None          spacing between gridlines in dB (auto if None)
+        interp_deg     : float or None          interpolation resolution in degrees (default: 1).
+                                                None → no interpolation, raw 10° data.
+        interp_method  : str                    'cubic' (spline, default) or 'linear'
+        """
+        self._check_ready_to_plot(source)
+
+        if source == 'directivity':
+            global_levels = self.dir_global
+            band_levels   = self.dir_levels
+            band_freqs    = self.dir_freqs
+        elif source == 'spl':
+            global_levels = self.spl_global
+            band_levels   = self.spl_levels
+            band_freqs    = self.spl_freqs
+        else:
+            global_levels = self.leq_global
+            band_levels   = self.leq_levels
+            band_freqs    = self.leq_freqs
+
+        # ── Levels matrix (n_angles, n_thetas) ───────────────────────────────
+        if freq is None:
+            levels     = global_levels
+            freq_label = 'broadband'
+        else:
+            i_band     = int(np.argmin(np.abs(band_freqs - freq)))
+            freq_label = f'{band_freqs[i_band]:.0f} Hz'
+            levels     = band_levels[:, :, i_band]
+
+        y_label  = 'dB' if source == 'directivity' or self._is_normalized \
+                   else ('dB SPL' if self._is_spl else 'dBFS')
+        th_label = 'ref' if theta == 'ref' else f'{theta}°'
+
+        # ── Build radial trace ────────────────────────────────────────────────
+        if theta == 'ref':
+            i_th  = self._th_to_col('ref')
+            r_dB  = levels[:, i_th].copy()              # 19 values, φ 0°→180°
+            phi   = list(self.angles)                    # [0, 10, ..., 180]
+            filled = False
+
+        elif theta == 90:
+            i_th  = self._th_to_col(90)
+            r_avg = 10 * np.log10(np.mean(10 ** (levels[:, i_th] / 10)))
+            r_dB  = np.full(37, r_avg)
+            phi   = list(range(0, 370, 10))
+            filled = True
+
+        else:
+            if theta not in self.thetas or (180 - theta) not in self.thetas:
+                raise ValueError(
+                    f"theta={theta}° or its pair {180 - theta}° not in "
+                    f"self.thetas. Available: {self.thetas}"
+                )
+            i_th_front = self._th_to_col(theta)
+            i_th_back  = self._th_to_col(180 - theta)
+            r_front    = levels[:, i_th_front]           # φ 0°→180° (front mic)
+            r_back     = levels[:, i_th_back]            # φ 0°→180° → std azimuth 180°→360°
+
+            def _enavg(a, b):
+                return 10 * np.log10((10 ** (a / 10) + 10 ** (b / 10)) / 2)
+
+            r_dB        = np.empty(37)
+            r_dB[0]     = _enavg(r_front[0], r_back[18])  # φ=0°   costura frontal
+            r_dB[1:18]  = r_front[1:18]                    # φ=10°…170°
+            r_dB[18]    = _enavg(r_front[18], r_back[0])  # φ=180° costura posterior
+            r_dB[19:36] = r_back[1:18]                     # φ=190°…350°
+            r_dB[36]    = r_dB[0]                          # φ=360° cierra la traza
+            phi         = list(range(0, 370, 10))
+            filled       = True
+
+        # ── Shift to display space ────────────────────────────────────────────
+        if db_range is not None:
+            vmin, vmax = float(db_range[0]), float(db_range[1])
+        else:
+            vmin = float(np.min(r_dB))
+            vmax = float(np.max(r_dB))
+
+        span      = vmax - vmin
+        r_display = np.clip(r_dB - vmin, 0, span)
+
+        # ── Tick labels ───────────────────────────────────────────────────────
+        step         = float(tick_step) if tick_step is not None else span / 4
+        tick_abs     = np.arange(vmin, vmax + step * 0.01, step)
+        tick_display = tick_abs - vmin
+        tick_text    = [f'{v:.0f}' for v in tick_abs]
+        tick_suffix  = f' {y_label}'
+
+        # ── Interpolation ─────────────────────────────────────────────────────
+        if interp_deg is not None:
+            from scipy.interpolate import interp1d
+            phi_arr  = np.array(phi, dtype=float)
+            r_arr    = np.array(r_display, dtype=float)
+            phi_new  = np.arange(phi_arr[0], phi_arr[-1] + interp_deg * 0.01, interp_deg)
+            f_interp = interp1d(phi_arr, r_arr, kind=interp_method)
+            r_display = f_interp(phi_new).clip(0, span).tolist()
+            phi       = phi_new.tolist()
+
+        # ── Figure ────────────────────────────────────────────────────────────
+        if source == 'directivity' and hasattr(self, 'dir_ref_spl'):
+            if freq is None:
+                ref_spl = self.dir_ref_spl_global
+            else:
+                ref_spl = float(self.dir_ref_spl[i_band])
+            spl_note = f"  |  ref {ref_spl:.1f} dB SPL"
+        else:
+            spl_note = ''
+        auto_title = f"Directividad — θ {th_label}  |  {freq_label}{spl_note}  [{y_label}]"
+
+        trace_kw = dict(r=r_display, theta=phi, mode='lines',
+                        line=dict(color='steelblue', width=2))
+        if filled:
+            trace = go.Scatterpolar(**trace_kw, fill='toself',
+                                    fillcolor='rgba(70,130,180,0.2)',
+                                    name=f'θ {th_label}')
+        else:
+            trace = go.Scatterpolar(**trace_kw, name='ref mic')
+
+        fig = go.Figure(trace)
+        fig.update_layout(
+            title=title or auto_title,
+            polar=dict(
+                radialaxis=dict(
+                    range=[0, span],
+                    tickvals=tick_display.tolist(),
+                    ticktext=[t + tick_suffix for t in tick_text],
+                    tickfont=dict(size=10),
+                    gridcolor='lightgrey',
+                    showline=True,
+                    linecolor='grey',
+                ),
+                angularaxis=dict(
+                    rotation=90,
+                    direction='clockwise',
+                    tickmode='array',
+                    tickvals=list(range(0, 360, 30)),
+                    ticktext=[f'{v}°' for v in range(0, 360, 30)],
+                    gridcolor='lightgrey',
+                ),
+            ),
+            width=600,
+            height=600,
+        )
+        fig.show()
+
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def plot_polar_3d(self, freq=None, source='directivity', db_range=None,
+                      mirror=False, interp_deg=2, interp_method='cubic',
+                      title=None):
+        """
+        3D directivity balloon (upper hemisphere by default).
+
+        Reconstructs the hemisphere by combining front/back mic pairs for each
+        elevation (same pairing logic as plot_polar_2d). Includes azimuth and
+        elevation reference rings.
+
+        Parameters
+        ----------
+        freq          : float or None    center frequency in Hz; None = broadband
+        source        : str              'directivity', 'spl', or 'leq'
+        db_range      : [float, float]   dB range; None = auto
+        mirror        : bool             reflect upper hemisphere below horizontal (default False)
+        interp_deg    : float or None    interpolated grid resolution in degrees (default 2). None = raw data.
+        interp_method : str              'cubic' (spline) or 'linear' (default 'cubic')
+        title         : str or None      auto-generated if None
+        """
+        import plotly.graph_objects as go
+
+        self._check_ready_to_plot(source)
+
+        if source == 'directivity':
+            global_levels = self.dir_global
+            band_levels   = self.dir_levels
+            band_freqs    = self.dir_freqs
+        elif source == 'spl':
+            global_levels = self.spl_global
+            band_levels   = self.spl_levels
+            band_freqs    = self.spl_freqs
+        else:
+            global_levels = self.leq_global
+            band_levels   = self.leq_levels
+            band_freqs    = self.leq_freqs
+
+        if freq is None:
+            levels     = global_levels
+            freq_label = 'broadband'
+        else:
+            i_band     = int(np.argmin(np.abs(band_freqs - freq)))
+            freq_label = f'{band_freqs[i_band]:.0f} Hz'
+            levels     = band_levels[:, :, i_band]
+
+        def _enavg(a, b):
+            return 10 * np.log10((10 ** (a / 10) + 10 ** (b / 10)) / 2)
+
+        # Elevations 0°→90° (unique, sorted)
+        elevs = sorted(th for th in self.thetas
+                       if isinstance(th, (int, float)) and 0 <= th <= 90)
+        n_elev = len(elevs)   # typically 10: 0°,10°,...,90°
+        n_phi  = 37           # 0°→360° in 10° steps (closed ring)
+
+        # ── Build R_dB  (n_elev × n_phi) ─────────────────────────────────────
+        R_dB = np.zeros((n_elev, n_phi))
+        for i_e, e in enumerate(elevs):
+            i_f = self._th_to_col(e)
+            if e == 90:
+                avg           = 10 * np.log10(np.mean(10 ** (levels[:, i_f] / 10)))
+                R_dB[i_e, :] = avg
+            else:
+                i_b = self._th_to_col(180 - e)
+                rf  = levels[:, i_f]
+                rb  = levels[:, i_b]
+                row        = np.empty(37)
+                row[0]     = _enavg(rf[0], rb[18])   # φ=0°   seam
+                row[1:18]  = rf[1:18]                 # φ=10°→170°
+                row[18]    = _enavg(rf[18], rb[0])   # φ=180° seam
+                row[19:36] = rb[1:18]                 # φ=190°→350°
+                row[36]    = row[0]                   # close ring
+                R_dB[i_e, :] = row
+
+        vmin   = float(db_range[0]) if db_range else float(R_dB.min())
+        vmax   = float(db_range[1]) if db_range else float(R_dB.max())
+        span   = (vmax - vmin) or 1.0
+        R_clip = np.clip(R_dB, vmin, vmax)
+        R_r    = (R_clip - vmin) / span   # radius ∈ [0, 1]
+
+        # ── Interpolation ─────────────────────────────────────────────────────
+        phi_orig  = np.arange(0, 361, 10, dtype=float)   # 0°→360°, 37 pts
+        elev_orig = np.array(elevs, dtype=float)
+
+        if interp_deg is not None:
+            phi_new  = np.arange(0, 360 + interp_deg, interp_deg, dtype=float)
+            elev_new = np.arange(0,  90 + interp_deg, interp_deg, dtype=float)
+            phi_new  = phi_new[phi_new <= 360]
+            elev_new = elev_new[elev_new <= 90]
+
+            if interp_method == 'cubic':
+                from scipy.interpolate import RectBivariateSpline
+                R_r    = np.clip(
+                    RectBivariateSpline(elev_orig, phi_orig, R_r,    kx=3, ky=3)(elev_new, phi_new),
+                    0, 1)
+                R_clip = np.clip(
+                    RectBivariateSpline(elev_orig, phi_orig, R_clip, kx=3, ky=3)(elev_new, phi_new),
+                    vmin, vmax)
+            else:
+                from scipy.interpolate import RegularGridInterpolator
+                E_g, P_g = np.meshgrid(elev_new, phi_new, indexing='ij')
+                pts      = np.c_[E_g.ravel(), P_g.ravel()]
+                R_r    = RegularGridInterpolator(
+                    (elev_orig, phi_orig), R_r,    method='linear')(pts
+                ).clip(0, 1).reshape(len(elev_new), len(phi_new))
+                R_clip = RegularGridInterpolator(
+                    (elev_orig, phi_orig), R_clip, method='linear')(pts
+                ).clip(vmin, vmax).reshape(len(elev_new), len(phi_new))
+
+            phi_rad  = np.radians(phi_new)
+            elev_rad = np.radians(elev_new)
+        else:
+            phi_rad  = np.radians(phi_orig)
+            elev_rad = np.radians(elev_orig)
+
+        # ── Cartesian (elevation measured from horizontal plane) ──────────────
+        E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
+
+        X = R_r * np.cos(E) * np.cos(P)
+        Y = R_r * np.cos(E) * np.sin(P)
+        Z = R_r * np.sin(E)
+
+        if mirror:
+            X = np.vstack([np.flipud(X[1:]), X])
+            Y = np.vstack([np.flipud(Y[1:]), Y])
+            Z = np.vstack([-np.flipud(Z[1:]), Z])
+            C = np.vstack([np.flipud(R_clip[1:]), R_clip])
+        else:
+            C = R_clip
+
+        # ── Reference protractors ─────────────────────────────────────────────
+        r_ref = 1.10   # slightly outside the unit balloon
+
+        # Horizontal ring (azimuth protractor)
+        phi_d    = np.linspace(0, 2 * np.pi, 361)
+        h_ring   = go.Scatter3d(
+            x=r_ref * np.cos(phi_d), y=r_ref * np.sin(phi_d), z=np.zeros(361),
+            mode='lines', line=dict(color='rgba(60,60,60,0.7)', width=2),
+            showlegend=False, hoverinfo='none',
+        )
+
+        # Azimuth tick marks and labels every 30°
+        az_ticks = list(range(0, 360, 30))
+        r_lbl    = r_ref * 1.20
+        r_tk0, r_tk1 = r_ref * 0.95, r_ref * 1.05
+        az_tick_lines = []
+        for a in az_ticks:
+            ar = np.radians(a)
+            az_tick_lines.append(go.Scatter3d(
+                x=[r_tk0 * np.cos(ar), r_tk1 * np.cos(ar)],
+                y=[r_tk0 * np.sin(ar), r_tk1 * np.sin(ar)],
+                z=[0, 0],
+                mode='lines', line=dict(color='rgba(60,60,60,0.8)', width=2),
+                showlegend=False, hoverinfo='none',
+            ))
+        az_labels = go.Scatter3d(
+            x=[r_lbl * np.cos(np.radians(a)) for a in az_ticks],
+            y=[r_lbl * np.sin(np.radians(a)) for a in az_ticks],
+            z=[0] * len(az_ticks),
+            mode='text',
+            text=[f'{a}°' for a in az_ticks],
+            textfont=dict(size=12, color='rgba(40,40,40,1.0)'),
+            showlegend=False, hoverinfo='none',
+        )
+
+        # Vertical arc (front-back plane, y=0): elevation 0°→90° both sides
+        elev_d    = np.linspace(0, np.pi / 2, 91)
+        v_front   = go.Scatter3d(
+            x=r_ref * np.cos(elev_d), y=np.zeros(91), z=r_ref * np.sin(elev_d),
+            mode='lines', line=dict(color='rgba(60,60,60,0.7)', width=2),
+            showlegend=False, hoverinfo='none',
+        )
+        v_back    = go.Scatter3d(
+            x=-r_ref * np.cos(elev_d), y=np.zeros(91), z=r_ref * np.sin(elev_d),
+            mode='lines', line=dict(color='rgba(60,60,60,0.7)', width=2),
+            showlegend=False, hoverinfo='none',
+        )
+
+        # Elevation tick marks and labels on front arc
+        el_ticks  = [30, 60, 90]
+        r_lbl_v   = r_ref * 1.20
+        el_tick_lines = []
+        for e in el_ticks:
+            er = np.radians(e)
+            el_tick_lines.append(go.Scatter3d(
+                x=[r_ref * 0.95 * np.cos(er), r_ref * 1.05 * np.cos(er)],
+                y=[0, 0],
+                z=[r_ref * 0.95 * np.sin(er), r_ref * 1.05 * np.sin(er)],
+                mode='lines', line=dict(color='rgba(60,60,60,0.8)', width=2),
+                showlegend=False, hoverinfo='none',
+            ))
+        el_labels = go.Scatter3d(
+            x=[r_lbl_v * np.cos(np.radians(e)) for e in el_ticks],
+            y=[-0.04] * len(el_ticks),
+            z=[r_lbl_v * np.sin(np.radians(e)) for e in el_ticks],
+            mode='text',
+            text=[f'{e}°' for e in el_ticks],
+            textfont=dict(size=12, color='rgba(40,40,40,1.0)'),
+            showlegend=False, hoverinfo='none',
+        )
+
+        # ── Figure ────────────────────────────────────────────────────────────
+        y_label = 'dB' if source == 'directivity' or self._is_normalized \
+                  else ('dB SPL' if self._is_spl else 'dBFS')
+
+        surf = go.Surface(
+            x=X, y=Y, z=Z,
+            surfacecolor=C,
+            colorscale=[[0.0, 'blue'], [1.0, 'red']],
+            cmin=vmin, cmax=vmax,
+            colorbar=dict(title=y_label, ticksuffix=f' {y_label}'),
+        )
+
+        all_traces = ([surf, h_ring, az_labels, v_front, v_back, el_labels]
+                      + az_tick_lines + el_tick_lines)
+        fig = go.Figure(data=all_traces)
+        fig.update_layout(
+            title=title or f'Directividad 3D — {freq_label}  [{y_label}]',
+            scene=dict(
+                xaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
+                yaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
+                zaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
+                aspectmode='cube',
+            ),
+            width=750,
+            height=750,
+        )
+        fig.show()
+
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def listen(self, azimuth, theta):
+        """
+        Returns an IPython Audio widget to listen to a specific take and theta.
 
         Parameters
         ----------
         azimuth   : int              azimuth angle value (e.g. 0, 90, 180)
-        elevation : int or 'ref'     elevation label (e.g. 0, 90, 'ref')
+        theta : int or 'ref'     theta label (e.g. 0, 90, 'ref')
         """
         from IPython.display import Audio, display
 
         i_az   = self._az_to_row(azimuth)
-        i_el   = self._el_to_col(elevation)
-        signal = self.tensor[i_az, i_el, :].astype(np.float32)
+        i_th   = self._th_to_col(theta)
+        signal = self.tensor[i_az, i_th, :].astype(np.float32)
 
         # Trim trailing zeros (from extract_note padding)
         nonzero = np.nonzero(signal)[0]
         if len(nonzero):
             signal = signal[:nonzero[-1] + 1]
 
-        label = f"ref" if elevation == 'ref' else f"{elevation}°"
-        print(f"  elevation {label}  |  {azimuth}°  |  {len(signal)/self.sr:.2f}s")
+        label = f"ref" if theta == 'ref' else f"{theta}°"
+        print(f"  theta {label}  |  {azimuth}°  |  {len(signal)/self.sr:.2f}s")
         display(Audio(signal, rate=self.sr))
 
     # ──────────────────────────────────────────────────────────────────────────
     # Analysis plots
     # ──────────────────────────────────────────────────────────────────────────
 
-    def plot_rms_takes(self, elevation='ref', floor_dB=-60, yrange=None):
+    def plot_rms_takes(self, theta='ref', floor_dB=-60, yrange=None):
         """
-        Plots the RMS level (dBFS) of an elevation across all takes as a
+        Plots the RMS level (dBFS) of an theta across all takes as a
         VU-meter style bar chart.
 
         Parameters
         ----------
-        elevation : int or 'ref'       elevation to measure (default: 'ref')
+        theta : int or 'ref'       theta to measure (default: 'ref')
         floor_dB  : float              bottom of the y-axis in dBFS (default: -60)
         yrange    : [float, float]     optional y-axis zoom, e.g. [-40, -20]
         """
-        i_el = self._el_to_col(elevation)
+        i_th = self._th_to_col(theta)
 
         rms_dB = [
-            20 * np.log10(np.sqrt(np.mean(self.tensor[i_az, i_el, :] ** 2)) + 1e-12)
+            20 * np.log10(np.sqrt(np.mean(self.tensor[i_az, i_th, :] ** 2)) + 1e-12)
             for i_az in range(self.n_angles)
         ]
 
-        label = "ref" if elevation == 'ref' else f"{elevation}°"
+        label = "ref" if theta == 'ref' else f"{theta}°"
         fig = go.Figure(go.Bar(
             x=[f"{a}°" for a in self.angles],
             y=[r - floor_dB for r in rms_dB],
@@ -1275,7 +1953,7 @@ class MicArray:
             textposition='outside',
         ))
         fig.update_layout(
-            title=f"RMS por toma — elevation {label}",
+            title=f"RMS por toma — theta {label}",
             xaxis_title="Azimut",
             yaxis=dict(title="dBFS", range=yrange if yrange else [floor_dB, 0],
                        gridcolor='lightgrey'),
@@ -1285,7 +1963,7 @@ class MicArray:
         )
         fig.show()
 
-    def plot_tune(self, azimuth, scale=None, elevation='ref', hop_length=512,
+    def plot_tune(self, azimuth, scale=None, theta='ref', hop_length=512,
                   confidence_threshold=0.5):
         """
         Plots the tuning deviation (cents) of each note for a given take.
@@ -1294,7 +1972,7 @@ class MicArray:
         ----------
         scale                : dict           {note_name: freq_hz}
         azimuth              : int            azimuth take to analyze
-        elevation            : int or 'ref'   elevation to use (default: 'ref')
+        theta            : int or 'ref'   theta to use (default: 'ref')
         hop_length           : int            pyin hop length (default: 512)
         confidence_threshold : float          min pyin confidence (default: 0.5)
         """
@@ -1305,14 +1983,14 @@ class MicArray:
             raise RuntimeError("Provide a scale or set self.scale first.")
 
         i_az = self._az_to_row(azimuth)
-        i_el = self._el_to_col(elevation)
+        i_th = self._th_to_col(theta)
 
         note_names = list(scale.keys())
         note_freqs = np.array(list(scale.values()))
         fmin       = min(note_freqs) * 0.9
         fmax       = max(note_freqs) * 1.1
 
-        signal = self.tensor[i_az, i_el, :].astype(np.float32)
+        signal = self.tensor[i_az, i_th, :].astype(np.float32)
 
         f0, _, voiced_prob = librosa.pyin(
             signal, fmin=fmin, fmax=fmax,
@@ -1341,7 +2019,7 @@ class MicArray:
             elif abs(mv) <= 50:   colors.append('goldenrod')
             else:                 colors.append('crimson')
 
-        label = "ref" if elevation == 'ref' else f"{elevation}°"
+        label = "ref" if theta == 'ref' else f"{theta}°"
         fig = go.Figure()
         fig.add_hrect(y0=-50, y1=50, fillcolor='lightgreen', opacity=0.1, line_width=0)
         fig.add_trace(go.Bar(
@@ -1355,7 +2033,7 @@ class MicArray:
         fig.add_hline(y=50,  line=dict(color='green', width=1, dash='dash'))
         fig.add_hline(y=-50, line=dict(color='green', width=1, dash='dash'))
         fig.update_layout(
-            title=f"Afinación — elevation {label}  |  {azimuth}°",
+            title=f"Afinación — theta {label}  |  {azimuth}°",
             xaxis_title="Nota",
             yaxis_title="Desviación (cents)",
             plot_bgcolor='white',
@@ -1365,7 +2043,7 @@ class MicArray:
         )
         fig.show()
 
-    def plot_f0(self, azimuth, scale=None, elevation='ref', hop_length=512,
+    def plot_f0(self, azimuth, scale=None, theta='ref', hop_length=512,
                 band_cents=50, segments=None):
         """
         Plots the pyin f0 tracking for a specific take against the scale notes.
@@ -1374,7 +2052,7 @@ class MicArray:
         ----------
         scale      : dict            {note_name: freq_hz}
         azimuth    : int             azimuth take to analyze
-        elevation  : int or 'ref'    elevation to use (default: 'ref')
+        theta  : int or 'ref'    theta to use (default: 'ref')
         hop_length : int             pyin hop length in samples (default: 512)
         band_cents : float           half-width of shaded band per note (default: 50)
         segments   : list or None    output of detect_notes(); if provided, draws vertical
@@ -1387,7 +2065,7 @@ class MicArray:
             raise RuntimeError("Provide a scale or set self.scale first.")
 
         i_az = self._az_to_row(azimuth)
-        i_el = self._el_to_col(elevation)
+        i_th = self._th_to_col(theta)
 
         note_names = list(scale.keys())
         note_freqs = np.array(list(scale.values()))
@@ -1395,7 +2073,7 @@ class MicArray:
         fmin       = note_freqs[0] * 0.9
         fmax       = note_freqs[-1] * 1.1
 
-        signal = self.tensor[i_az, i_el, :].astype(np.float32)
+        signal = self.tensor[i_az, i_th, :].astype(np.float32)
 
         f0, voiced, _ = librosa.pyin(
             signal, fmin=fmin, fmax=fmax,
@@ -1439,9 +2117,9 @@ class MicArray:
                         annotation_position='top',
                     )
 
-        label = "ref" if elevation == 'ref' else f"{elevation}°"
+        label = "ref" if theta == 'ref' else f"{theta}°"
         fig.update_layout(
-            title=f"F0 tracking — elevation {label}  |  {azimuth}°",
+            title=f"F0 tracking — theta {label}  |  {azimuth}°",
             xaxis_title="Tiempo (s)",
             yaxis=dict(
                 title="Nota",
@@ -1459,28 +2137,28 @@ class MicArray:
     # Plotting methods
     # ──────────────────────────────────────────────────────────────────────────
 
-    def plot(self, azimuth=None, elevation=None, title=None,
+    def plot(self, azimuth=None, theta=None, title=None,
              envelope=True, dB=False, floor_dB=-80, yrange=None):
         """
         Plots time-domain signals from the tensor.
 
         Dispatch rules:
-          azimuth + elevation  → single signal at that position
-          azimuth only         → all elevations for that azimuth
-          elevation only       → all azimuths for that elevation
+          azimuth + theta  → single signal at that position
+          azimuth only         → all thetas for that azimuth
+          theta only       → all azimuths for that theta
 
         Parameters
         ----------
         azimuth   : int or None           azimuth angle (e.g. 0, 90, 180)
-        elevation : int, 'ref', or None   elevation label (e.g. 0, 90, 'ref')
+        theta : int, 'ref', or None   theta label (e.g. 0, 90, 'ref')
         title     : str or None           plot title (auto-generated if None)
         envelope  : bool                  if True, shows smooth abs envelope (default: True)
         dB        : bool                  if True, converts amplitude to dB (default: False)
         floor_dB  : float                 noise floor clipping when dB=True (default: -80)
         yrange    : [float, float] or None  y-axis range, e.g. [40, 100]. Auto if None.
         """
-        if azimuth is None and elevation is None:
-            raise ValueError("Provide at least 'azimuth' or 'elevation'.")
+        if azimuth is None and theta is None:
+            raise ValueError("Provide at least 'azimuth' or 'theta'.")
 
         P_REF = 20e-6 if self._is_spl else 1.0
         def to_dB(ds):
@@ -1488,46 +2166,46 @@ class MicArray:
 
         fig = go.Figure()
 
-        if azimuth is not None and elevation is not None:
+        if azimuth is not None and theta is not None:
             i_az       = self._az_to_row(azimuth)
-            i_el       = self._el_to_col(elevation)
-            signal     = self.tensor[i_az, i_el, :]
+            i_th       = self._th_to_col(theta)
+            signal     = self.tensor[i_az, i_th, :]
             ds, factor = self._prepare(signal, envelope)
             if dB: ds  = to_dB(ds)
             t          = np.arange(len(ds)) * factor / self.sr
-            el_label   = "ref" if elevation == 'ref' else f"{elevation}°"
+            th_label   = "ref" if theta == 'ref' else f"{theta}°"
             fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
                                      line=dict(width=1),
-                                     name=f"{el_label} — {azimuth}°"))
-            auto_title = f"Elevación {el_label} dado el azimut {azimuth}°"
+                                     name=f"{th_label} — {azimuth}°"))
+            auto_title = f"theta {th_label} dado el azimut {azimuth}°"
             height     = 400
 
         elif azimuth is not None:
             i_az = self._az_to_row(azimuth)
-            for el in self.elevations:
-                i_el       = self._el_to_col(el)
-                signal     = self.tensor[i_az, i_el, :]
+            for el in self.thetas:
+                i_th       = self._th_to_col(el)
+                signal     = self.tensor[i_az, i_th, :]
                 ds, factor = self._prepare(signal, envelope)
                 if dB: ds  = to_dB(ds)
                 t          = np.arange(len(ds)) * factor / self.sr
                 label      = "ref" if el == 'ref' else f"{el}°"
                 fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
                                          line=dict(width=1), name=label))
-            auto_title = f"Elevaciones dado el azimut {azimuth}°"
+            auto_title = f"thetaes dado el azimut {azimuth}°"
             height     = 500
 
         else:
-            i_el     = self._el_to_col(elevation)
-            el_label = "ref" if elevation == 'ref' else f"{elevation}°"
+            i_th     = self._th_to_col(theta)
+            th_label = "ref" if theta == 'ref' else f"{theta}°"
             for az in self.angles:
                 i_az       = self._az_to_row(az)
-                signal     = self.tensor[i_az, i_el, :]
+                signal     = self.tensor[i_az, i_th, :]
                 ds, factor = self._prepare(signal, envelope)
                 if dB: ds  = to_dB(ds)
                 t          = np.arange(len(ds)) * factor / self.sr
                 fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
                                          line=dict(width=1), name=f"{az}°"))
-            auto_title = f"Azimuts dada la elevación {el_label}"
+            auto_title = f"Azimuts dada la theta {th_label}"
             height     = 500
 
         axis_style = dict(
@@ -1561,20 +2239,20 @@ class MicArray:
         )
         fig.show()
 
-    def plot_leq(self, azimuth=None, elevation=None, title=None, vrange=None,
+    def plot_leq(self, azimuth=None, theta=None, title=None, vrange=None,
                  colorscale='Viridis', frange=None):
         """
         Plots Leq per band. Requires compute_leq() to have been called first.
 
         Dispatch rules:
-          azimuth + elevation  → bar chart — single spectrum at that position
-          azimuth only         → heatmap   — elevaciones × bandas
-          elevation only       → heatmap   — azimuts × bandas
+          azimuth + theta  → bar chart — single spectrum at that position
+          azimuth only         → heatmap   — thetaes × bandas
+          theta only       → heatmap   — azimuts × bandas
 
         Parameters
         ----------
         azimuth   : int or None           azimuth angle
-        elevation : int, 'ref', or None   elevation label
+        theta : int, 'ref', or None   theta label
         title       : str or None           plot title (auto-generated if None)
         vrange      : [float, float] or None  dB range. Auto if None.
                                               For bar: y-axis. For heatmap: colorscale.
@@ -1584,8 +2262,8 @@ class MicArray:
         """
         if self.leq_levels is None:
             raise RuntimeError("Run compute_leq() first.")
-        if azimuth is None and elevation is None:
-            raise ValueError("Provide at least 'azimuth' or 'elevation'.")
+        if azimuth is None and theta is None:
+            raise ValueError("Provide at least 'azimuth' or 'theta'.")
 
         def _fmt_freq(f):
             if f >= 1000:
@@ -1604,12 +2282,12 @@ class MicArray:
         axis_style  = dict(gridcolor='lightgrey',
                            showline=True, linecolor='black', linewidth=1, mirror=False)
 
-        if azimuth is not None and elevation is not None:
+        if azimuth is not None and theta is not None:
             # ── Bar chart — single position ───────────────────────────────────
             i_az     = self._az_to_row(azimuth)
-            i_el     = self._el_to_col(elevation)
-            levels   = self.leq_levels[i_az, i_el, band_mask]
-            el_label = 'ref' if elevation == 'ref' else f'{elevation}°'
+            i_th     = self._th_to_col(theta)
+            levels   = self.leq_levels[i_az, i_th, band_mask]
+            th_label = 'ref' if theta == 'ref' else f'{theta}°'
 
             fig = go.Figure(go.Bar(
                 x=band_labels, y=levels,
@@ -1617,7 +2295,7 @@ class MicArray:
                 text=[f"{v:.1f}" for v in levels],
                 textposition='outside',
             ))
-            auto_title = f"Leq — az {azimuth}°  el {el_label}"
+            auto_title = f"Leq — az {azimuth}°  el {th_label}"
             y_axis = dict(**axis_style, range=vrange) if vrange else axis_style
             fig.update_layout(
                 title=title or auto_title,
@@ -1627,10 +2305,10 @@ class MicArray:
             )
 
         elif azimuth is not None:
-            # ── Heatmap — elevaciones × bandas ────────────────────────────────
+            # ── Heatmap — theta × bandas ────────────────────────────────
             i_az     = self._az_to_row(azimuth)
             z        = self.leq_levels[i_az, :, :][:, band_mask]
-            y_labels = ['ref' if e == 'ref' else f'{e}°' for e in self.elevations]
+            y_labels = ['ref' if e == 'ref' else f'{e}°' for e in self.thetas]
 
             fig = go.Figure(go.Heatmap(
                 x=band_labels, y=y_labels, z=z,
@@ -1639,19 +2317,19 @@ class MicArray:
                 zmax=vrange[1] if vrange else None,
                 colorbar=dict(title=y_label),
             ))
-            auto_title = f"Leq por elevación — azimut {azimuth}°"
+            auto_title = f"Leq por theta — azimut {azimuth}°"
             fig.update_layout(
                 title=title or auto_title,
-                xaxis_title="Banda (Hz)", yaxis_title="Elevación",
+                xaxis_title="Banda (Hz)", yaxis_title="theta",
                 width=1200, height=550,
             )
 
         else:
             # ── Heatmap — azimuts × bandas ────────────────────────────────────
-            i_el     = self._el_to_col(elevation)
-            z        = self.leq_levels[:, i_el, :][:, band_mask]
+            i_th     = self._th_to_col(theta)
+            z        = self.leq_levels[:, i_th, :][:, band_mask]
             y_labels = [f'{a}°' for a in self.angles]
-            el_label = 'ref' if elevation == 'ref' else f'{elevation}°'
+            th_label = 'ref' if theta == 'ref' else f'{theta}°'
 
             fig = go.Figure(go.Heatmap(
                 x=band_labels, y=y_labels, z=z,
@@ -1660,7 +2338,7 @@ class MicArray:
                 zmax=vrange[1] if vrange else None,
                 colorbar=dict(title=y_label),
             ))
-            auto_title = f"Leq por azimut — elevación {el_label}"
+            auto_title = f"Leq por azimut — theta {th_label}"
             fig.update_layout(
                 title=title or auto_title,
                 xaxis_title="Banda (Hz)", yaxis_title="Azimut",
@@ -1671,6 +2349,32 @@ class MicArray:
 
 
 # ── Module-level helpers (not part of the class) ─────────────────────────────
+
+def _vad_mask(signal, sr, threshold_spl, window_ms=50, p_ref=20e-6):
+    """
+    Returns a boolean mask marking active frames (short-term RMS >= threshold_spl dB SPL).
+    Uses non-overlapping windows of window_ms ms.
+    """
+    window  = max(1, int(window_ms / 1000 * sr))
+    n       = len(signal)
+    n_full  = (n // window) * window
+
+    if n_full > 0:
+        chunks  = signal[:n_full].reshape(-1, window)
+        rms_vec = np.sqrt(np.mean(chunks ** 2, axis=1))
+        active  = 20 * np.log10(rms_vec / p_ref + 1e-12) >= threshold_spl
+        mask    = np.repeat(active, window)
+    else:
+        mask = np.array([], dtype=bool)
+
+    if n_full < n:
+        tail   = signal[n_full:]
+        rms_t  = np.sqrt(np.mean(tail ** 2))
+        active_tail = 20 * np.log10(rms_t / p_ref + 1e-12) >= threshold_spl
+        mask = np.concatenate([mask, np.full(len(tail), active_tail)])
+
+    return mask.astype(bool)
+
 
 def _gcc_phat(sig1, sig2):
     """
