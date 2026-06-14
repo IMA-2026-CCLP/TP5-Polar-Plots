@@ -1499,6 +1499,55 @@ class MicArray:
         if not self._is_normalized:
             raise RuntimeError("Run normalize() first.")
 
+    def plot_spectrum(self, azimuth=0, theta=0, title=None):
+        """
+        Bar chart of per-band spectrum at a given mic position.
+
+        Uses spl_levels if available (active-frame-gated), otherwise leq_levels.
+        Works on the full MicArray or on ma.notes['X'].
+
+        Parameters
+        ----------
+        azimuth : int or 'ref'   azimuth position (default 0)
+        theta   : int or 'ref'   theta position   (default 0)
+        title   : str or None    auto-generated if None
+        """
+        import plotly.graph_objects as go
+
+        if hasattr(self, 'spl_levels') and self.spl_levels is not None:
+            levels = self.spl_levels
+            freqs  = self.spl_freqs
+            source_label = 'SPL (frames activos)'
+        elif hasattr(self, 'leq_levels') and self.leq_levels is not None:
+            levels = self.leq_levels
+            freqs  = self.leq_freqs
+            source_label = 'LEQ'
+        else:
+            raise RuntimeError("Run compute_spl() or compute_leq() first.")
+
+        i_az = self._az_to_row(azimuth)
+        i_th = self._th_to_col(theta)
+
+        band_levels = levels[i_az, i_th, :]
+        freqs_str   = [str(int(f)) for f in freqs]
+
+        az_label = f'{azimuth}°' if azimuth != 'ref' else 'ref'
+        th_label = f'{theta}°'   if theta   != 'ref' else 'ref'
+
+        fig = go.Figure(go.Bar(
+            x=freqs_str,
+            y=band_levels,
+            marker_color='steelblue',
+        ))
+        fig.update_layout(
+            title=title or f'Espectro 1/3 octava — az={az_label}  θ={th_label}  [{source_label}]',
+            xaxis_title='Frecuencia (Hz)',
+            yaxis_title='dB SPL',
+            xaxis=dict(tickangle=-45),
+            height=450,
+        )
+        fig.show()
+
     def plot_polar_2d(self, theta=0, freq=None, title=None, source='leq',
                       db_range=None, tick_step=None,
                       interp_deg=1, interp_method='cubic'):
@@ -1920,6 +1969,47 @@ class MicArray:
         label = f"ref" if theta == 'ref' else f"{theta}°"
         print(f"  theta {label}  |  {azimuth}°  |  {len(signal)/self.sr:.2f}s")
         display(Audio(signal, rate=self.sr))
+
+    def listen_band(self, freq, azimuth=0, theta=0):
+        """
+        Plays the audio of a mic position filtered to the 1/3 octave band
+        centered at freq. Works on full audio and ma.notes['X'].
+
+        Parameters
+        ----------
+        freq    : float          nominal 1/3 octave center frequency in Hz
+        azimuth : int            azimuth angle (default 0)
+        theta   : int or 'ref'  theta position  (default 0)
+        """
+        from IPython.display import Audio, display
+        from scipy.signal import butter, sosfilt
+
+        i_az   = self._az_to_row(azimuth)
+        i_th   = self._th_to_col(theta)
+        signal = self.tensor[i_az, i_th, :].astype(np.float64)
+
+        # Trim trailing zeros (note padding)
+        nonzero = np.nonzero(signal)[0]
+        if len(nonzero):
+            signal = signal[:nonzero[-1] + 1]
+
+        # 1/3 octave band limits
+        flo = max(freq * 2 ** (-1 / 6),  20.0)
+        fhi = min(freq * 2 ** ( 1 / 6), self.sr / 2 * 0.95)
+
+        sos      = butter(6, [flo, fhi], btype='band', fs=self.sr, output='sos')
+        filtered = sosfilt(sos, signal)
+
+        # Normalize for playback
+        peak = np.max(np.abs(filtered))
+        if peak > 0:
+            filtered = filtered / peak * 0.9
+
+        az_label = f'{azimuth}°'
+        th_label = 'ref' if theta == 'ref' else f'{theta}°'
+        print(f"  {freq} Hz  (1/3 oct: {flo:.0f}–{fhi:.0f} Hz)"
+              f"  |  az={az_label}  θ={th_label}  |  {len(filtered)/self.sr:.2f}s")
+        display(Audio(filtered, rate=self.sr))
 
     # ──────────────────────────────────────────────────────────────────────────
     # Analysis plots
