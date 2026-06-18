@@ -1177,18 +1177,20 @@ class MicArray:
     def compute_directivity(self, bands='1/3', threshold_spl=30, window_ms=50,
                             ref_theta='ref', ref_azimuth=0, ref_theta_plot=0):
         """
-        Computes directivity levels relative to the reference mic of each take,
-        then normalizes so that (ref_azimuth, ref_theta_plot) = 0 dB per band.
+        Computes the directivity pattern in 1/3-octave bands.
 
-        Two-step process:
-          1. Per-take cancellation:
-             dir[az, theta, band] = spl[az, theta, band] - spl[az, ref_theta, band]
-             Removes take-to-take spectral variability of the singer since both
-             mics record the same phonation simultaneously.
+        Three-step process:
+          1. Compute SPL per band for every mic position (n_az, n_th, n_bands).
 
-          2. Per-band normalization to plot reference:
-             dir[az, theta, band] -= dir[ref_azimuth, ref_theta_plot, band]
-             Makes the chosen reference direction = 0 dB in every band.
+          2. Per-take emission correction via reference mic:
+             delta[az, f] = SPL[az=ref_azimuth, ref_theta, f] - SPL[az, ref_theta, f]
+             SPL_corr[az, theta, f] = SPL[az, theta, f] + delta[az, f]
+             Cancels take-to-take emission variability — all takes are brought
+             to the emission level of the reference azimuth.
+
+          3. Normalization to on-axis reference position:
+             dir[az, theta, f] = SPL_corr[az, theta, f] - SPL_corr[ref_azimuth, ref_theta_plot, f]
+             Makes (ref_azimuth, ref_theta_plot) = 0 dB in every band.
 
         Does NOT require level_compensation() or normalize().
 
@@ -1197,15 +1199,18 @@ class MicArray:
         bands           : str          '1/3' or 'octave' (default: '1/3')
         threshold_spl   : float        VAD threshold in dB SPL (default: 30)
         window_ms       : float        VAD window in ms (default: 50)
-        ref_theta       : int or 'ref' mic used as per-take reference (default: 'ref')
-        ref_azimuth     : int          azimuth of the plot reference direction (default: 0)
+        ref_theta       : int or 'ref' mic used as per-take emission reference (default: 'ref')
+        ref_azimuth     : int          azimuth used as emission reference and plot origin (default: 0)
         ref_theta_plot  : int or 'ref' theta of the plot reference direction (default: 0)
 
         Stores
         ------
-        self.dir_freqs   : np.ndarray  center frequencies       (n_bands,)
-        self.dir_levels  : np.ndarray  directivity per band dB  (n_angles, n_thetas, n_bands)
-        self.dir_global  : np.ndarray  broadband directivity dB (n_angles, n_thetas)
+        self.dir_freqs          : np.ndarray  center frequencies           (n_bands,)
+        self.dir_levels         : np.ndarray  directivity in dB            (n_angles, n_thetas, n_bands)
+        self.dir_global         : np.ndarray  broadband directivity in dB  (n_angles, n_thetas)
+        self.dir_delta          : np.ndarray  per-take correction in dB    (n_angles, n_bands)
+        self.dir_ref_spl        : np.ndarray  absolute SPL at ref pos      (n_bands,)
+        self.dir_ref_spl_global : float       broadband SPL at ref pos
         """
         if not self._is_spl:
             raise RuntimeError("Run calibrate() + to_spl() first.")
@@ -1222,6 +1227,7 @@ class MicArray:
         total = self.n_angles * self.n_thetas
         done  = 0
 
+        # Step 1 — compute SPL for all positions
         for i_az in range(self.n_angles):
             for i_th in range(self.n_thetas):
                 signal = self.tensor[i_az, i_th, :].astype(np.float64)
@@ -1238,22 +1244,29 @@ class MicArray:
                 print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
                       f"  el={self.thetas[i_th]}", end='')
 
-        # Step 1 — subtract ref mic per take (cancels singer's spectral variability)
-        i_ref      = self._th_to_col(ref_theta)
-        dir_levels = spl_levels - spl_levels[:, i_ref:i_ref+1, :]
-        dir_global = spl_global - spl_global[:, i_ref:i_ref+1]
-
-        # Step 2 — normalize to plot reference position per band
+        # Step 2 — per-take emission correction
+        # delta[az, f] = SPL(az=0, ref, f) - SPL(az, ref, f)
+        i_ref    = self._th_to_col(ref_theta)
         i_ref_az = self._az_to_row(ref_azimuth)
+
+        delta        = spl_levels[i_ref_az, i_ref, :] - spl_levels[:, i_ref, :]  # (n_angles, n_bands)
+        delta_global = spl_global[i_ref_az, i_ref]    - spl_global[:, i_ref]     # (n_angles,)
+
+        spl_corr        = spl_levels + delta[:, np.newaxis, :]      # (n_angles, n_thetas, n_bands)
+        spl_corr_global = spl_global + delta_global[:, np.newaxis]  # (n_angles, n_thetas)
+
+        # Step 3 — normalize to on-axis reference position
         i_ref_th = self._th_to_col(ref_theta_plot)
-        self.dir_ref_spl        = spl_levels[i_ref_az, i_ref_th, :].copy()   # (n_bands,) dB SPL
-        self.dir_ref_spl_global = float(spl_global[i_ref_az, i_ref_th])
-        dir_levels -= dir_levels[i_ref_az, i_ref_th, :]          # (n_bands,) broadcasts
-        dir_global -= float(dir_global[i_ref_az, i_ref_th])
+        self.dir_ref_spl        = spl_corr[i_ref_az, i_ref_th, :].copy()  # (n_bands,) dB SPL
+        self.dir_ref_spl_global = float(spl_corr_global[i_ref_az, i_ref_th])
+
+        dir_levels = spl_corr        - spl_corr[i_ref_az, i_ref_th, :]
+        dir_global = spl_corr_global - float(spl_corr_global[i_ref_az, i_ref_th])
 
         self.dir_freqs  = np.array(fb.center_freqs_nominal, dtype=float)
         self.dir_levels = dir_levels
         self.dir_global = dir_global
+        self.dir_delta  = delta
         self._is_normalized = True
 
         th_plot_label = 'ref' if ref_theta_plot == 'ref' else f'{ref_theta_plot}°'
@@ -1933,6 +1946,217 @@ class MicArray:
         fig = go.Figure(data=all_traces)
         fig.update_layout(
             title=title or f'Directividad 3D — {freq_label}  [{y_label}]',
+            scene=dict(
+                xaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
+                yaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
+                zaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
+                aspectmode='cube',
+            ),
+            width=750,
+            height=750,
+        )
+        fig.show()
+
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def plot_directivity_sphere(self, freq=None, source='directivity', db_range=None,
+                                mirror=False, interp_deg=2, interp_method='cubic',
+                                colorscale='plasma', title=None):
+        """
+        3D unit sphere with surface color encoding the directivity level.
+
+        Same data and interpolation logic as plot_polar_3d, but the radius is
+        constant (r=1) — the shape is always a perfect sphere. The level is
+        encoded only through color (blue = low, red = high).
+
+        Parameters
+        ----------
+        freq          : float or None    center frequency in Hz; None = broadband
+        source        : str              'directivity', 'spl', or 'leq'
+        db_range      : [float, float]   dB range for colorscale; None = auto
+        mirror        : bool             reflect upper hemisphere below horizontal (default False)
+        interp_deg    : float or None    interpolated grid resolution in degrees (default 2). None = raw data.
+        interp_method : str              'cubic' (spline) or 'linear' (default 'cubic')
+        title         : str or None      auto-generated if None
+        """
+        import plotly.graph_objects as go
+
+        self._check_ready_to_plot(source)
+
+        if source == 'directivity':
+            global_levels = self.dir_global
+            band_levels   = self.dir_levels
+            band_freqs    = self.dir_freqs
+        elif source == 'spl':
+            global_levels = self.spl_global
+            band_levels   = self.spl_levels
+            band_freqs    = self.spl_freqs
+        else:
+            global_levels = self.leq_global
+            band_levels   = self.leq_levels
+            band_freqs    = self.leq_freqs
+
+        if freq is None:
+            levels     = global_levels
+            freq_label = 'broadband'
+        else:
+            i_band     = int(np.argmin(np.abs(band_freqs - freq)))
+            freq_label = f'{band_freqs[i_band]:.0f} Hz'
+            levels     = band_levels[:, :, i_band]
+
+        def _enavg(a, b):
+            return 10 * np.log10((10 ** (a / 10) + 10 ** (b / 10)) / 2)
+
+        # ── Build R_dB  (n_elev × n_phi) ─────────────────────────────────────
+        elevs  = sorted(th for th in self.thetas
+                        if isinstance(th, (int, float)) and 0 <= th <= 90)
+        n_phi  = 37
+        R_dB   = np.zeros((len(elevs), n_phi))
+
+        for i_e, e in enumerate(elevs):
+            i_f = self._th_to_col(e)
+            if e == 90:
+                avg           = 10 * np.log10(np.mean(10 ** (levels[:, i_f] / 10)))
+                R_dB[i_e, :] = avg
+            else:
+                i_b = self._th_to_col(180 - e)
+                rf, rb     = levels[:, i_f], levels[:, i_b]
+                row        = np.empty(37)
+                row[0]     = _enavg(rf[0], rb[18])
+                row[1:18]  = rf[1:18]
+                row[18]    = _enavg(rf[18], rb[0])
+                row[19:36] = rb[1:18]
+                row[36]    = row[0]
+                R_dB[i_e, :] = row
+
+        vmin   = float(db_range[0]) if db_range else float(R_dB.min())
+        vmax   = float(db_range[1]) if db_range else float(R_dB.max())
+        R_clip = np.clip(R_dB, vmin, vmax)
+
+        # ── Interpolation ─────────────────────────────────────────────────────
+        phi_orig  = np.arange(0, 361, 10, dtype=float)
+        elev_orig = np.array(elevs, dtype=float)
+
+        if interp_deg is not None:
+            phi_new  = np.arange(0, 360 + interp_deg, interp_deg, dtype=float)
+            elev_new = np.arange(0,  90 + interp_deg, interp_deg, dtype=float)
+            phi_new  = phi_new[phi_new <= 360]
+            elev_new = elev_new[elev_new <= 90]
+
+            if interp_method == 'cubic':
+                from scipy.interpolate import RectBivariateSpline
+                R_clip = np.clip(
+                    RectBivariateSpline(elev_orig, phi_orig, R_clip, kx=3, ky=3)(elev_new, phi_new),
+                    vmin, vmax)
+            else:
+                from scipy.interpolate import RegularGridInterpolator
+                E_g, P_g = np.meshgrid(elev_new, phi_new, indexing='ij')
+                pts      = np.c_[E_g.ravel(), P_g.ravel()]
+                R_clip   = RegularGridInterpolator(
+                    (elev_orig, phi_orig), R_clip, method='linear')(pts
+                ).clip(vmin, vmax).reshape(len(elev_new), len(phi_new))
+
+            phi_rad  = np.radians(phi_new)
+            elev_rad = np.radians(elev_new)
+        else:
+            phi_rad  = np.radians(phi_orig)
+            elev_rad = np.radians(elev_orig)
+
+        # ── Cartesian — unit sphere (r = 1 constant) ──────────────────────────
+        E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
+        X = np.cos(E) * np.cos(P)
+        Y = np.cos(E) * np.sin(P)
+        Z = np.sin(E)
+
+        if mirror:
+            X = np.vstack([np.flipud(X[1:]), X])
+            Y = np.vstack([np.flipud(Y[1:]), Y])
+            Z = np.vstack([-np.flipud(Z[1:]), Z])
+            C = np.vstack([np.flipud(R_clip[1:]), R_clip])
+        else:
+            C = R_clip
+
+        # ── Reference protractors ─────────────────────────────────────────────
+        r_ref = 1.10
+        phi_d = np.linspace(0, 2 * np.pi, 361)
+        h_ring = go.Scatter3d(
+            x=r_ref * np.cos(phi_d), y=r_ref * np.sin(phi_d), z=np.zeros(361),
+            mode='lines', line=dict(color='rgba(60,60,60,0.7)', width=2),
+            showlegend=False, hoverinfo='none',
+        )
+
+        az_ticks = list(range(0, 360, 30))
+        r_lbl    = r_ref * 1.20
+        r_tk0, r_tk1 = r_ref * 0.95, r_ref * 1.05
+        az_tick_lines = []
+        for a in az_ticks:
+            ar = np.radians(a)
+            az_tick_lines.append(go.Scatter3d(
+                x=[r_tk0 * np.cos(ar), r_tk1 * np.cos(ar)],
+                y=[r_tk0 * np.sin(ar), r_tk1 * np.sin(ar)],
+                z=[0, 0],
+                mode='lines', line=dict(color='rgba(60,60,60,0.8)', width=2),
+                showlegend=False, hoverinfo='none',
+            ))
+        az_labels = go.Scatter3d(
+            x=[r_lbl * np.cos(np.radians(a)) for a in az_ticks],
+            y=[r_lbl * np.sin(np.radians(a)) for a in az_ticks],
+            z=[0] * len(az_ticks),
+            mode='text', text=[f'{a}°' for a in az_ticks],
+            textfont=dict(size=12, color='rgba(40,40,40,1.0)'),
+            showlegend=False, hoverinfo='none',
+        )
+
+        elev_d = np.linspace(0, np.pi / 2, 91)
+        v_front = go.Scatter3d(
+            x=r_ref * np.cos(elev_d), y=np.zeros(91), z=r_ref * np.sin(elev_d),
+            mode='lines', line=dict(color='rgba(60,60,60,0.7)', width=2),
+            showlegend=False, hoverinfo='none',
+        )
+        v_back = go.Scatter3d(
+            x=-r_ref * np.cos(elev_d), y=np.zeros(91), z=r_ref * np.sin(elev_d),
+            mode='lines', line=dict(color='rgba(60,60,60,0.7)', width=2),
+            showlegend=False, hoverinfo='none',
+        )
+
+        el_ticks = [30, 60, 90]
+        r_lbl_v  = r_ref * 1.20
+        el_tick_lines = []
+        for e in el_ticks:
+            er = np.radians(e)
+            el_tick_lines.append(go.Scatter3d(
+                x=[r_ref * 0.95 * np.cos(er), r_ref * 1.05 * np.cos(er)],
+                y=[0, 0],
+                z=[r_ref * 0.95 * np.sin(er), r_ref * 1.05 * np.sin(er)],
+                mode='lines', line=dict(color='rgba(60,60,60,0.8)', width=2),
+                showlegend=False, hoverinfo='none',
+            ))
+        el_labels = go.Scatter3d(
+            x=[r_lbl_v * np.cos(np.radians(e)) for e in el_ticks],
+            y=[-0.04] * len(el_ticks),
+            z=[r_lbl_v * np.sin(np.radians(e)) for e in el_ticks],
+            mode='text', text=[f'{e}°' for e in el_ticks],
+            textfont=dict(size=12, color='rgba(40,40,40,1.0)'),
+            showlegend=False, hoverinfo='none',
+        )
+
+        # ── Figure ────────────────────────────────────────────────────────────
+        y_label = 'dB' if source == 'directivity' or self._is_normalized \
+                  else ('dB SPL' if self._is_spl else 'dBFS')
+
+        surf = go.Surface(
+            x=X, y=Y, z=Z,
+            surfacecolor=C,
+            colorscale=colorscale,
+            cmin=vmin, cmax=vmax,
+            colorbar=dict(title=y_label, ticksuffix=f' {y_label}'),
+        )
+
+        all_traces = ([surf, h_ring, az_labels, v_front, v_back, el_labels]
+                      + az_tick_lines + el_tick_lines)
+        fig = go.Figure(data=all_traces)
+        fig.update_layout(
+            title=title or f'Esfera de directividad — {freq_label}  [{y_label}]',
             scene=dict(
                 xaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
                 yaxis=dict(showbackground=False, showticklabels=False, title='', range=[-1.3, 1.3]),
