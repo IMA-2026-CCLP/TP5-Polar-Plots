@@ -334,3 +334,7 @@ class TabNotas(QWidget):
         self.btn_extract.setEnabled(False)
         self.btn_apply_edits.setEnabled(False)
         self.table_segs.setRowCount(0)
+
+    def detect_notes(self, dur: float, margin: float, thresh: float, ref_theta):
+        """Llamado desde el ribbon — desencadena detección con los parámetros del tab."""
+        self._on_detectar()

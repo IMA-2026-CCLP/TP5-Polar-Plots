@@ -145,6 +145,9 @@ def _build_hemisphere_grid(
     front_elevs = np.array(sorted(t for t in thetas if 0 <= t <= 90), dtype=float)
     n_elev      = len(front_elevs)
 
+    # Tolerancia para detectar si e_back existe en los datos medidos
+    theta_step = float(np.median(np.diff(np.sort(thetas)))) if len(thetas) > 1 else 10.0
+
     R_dB = np.zeros((n_elev, n_phi))
     for i_e, e in enumerate(front_elevs):
         i_f = int(np.argmin(np.abs(thetas - e)))
@@ -156,7 +159,12 @@ def _build_hemisphere_grid(
         else:
             e_back = 180.0 - e
             i_b    = int(np.argmin(np.abs(thetas - e_back)))
-            R_dB[i_e, :] = _build_full_ring(lev_2d[:, i_f], lev_2d[:, i_b])
+            if np.abs(thetas[i_b] - e_back) < theta_step * 0.6:
+                # Par frontal/trasero real → combinar con promedio energético en costuras
+                R_dB[i_e, :] = _build_full_ring(lev_2d[:, i_f], lev_2d[:, i_b])
+            else:
+                # Solo hemisferio superior: espejo de azimut para mantener continuidad
+                R_dB[i_e, :] = _build_full_ring(lev_2d[:, i_f], lev_2d[::-1, i_f])
 
     # Guardar nivel del cénit (el=90°) antes de excluirlo de la grilla
     zenith_dB: Optional[float] = None
@@ -172,31 +180,41 @@ def _build_hemisphere_grid(
     phi_orig  = np.arange(0, 360 + az_step, az_step, dtype=float)
     elev_orig = front_elevs
 
-    # Elevación máxima de la grilla: un paso antes del cénit exacto para evitar
-    # la singularidad cos(90°)=0 que colapsa todos los phi a un solo punto.
-    max_elev_grid = max(e for e in front_elevs if e < 90.0) if any(e < 90.0 for e in front_elevs) else front_elevs[-1]
+    # Elevaciones sin el cénit exacto (singularidad cos=0)
+    mask_no_zenith = front_elevs < 89.5
+    elev_fit = elev_orig[mask_no_zenith]
+    R_fit    = R_dB[mask_no_zenith, :]
+
+    # Si tenemos el cénit medido, agregarlo como restricción al spline
+    # (fila constante = zenith_dB) para que el spline converja suavemente,
+    # eliminando los "rayos" en el fan cap.
+    if zenith_dB is not None and len(elev_fit) > 0 and elev_fit[-1] < 89.0:
+        elev_fit = np.append(elev_fit, 89.5)
+        R_fit    = np.vstack([R_fit, np.full((1, n_phi), zenith_dB)])
+
+    # Interp hasta 89° (1° antes del cénit) para dejar un fan cap mínimo
+    interp_top = min(89.0, float(elev_fit[-1]))
 
     if interp_deg is not None:
         try:
             from scipy.interpolate import RectBivariateSpline
             phi_new  = np.arange(0, 360 + interp_deg, interp_deg, dtype=float)
             phi_new  = phi_new[phi_new <= 360]
-            elev_new = np.arange(0, max_elev_grid + interp_deg, interp_deg, dtype=float)
-            elev_new = elev_new[elev_new <= max_elev_grid]
-            mask_orig = front_elevs <= max_elev_grid
-            spl  = RectBivariateSpline(elev_orig[mask_orig], phi_orig,
-                                       R_dB[mask_orig, :], kx=3, ky=3)
+            elev_new = np.arange(0, interp_top + interp_deg * 0.5, interp_deg, dtype=float)
+            elev_new = elev_new[elev_new <= interp_top]
+            kx = min(3, len(elev_fit) - 1)
+            spl  = RectBivariateSpline(elev_fit, phi_orig, R_fit, kx=kx, ky=3)
             R_dB     = spl(elev_new, phi_new)
             phi_rad  = np.radians(phi_new)
             elev_rad = np.radians(elev_new)
         except Exception:
             phi_rad  = np.radians(phi_orig)
-            elev_rad = np.radians(elev_orig[front_elevs <= max_elev_grid])
-            R_dB     = R_dB[front_elevs <= max_elev_grid, :]
+            elev_rad = np.radians(elev_fit)
+            R_dB     = R_fit
     else:
-        mask_orig = front_elevs <= max_elev_grid
         phi_rad  = np.radians(phi_orig)
-        elev_rad = np.radians(elev_orig[mask_orig])
+        elev_rad = np.radians(elev_fit)
+        R_dB     = R_fit
         R_dB     = R_dB[mask_orig, :]
 
     return R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB
@@ -339,26 +357,17 @@ def build_balloon_html(
     Y = R_r * np.cos(E) * np.sin(P)
     Z = R_r * np.sin(E)
 
-    # Espejo: agregar hemisferio inferior
-    X_all, Y_all, Z_all, C_all = _mirror_grid(X, Y, Z, R_clip)
+    # Solo hemisferio superior (sin espejo)
+    traces = [_surface_trace(X, Y, Z, R_clip, cmin, cmax, colorscale)]
 
-    traces = [_surface_trace(X_all, Y_all, Z_all, C_all, cmin, cmax, colorscale)]
-
-    # Caps de cénit y nadir con mesh3d
+    # Cap del cénit con mesh3d
     if zenith_dB is not None:
         z_norm  = float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
         z_color = float(np.clip(zenith_dB, cmin, cmax))
-        # cénit (arriba)
         traces.append(_cap_mesh_trace(
-            X_all[-1], Y_all[-1], Z_all[-1],
+            X[-1], Y[-1], Z[-1],
             0.0, 0.0, z_norm,
-            C_all[-1], z_color, cmin, cmax, colorscale,
-        ))
-        # nadir (abajo, espejo)
-        traces.append(_cap_mesh_trace(
-            X_all[0], Y_all[0], Z_all[0],
-            0.0, 0.0, -z_norm,
-            C_all[0], z_color, cmin, cmax, colorscale,
+            R_clip[-1], z_color, cmin, cmax, colorscale,
         ))
 
     traces += _axes_traces()
@@ -387,8 +396,8 @@ def build_sphere_html(
     max_db:     Optional[float] = None,
 ) -> str:
     """
-    Esfera unitaria — idem plot_directivity_sphere en patron.py.
-    Radio constante = 1, el nivel se codifica sólo en color.
+    Hemisferio superior — radio constante = 1, nivel codificado en color.
+    Usa mesh3d triangulado para evitar la singularidad de superficie en el cénit.
     """
     lev_2d = levels[:, :, band_index]
 
@@ -398,35 +407,80 @@ def build_sphere_html(
 
     cmin = min_db if min_db is not None else vmin
     cmax = max_db if max_db is not None else vmax
-
     R_clip = np.clip(R_dB, cmin, cmax)
 
-    E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
-    X = np.cos(E) * np.cos(P)
-    Y = np.cos(E) * np.sin(P)
-    Z = np.sin(E)
+    # ── Construir mesh3d triangulado del hemisferio ───────────────────────────
+    # phi_rad incluye punto de cierre (0°==360°); usamos n_phi únicos
+    n_elev     = len(elev_rad)
+    n_phi_full = len(phi_rad)
+    n_phi      = n_phi_full - 1   # ángulos únicos (0°..358°)
 
-    # Espejo: agregar hemisferio inferior
-    X_all, Y_all, Z_all, C_all = _mirror_grid(X, Y, Z, R_clip)
+    # Vértices de la grilla (filas = elevación, cols = azimuth único)
+    E, P = np.meshgrid(elev_rad, phi_rad[:n_phi], indexing='ij')
+    Xv = (np.cos(E) * np.cos(P)).ravel()
+    Yv = (np.cos(E) * np.sin(P)).ravel()
+    Zv = np.sin(E).ravel()
+    Cv = R_clip[:, :n_phi].ravel()
 
-    traces = [_surface_trace(X_all, Y_all, Z_all, C_all, cmin, cmax, colorscale)]
-
-    # Caps de cénit y nadir con mesh3d
+    # Vértice ápice en el cénit
     if zenith_dB is not None:
-        z_color = float(np.clip(zenith_dB, cmin, cmax))
-        traces.append(_cap_mesh_trace(
-            X_all[-1], Y_all[-1], Z_all[-1],
-            0.0, 0.0, 1.0,
-            C_all[-1], z_color, cmin, cmax, colorscale,
-        ))
-        traces.append(_cap_mesh_trace(
-            X_all[0], Y_all[0], Z_all[0],
-            0.0, 0.0, -1.0,
-            C_all[0], z_color, cmin, cmax, colorscale,
-        ))
+        apex_color = float(np.clip(zenith_dB, cmin, cmax))
+    else:
+        apex_color = float(np.mean(Cv[(n_elev - 1) * n_phi:]))
+    apex_idx = len(Xv)
+    Xv = np.append(Xv, 0.0)
+    Yv = np.append(Yv, 0.0)
+    Zv = np.append(Zv, 1.0)
+    Cv = np.append(Cv, apex_color)
 
-    traces += _axes_traces()
+    i_tri, j_tri, k_tri = [], [], []
+
+    # Quads entre anillos de elevación → 2 triángulos cada uno
+    for ie in range(n_elev - 1):
+        for ip in range(n_phi):
+            ip1 = (ip + 1) % n_phi
+            v00 = ie * n_phi + ip
+            v01 = ie * n_phi + ip1
+            v10 = (ie + 1) * n_phi + ip
+            v11 = (ie + 1) * n_phi + ip1
+            i_tri += [v00, v00]
+            j_tri += [v10, v11]
+            k_tri += [v11, v01]
+
+    # Abanico desde el anillo superior hasta el ápice
+    for ip in range(n_phi):
+        ip1 = (ip + 1) % n_phi
+        v0  = (n_elev - 1) * n_phi + ip
+        v1  = (n_elev - 1) * n_phi + ip1
+        i_tri.append(v0)
+        j_tri.append(apex_idx)
+        k_tri.append(v1)
+
+    mesh_trace = {
+        "type": "mesh3d",
+        "x": Xv.tolist(), "y": Yv.tolist(), "z": Zv.tolist(),
+        "i": i_tri, "j": j_tri, "k": k_tri,
+        "intensity":     Cv.tolist(),
+        "intensitymode": "vertex",
+        "colorscale":    COLORSCALES.get(colorscale, "Plasma"),
+        "cmin": float(cmin), "cmax": float(cmax),
+        "showscale": True,
+        "colorbar": {
+            "title":     {"text": "dB", "side": "right"},
+            "thickness": 16, "len": 0.6, "x": 0.92,
+            "tickfont":  {"color": _TEXT_COL, "size": 11},
+            "titlefont": {"color": _TEXT_COL},
+        },
+        "lighting":      {"ambient": 0.75, "diffuse": 0.7, "specular": 0.15, "roughness": 0.4},
+        "lightposition": {"x": 100, "y": 100, "z": 150},
+        "hoverinfo": "skip",
+    }
+
+    traces = [mesh_trace] + _axes_traces()
     layout  = _scene_layout(f"Esfera de Directividad — {freq_label(band_hz)} Hz")
+    # Corregir proporción: Z va 0→1 mientras X,Y van -1→1; sin esto Z se estira
+    layout["scene"]["aspectmode"]  = "manual"
+    layout["scene"]["aspectratio"] = {"x": 1, "y": 1, "z": 0.5}
 
     zenith_str = f" &nbsp;|&nbsp; <b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
     info = (
@@ -520,8 +574,9 @@ def build_polar2d_html(
     gmax  = float(np.nanmax(r_full - ref_val)) if valid.any() else 0.0
     r_rel = np.where(valid, r_full - ref_val, -60.0)
 
-    # Rango dinámico: user-defined o 30 dB por defecto
-    r_floor = min_db if min_db is not None else -30.0
+    # Rango dinámico: user-defined o auto-scale desde los datos
+    step = 5.0
+    r_floor = min_db if min_db is not None else float(np.floor(gmin / step) * step)
     r_ceil  = max_db if max_db is not None else 0.0
     dyn_range = r_ceil - r_floor   # positivo
 
@@ -542,7 +597,6 @@ def build_polar2d_html(
     ]
 
     # ── Anillos de referencia (cada 5 dB dentro del rango) ───────────────────
-    step = 5.0
     ring_vals = np.arange(np.ceil(r_floor / step) * step, r_ceil + 0.01, step)
     ring_vals = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
     ref_db_rings = [float(v) for v in ring_vals]
@@ -555,14 +609,14 @@ def build_polar2d_html(
             "r": [r_ring] * 361, "theta": theta_ring.tolist(),
             "mode": "lines",
             "line": {"color": "rgba(255,255,255,0.12)", "width": 1, "dash": "dot"},
-            "hovertemplate": f"{db} dBr<extra></extra>",
+            "hovertemplate": f"{db:g} dBr<extra></extra>",
             "showlegend": False,
         })
         ring_traces.append({
             "type": "scatterpolar",
             "r": [r_ring], "theta": [92],
             "mode": "text",
-            "text": [f"{db}"],
+            "text": [f"{db:g}"],
             "textfont": {"color": "rgba(200,200,200,0.5)", "size": 9},
             "hoverinfo": "skip", "showlegend": False,
         })
@@ -599,7 +653,7 @@ def build_polar2d_html(
                 "tickfont": {"color": _TEXT_COL, "size": 11},
                 "linecolor": "rgba(255,255,255,0.2)",
                 "gridcolor": "rgba(255,255,255,0.1)",
-                "direction": "clockwise", "rotation": 90,
+                "direction": "counterclockwise", "rotation": 90,
             },
         },
         "uirevision": "polar2d",

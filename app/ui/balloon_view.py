@@ -43,6 +43,7 @@ class BalloonView(QWidget):
         show_placeholder()
     """
     point_hovered = pyqtSignal(str)
+    log           = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -190,6 +191,13 @@ class BalloonView(QWidget):
         if self._levels is None or self._bands is None:
             return
 
+        try:
+            self._render_inner()
+        except Exception as exc:
+            import traceback
+            self.log.emit(f"[ERROR] {self._view_mode} render: {exc}\n{traceback.format_exc()}")
+
+    def _render_inner(self):
         lvl, bnd, bi = self._filtered()
         band_hz = float(bnd[bi])
 

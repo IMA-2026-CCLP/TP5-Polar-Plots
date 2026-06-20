@@ -7,10 +7,9 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QPushButton, QLabel, QLineEdit, QFileDialog,
-    QRadioButton, QButtonGroup,
     QStackedWidget, QScrollArea, QFrame,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 
 from core.worker import Worker
 
@@ -29,6 +28,7 @@ class TabCarga(QWidget):
         super().__init__(parent)
         self._worker: Worker | None = None
         self._ma = None
+        self._current_mode = 'audio'
         self._build_ui()
 
     # ── Construcción UI ───────────────────────────────────────────────────
@@ -58,28 +58,12 @@ class TabCarga(QWidget):
         g = QGroupBox("FUENTE")
         lay = QVBoxLayout(g)
         lay.setSpacing(12)
+        lay.setContentsMargins(12, 16, 12, 12)
 
-        # Radio buttons
-        radio_row = QHBoxLayout()
-        self.radio_audio = QRadioButton("Desde carpeta de audios")
-        self.radio_npz   = QRadioButton("Cargar tensor .npz guardado")
-        self.radio_audio.setChecked(True)
-        self._radio_group = QButtonGroup()
-        self._radio_group.addButton(self.radio_audio, 0)
-        self._radio_group.addButton(self.radio_npz,   1)
-        radio_row.addWidget(self.radio_audio)
-        radio_row.addWidget(self.radio_npz)
-        radio_row.addStretch()
-        lay.addLayout(radio_row)
-
-        # Stack: panel audios / panel NPZ
         self._source_stack = QStackedWidget()
         self._source_stack.addWidget(self._make_panel_audio())
         self._source_stack.addWidget(self._make_panel_npz())
         lay.addWidget(self._source_stack)
-
-        self.radio_audio.toggled.connect(lambda checked: self._source_stack.setCurrentIndex(0) if checked else None)
-        self.radio_npz.toggled.connect(lambda checked:   self._source_stack.setCurrentIndex(1) if checked else None)
 
         return g
 
@@ -184,28 +168,36 @@ class TabCarga(QWidget):
 
     def _make_group_acciones(self) -> QGroupBox:
         g = QGroupBox("ACCIONES")
-        lay = QHBoxLayout(g)
+        lay = QVBoxLayout(g)
+        lay.setContentsMargins(12, 16, 12, 12)
         lay.setSpacing(10)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
 
         self.btn_cargar = QPushButton("Cargar y procesar")
         self.btn_cargar.setObjectName("btn_primary")
         self.btn_cargar.clicked.connect(self._on_cargar)
-        lay.addWidget(self.btn_cargar)
+        btn_row.addWidget(self.btn_cargar)
 
         self.btn_guardar_npz = QPushButton("Guardar tensor .npz")
         self.btn_guardar_npz.setEnabled(False)
         self.btn_guardar_npz.clicked.connect(self._on_guardar_npz)
-        lay.addWidget(self.btn_guardar_npz)
+        btn_row.addWidget(self.btn_guardar_npz)
 
-        lay.addStretch()
+        btn_row.addStretch()
+        lay.addLayout(btn_row)
         return g
 
     def _make_status_bar(self) -> QWidget:
         w = QWidget()
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(4, 4, 0, 0)
         self.lbl_status = QLabel("Sin tensor cargado.")
-        self.lbl_status.setObjectName("label_hint")
+        self.lbl_status.setStyleSheet(
+            "color: #8a96be; font-size: 10pt;"
+        )
+        self.lbl_status.setWordWrap(True)
         lay.addWidget(self.lbl_status)
         lay.addStretch()
         return w
@@ -229,7 +221,7 @@ class TabCarga(QWidget):
         self.btn_cargar.setEnabled(False)
         self.lbl_status.setText("Cargando…")
 
-        if self.radio_audio.isChecked():
+        if self._current_mode == 'audio':
             self._worker = Worker(self._load_from_audio)
         else:
             self._worker = Worker(self._load_from_npz)
@@ -291,3 +283,8 @@ class TabCarga(QWidget):
     def set_ma(self, ma):
         """Permite que MainWindow inyecte un MicArray (ej.: cargado por menú)."""
         self._on_load_done(ma)
+
+    def set_source_mode(self, mode: str):
+        """Cambia el panel visible (audio / tensor) sin disparar carga."""
+        self._current_mode = mode
+        self._source_stack.setCurrentIndex(0 if mode == 'audio' else 1)

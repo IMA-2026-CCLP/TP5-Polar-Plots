@@ -112,6 +112,122 @@ def save_results(
     print(f"  Guardado: {filepath}  ({size_kb:.0f} KB)")
 
 
+def drop_bad_thetas(
+    filepath_in:  str,
+    filepath_out: str,
+    bad_thetas:   list[float],
+) -> None:
+    """
+    Elimina filas de thetas corruptos del NPZ (ej. mic roto o mal interpolado).
+    La visualización rellenará el hueco con el spline automáticamente.
+
+    Parameters
+    ----------
+    bad_thetas : ej. [80.0] para eliminar theta=80° (mic_9 roto)
+    """
+    raw    = np.load(filepath_in, allow_pickle=False)
+    thetas = raw['thetas'].astype(np.float64)
+
+    keep = np.ones(len(thetas), dtype=bool)
+    for bt in bad_thetas:
+        idx = int(np.argmin(np.abs(thetas - bt)))
+        if np.abs(thetas[idx] - bt) <= 1.0:
+            keep[idx] = False
+            print(f"  Eliminando theta={thetas[idx]:.1f}°")
+        else:
+            print(f"  AVISO: theta={bt}° no encontrado, omitiendo.")
+
+    kwargs = {k: raw[k] for k in raw.files}
+    kwargs['thetas']     = thetas[keep].astype(np.float32)
+    kwargs['dir_levels'] = raw['dir_levels'][:, keep, :].astype(np.float32)
+    for key in raw.files:
+        if key.endswith('_dir_levels') and key.startswith('note_'):
+            kwargs[key] = raw[key][:, keep, :].astype(np.float32)
+
+    p = str(filepath_out)
+    if not p.endswith('.npz'):
+        p += '.npz'
+    np.savez_compressed(p, **kwargs)
+    print(f"  Guardado sin thetas malos: {p}")
+
+
+def repair_broken_mic(
+    filepath_in:  str,
+    filepath_out: str,
+    bad_thetas:   list[float],
+) -> None:
+    """
+    Sintetiza los thetas de micrófonos rotos usando spline cúbico sobre todos
+    los demás thetas medidos (por azimut y banda), y guarda un NPZ corregido.
+
+    Parameters
+    ----------
+    filepath_in  : NPZ original con datos incorrectos/interpolados manualmente
+    filepath_out : NPZ de salida corregido
+    bad_thetas   : lista de ángulos theta (en grados) a reconstruir
+                   ej. [80.0] para mic_9 roto
+    """
+    from scipy.interpolate import CubicSpline
+
+    data = load_results(filepath_in)
+    thetas     = data['thetas'].astype(np.float64)   # (n_thetas,)
+    dir_levels = data['dir_levels'].astype(np.float64)  # (n_az, n_thetas, n_bands)
+    n_az, n_thetas, n_bands = dir_levels.shape
+
+    for bad_theta in bad_thetas:
+        bad_idx = int(np.argmin(np.abs(thetas - bad_theta)))
+        if np.abs(thetas[bad_idx] - bad_theta) > 1.0:
+            print(f"  AVISO: theta={bad_theta}° no encontrado en los datos, omitiendo.")
+            continue
+
+        good_mask = np.ones(n_thetas, dtype=bool)
+        good_mask[bad_idx] = False
+        good_thetas = thetas[good_mask]
+
+        if len(good_thetas) < 4:
+            print(f"  AVISO: pocos puntos para spline en theta={bad_theta}°, omitiendo.")
+            continue
+
+        print(f"  Sintetizando theta={bad_theta}° con spline sobre {good_thetas} °...")
+        for ia in range(n_az):
+            for ib in range(n_bands):
+                vals = dir_levels[ia, good_mask, ib]
+                cs   = CubicSpline(good_thetas, vals)
+                dir_levels[ia, bad_idx, ib] = float(cs(bad_theta))
+
+    # Preservar el resto del NPZ (notas, metadata, etc.)
+    raw = np.load(filepath_in, allow_pickle=False)
+    kwargs: dict = {k: raw[k] for k in raw.files}
+    kwargs['dir_levels'] = dir_levels.astype(np.float32)
+
+    # También reparar las notas si las hay
+    for key in raw.files:
+        if key.endswith('_dir_levels') and key.startswith('note_'):
+            note_lev = raw[key].astype(np.float64)
+            for bad_theta in bad_thetas:
+                bad_idx = int(np.argmin(np.abs(thetas - bad_theta)))
+                if np.abs(thetas[bad_idx] - bad_theta) > 1.0:
+                    continue
+                good_mask = np.ones(n_thetas, dtype=bool)
+                good_mask[bad_idx] = False
+                good_thetas = thetas[good_mask]
+                if len(good_thetas) < 4:
+                    continue
+                for ia in range(n_az):
+                    for ib in range(note_lev.shape[2]):
+                        vals = note_lev[ia, good_mask, ib]
+                        cs   = CubicSpline(good_thetas, vals)
+                        note_lev[ia, bad_idx, ib] = float(cs(bad_theta))
+            kwargs[key] = note_lev.astype(np.float32)
+
+    p = str(filepath_out)
+    if not p.endswith('.npz'):
+        p += '.npz'
+    np.savez_compressed(p, **kwargs)
+    size_kb = Path(p).stat().st_size / 1024
+    print(f"  NPZ reparado guardado en: {p}  ({size_kb:.0f} KB)")
+
+
 def load_results(filepath: str) -> dict:
     """
     Carga un NPZ de resultados de directividad.
