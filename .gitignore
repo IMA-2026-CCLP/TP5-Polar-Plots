@@ -1,6 +1,10 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 .venv
+
+# PyInstaller output — no subir al repo
+build/
+dist/
 Medicion_Cristian
 Medicion_Juli
 *.wav

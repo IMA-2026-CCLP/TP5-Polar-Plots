@@ -14,18 +14,24 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 # WebEngine debe importarse antes de crear QApplication
 from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 
 from ui.main_window import MainWindow
 
+_ICON_PATH = os.path.join(os.path.dirname(__file__), 'ui', 'icons', 'logo.ico')
+if not os.path.exists(_ICON_PATH):
+    _ICON_PATH = os.path.join(os.path.dirname(__file__), 'ui', 'icons', 'logo.svg')
+
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Polar Pattern Analyzer")
-    app.setApplicationVersion("2.0.0")
-    app.setOrganizationName("AcousticTools")
+    app.setApplicationName("Polar Pattern CCLP")
+    app.setApplicationVersion("2.1.0")
+    app.setOrganizationName("CCLP")
+    if os.path.exists(_ICON_PATH):
+        app.setWindowIcon(QIcon(_ICON_PATH))
 
     font = QFont()
     font.setFamily("Segoe UI" if sys.platform == "win32" else

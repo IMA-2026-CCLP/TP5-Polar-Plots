@@ -11,23 +11,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QIcon
 
-# ── Paleta ────────────────────────────────────────────────────────────────────
-_BG_TABS    = "#0d0f18"
-_BG_RIBBON  = "#181b2c"
-_C_TEXT     = "#dde3f4"
-_C_HINT     = "#8a96be"   # etiquetas de campo — contraste ≥5:1 sobre fondos oscuros
-_C_ICON     = "#9aa6cc"
-_C_SEP      = "#252840"
-_C_ACCENT   = "#6070d0"
-_C_BTN_BG   = "#1e2238"
-_C_BTN_BOR  = "#3a3f60"
+from ui import theme as _theme
 
-_ICON_SZ    = QSize(26, 26)
-_BTN_W      = 62
-_BTN_H      = 68
-_RIBBON_H   = 100  # altura del área de contenido del ribbon
-_TAB_H      = 30   # altura de la barra de tabs
-
+# ── Constantes de layout (no dependen del tema) ───────────────────────────────
+_ICON_SZ   = QSize(26, 26)
+_BTN_W     = 62
+_BTN_H     = 68
+_RIBBON_H  = 100
+_TAB_H     = 30
 _FONT_SMALL = "font-size: 9pt; font-family: 'Segoe UI', Inter, sans-serif;"
 _FONT_GROUP = "font-size: 8pt;"
 
@@ -44,9 +35,9 @@ TAB_LABELS = ["Archivo", "Procesamiento", "Notas", "Directividad"]
 TAB_IDX    = {name: i for i, name in enumerate(TAB_LABELS)}
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers (sin setStyleSheet — estilos vienen del QSS global) ───────────────
 
-def _icon(name: str, color: str = _C_ICON):
+def _icon(name: str, color: str = "#9aa6cc"):
     return qta.icon(name, color=color)
 
 
@@ -57,22 +48,13 @@ def _tool_btn(icon_name: str, label: str, w: int = _BTN_W) -> QToolButton:
     btn.setText(label)
     btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
     btn.setFixedSize(w, _BTN_H)
-    btn.setStyleSheet(f"""
-        QToolButton {{
-            background: transparent; border: none; border-radius: 5px;
-            color: {_C_ICON}; {_FONT_SMALL} padding: 4px 2px 0 2px;
-        }}
-        QToolButton:hover  {{ background: {_C_BTN_BG}; color: {_C_TEXT}; }}
-        QToolButton:pressed {{ background: #0d0f1a; }}
-        QToolButton:disabled {{ color: #2e3248; }}
-    """)
     return btn
 
 
 def _vsep() -> QWidget:
     sep = QWidget()
+    sep.setObjectName("ribbon_vsep")
     sep.setFixedSize(1, 60)
-    sep.setStyleSheet("background: #353a58;")
     return sep
 
 
@@ -81,13 +63,6 @@ def _le(default: str = "", width: int = 60, placeholder: str = "") -> QLineEdit:
     w.setPlaceholderText(placeholder)
     w.setFixedWidth(width)
     w.wheelEvent = lambda e: e.ignore()
-    w.setStyleSheet(f"""
-        QLineEdit {{
-            background: {_C_BTN_BG}; border: 1px solid {_C_BTN_BOR};
-            border-radius: 3px; color: {_C_TEXT}; {_FONT_SMALL}
-            padding: 2px 4px; min-height: 18px;
-        }}
-    """)
     return w
 
 
@@ -95,88 +70,47 @@ def _combo(width: int = 100) -> QComboBox:
     w = QComboBox()
     w.setFixedWidth(width)
     w.wheelEvent = lambda e: e.ignore()
-    w.setStyleSheet(f"""
-        QComboBox {{
-            background: {_C_BTN_BG}; border: 1px solid {_C_BTN_BOR};
-            border-radius: 3px; color: {_C_TEXT}; {_FONT_SMALL}
-            padding: 2px 4px; min-height: 18px;
-        }}
-        QComboBox::drop-down {{ border: none; width: 14px; }}
-    """)
     return w
 
 
-def _lbl(text: str, color: str = _C_HINT) -> QLabel:
-    l = QLabel(text)
-    l.setStyleSheet(f"color:{color}; {_FONT_SMALL} background:transparent;")
-    return l
+def _lbl(text: str, _color: str = "") -> QLabel:
+    """Crea un QLabel; el color viene del QSS global (ignoramos _color)."""
+    return QLabel(text)
 
 
 def _chk(text: str) -> QCheckBox:
-    c = QCheckBox(text)
-    c.setStyleSheet(f"""
-        QCheckBox {{
-            color: {_C_TEXT}; {_FONT_SMALL} spacing: 5px; background: transparent;
-        }}
-        QCheckBox::indicator {{
-            width: 13px; height: 13px;
-            border: 1px solid {_C_BTN_BOR};
-            border-radius: 3px;
-            background: {_C_BTN_BG};
-        }}
-        QCheckBox::indicator:checked {{
-            background: {_C_ACCENT};
-            border-color: #8090e0;
-            image: url("{_CHK_ICON_PATH}");
-        }}
-        QCheckBox::indicator:hover {{
-            border-color: {_C_ACCENT};
-        }}
-    """)
-    return c
+    return QCheckBox(text)
 
 
 def _svg_tool_btn(svg_path: str, label: str, w: int = _BTN_W) -> QToolButton:
-    """QToolButton con icono cargado desde un SVG local (sin qtawesome)."""
     btn = QToolButton()
     btn.setIcon(QIcon(svg_path))
     btn.setIconSize(_ICON_SZ)
     btn.setText(label)
     btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
     btn.setFixedSize(w, _BTN_H)
-    btn.setStyleSheet(f"""
-        QToolButton {{
-            background: transparent; border: none; border-radius: 5px;
-            color: {_C_ICON}; {_FONT_SMALL} padding: 4px 2px 0 2px;
-        }}
-        QToolButton:hover   {{ background: {_C_BTN_BG}; color: {_C_TEXT}; }}
-        QToolButton:pressed  {{ background: #0d0f1a; }}
-        QToolButton:disabled {{ color: #2e3248; }}
-    """)
     return btn
 
 
 def _accent_btn(label: str) -> QPushButton:
-    """Botón accent compacto para usarlo dentro del ribbon."""
     btn = QPushButton(label)
-    btn.setStyleSheet(f"""
-        QPushButton {{
+    btn.setStyleSheet("""
+        QPushButton {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                 stop:0 #5d70cc, stop:1 #4858b8);
             color: #ffffff; border: none; font-weight: 600;
             font-size: 9pt; padding: 5px 10px; border-radius: 6px;
-        }}
-        QPushButton:hover {{
+        }
+        QPushButton:hover {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                 stop:0 #6d80dc, stop:1 #5868c8);
-        }}
-        QPushButton:disabled {{ background: #1e2238; color: #404868; }}
+        }
+        QPushButton:disabled { background: #1e2238; color: #404868; }
     """)
     return btn
 
 
 def _group(title: str) -> tuple[QWidget, QVBoxLayout]:
-    """Widget de grupo con título en la parte inferior."""
     outer = QWidget()
     outer.setStyleSheet("background: transparent;")
     v = QVBoxLayout(outer)
@@ -186,9 +120,8 @@ def _group(title: str) -> tuple[QWidget, QVBoxLayout]:
     body.setSpacing(2)
     v.addLayout(body, 1)
     lbl = QLabel(title)
+    lbl.setObjectName("ribbon_group_lbl")
     lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    lbl.setStyleSheet(f"color: #606880; {_FONT_GROUP} background: transparent;")
-    v.addWidget(lbl)
     return outer, body
 
 
@@ -200,28 +133,30 @@ class RibbonBar(QWidget):
 
     Señales emitidas (conectar en MainWindow):
       tab_changed(int)
+      sig_theme_toggled()
       # Archivo
       sig_load_audio, sig_save_tensor, sig_load_tensor
       sig_load_polar_npz, sig_save_polar_npz
       # Procesamiento
       sig_apply_hpf(float)
-      sig_align_takes(float, float, object)   # onset, thresh, theta
+      sig_align_takes(float, float, object)
       sig_align_ref()
       sig_open_calibracion()
-      sig_plot_params(object, object, bool, bool, object)  # theta, az, env, db, yrange
+      sig_plot_params(object, object, bool, bool, object)
       # Notas
-      sig_detect_notes(float, float, float, object)  # min_dur, margin, thresh, ref_theta
+      sig_detect_notes(float, float, float, object)
       # Directividad
-      sig_compute_dir(str, float, float, float, int, int)
+      sig_compute_dir(str, float, float, int, int)
       sig_save_dir_npz()
       sig_dir_display_changed()
     """
 
-    tab_changed = pyqtSignal(int)
+    tab_changed      = pyqtSignal(int)
+    sig_theme_toggled = pyqtSignal()
 
-    sig_load_audio      = pyqtSignal()  # navegar a tab Archivo, modo audio
+    sig_load_audio      = pyqtSignal()
     sig_save_tensor     = pyqtSignal()
-    sig_load_tensor     = pyqtSignal()  # navegar a tab Archivo, modo tensor
+    sig_load_tensor     = pyqtSignal()
     sig_load_polar_npz  = pyqtSignal()
     sig_save_polar_npz  = pyqtSignal()
 
@@ -233,7 +168,7 @@ class RibbonBar(QWidget):
 
     sig_detect_notes    = pyqtSignal(float, float, float, object)
 
-    sig_compute_dir     = pyqtSignal(str, float, float, float, int, int)
+    sig_compute_dir     = pyqtSignal(str, float, float, int, int)
     sig_save_dir_npz    = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
 
@@ -252,13 +187,13 @@ class RibbonBar(QWidget):
         root.addWidget(self._make_tab_bar())
 
         sep = QFrame()
+        sep.setObjectName("ribbon_sep")
         sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background:{_C_SEP};")
         root.addWidget(sep)
 
         self._stack = QStackedWidget()
+        self._stack.setObjectName("ribbon_stack")
         self._stack.setFixedHeight(_RIBBON_H)
-        self._stack.setStyleSheet(f"background:{_BG_RIBBON};")
         self._stack.addWidget(self._panel_archivo())
         self._stack.addWidget(self._panel_procesamiento())
         self._stack.addWidget(self._panel_notas())
@@ -267,6 +202,7 @@ class RibbonBar(QWidget):
 
     def _make_tab_bar(self) -> QWidget:
         bar = QWidget()
+        bar.setObjectName("ribbon_tab_bar")
         bar.setFixedHeight(_TAB_H)
 
         lay = QHBoxLayout(bar)
@@ -274,10 +210,7 @@ class RibbonBar(QWidget):
         lay.setSpacing(0)
 
         logo = QLabel("⬡")
-        logo.setStyleSheet(
-            f"color:{_C_ACCENT}; font-size:13pt; background:transparent;"
-            "padding: 0 10px 0 6px;"
-        )
+        logo.setObjectName("ribbon_logo")
         lay.addWidget(logo)
 
         self._tab_grp = QButtonGroup(bar)
@@ -294,29 +227,14 @@ class RibbonBar(QWidget):
 
         lay.addStretch()
 
-        bar.setStyleSheet(f"""
-            QWidget {{ background: {_BG_TABS}; }}
-            QLabel  {{ background: transparent; border: none; }}
-            QToolButton#ribbon_tab {{
-                background: transparent;
-                border: none;
-                border-bottom: 2px solid transparent;
-                color: {_C_HINT};
-                font-size: 9.5pt;
-                font-family: 'Segoe UI', Inter, sans-serif;
-                padding: 5px 16px 3px 16px;
-                min-width: 60px;
-            }}
-            QToolButton#ribbon_tab:checked {{
-                color: {_C_TEXT};
-                border-bottom: 2px solid {_C_ACCENT};
-                background: {_BG_RIBBON};
-            }}
-            QToolButton#ribbon_tab:hover:!checked {{
-                color: #9aa0b8;
-                background: rgba(255,255,255,0.04);
-            }}
-        """)
+        self._btn_theme = QToolButton()
+        self._btn_theme.setObjectName("ribbon_theme_toggle")
+        self._btn_theme.setFixedHeight(_TAB_H)
+        self._btn_theme.setToolTip("Cambiar tema claro/oscuro")
+        self._update_theme_icon(_theme.current())
+        self._btn_theme.clicked.connect(self.sig_theme_toggled)
+        lay.addWidget(self._btn_theme)
+
         return bar
 
     def _switch_tab(self, idx: int):
@@ -364,14 +282,11 @@ class RibbonBar(QWidget):
     def _panel_procesamiento(self) -> QWidget:
         w, lay = _panel_base()
 
-        # ── VISTA ──────────────────────────────────────────────────────────────
-        # 3 columnas: θ/Az combos | Envolvente/dB checkboxes | Min/Max inputs
         grp, body = _group("VISTA")
         grp.setMaximumWidth(330)
 
         cols = QHBoxLayout(); cols.setSpacing(10)
 
-        # Col 1 — selectores angulares
         c1 = QVBoxLayout(); c1.setSpacing(4)
         th_row = QHBoxLayout(); th_row.setSpacing(4)
         th_row.addWidget(_lbl("θ")); self.combo_theta = _combo(90); th_row.addWidget(self.combo_theta); th_row.addStretch()
@@ -380,14 +295,12 @@ class RibbonBar(QWidget):
         c1.addLayout(th_row); c1.addLayout(az_row)
         cols.addLayout(c1)
 
-        # Col 2 — checkboxes
         c2 = QVBoxLayout(); c2.setSpacing(4)
         self.chk_envelope = _chk("Envolvente"); self.chk_envelope.setChecked(True)
         self.chk_db = _chk("dB"); self.chk_db.toggled.connect(self._on_db_toggled)
         c2.addWidget(self.chk_envelope); c2.addWidget(self.chk_db)
         cols.addLayout(c2)
 
-        # Col 3 — rango Y (vacío = auto)
         c3 = QVBoxLayout(); c3.setSpacing(4)
         mn_row = QHBoxLayout(); mn_row.setSpacing(4)
         mn_row.addWidget(_lbl("Min"))
@@ -410,7 +323,6 @@ class RibbonBar(QWidget):
         lay.addWidget(grp)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # ── HPF ────────────────────────────────────────────────────────────────
         grp2, body2 = _group("HPF")
         grp2.setMaximumWidth(150)
 
@@ -430,7 +342,6 @@ class RibbonBar(QWidget):
         lay.addWidget(grp2)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # ── ALINEACIÓN ─────────────────────────────────────────────────────────
         grp3, body3 = _group("ALINEACIÓN")
 
         al_row = QHBoxLayout(); al_row.setSpacing(6)
@@ -465,7 +376,6 @@ class RibbonBar(QWidget):
         lay.addWidget(grp3)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # ── CALIBRAR ───────────────────────────────────────────────────────────
         grp4, body4 = _group("CALIBRAR")
         body4.addStretch()
         self.btn_calibrar = _tool_btn('fa5s.sliders-h', 'Calibrar', 78)
@@ -518,17 +428,15 @@ class RibbonBar(QWidget):
         from plot.balloon import COLORSCALES
         w, lay = _panel_base()
 
-        # ── CÁLCULO DIRECTIVIDAD ──────────────────────────────────────────────
         grp, body = _group("CÁLCULO DIRECTIVIDAD")
         grp.setMaximumWidth(285)
         body.setSpacing(5)
         body.addStretch(1)
 
-        # Grilla: 2 filas × 6 columnas — columnas alineadas entre filas
         g = QGridLayout()
         g.setHorizontalSpacing(5)
         g.setVerticalSpacing(5)
-        g.setColumnStretch(7, 1)       # col 7 vacía: absorbe espacio extra
+        g.setColumnStretch(7, 1)
 
         g.addWidget(_lbl("Bandas:"), 0, 0)
         self.combo_bands = _combo(52)
@@ -543,16 +451,12 @@ class RibbonBar(QWidget):
         self.le_hz_max.editingFinished.connect(self.sig_dir_display_changed)
         g.addWidget(self.le_hz_max, 0, 5)
 
-        g.addWidget(_lbl("VAD:"), 1, 0)
-        self.le_vad = _le("30", 38)
-        g.addWidget(self.le_vad, 1, 1)
-        g.addWidget(_lbl("dBSPL"), 1, 2)
-        g.addWidget(_lbl("Ref Az:"), 1, 3)
+        g.addWidget(_lbl("Ref Az:"), 1, 0)
         self.le_ref_az = _le("0", 36)
-        g.addWidget(self.le_ref_az, 1, 4)
-        g.addWidget(_lbl("θ:"), 1, 5)
+        g.addWidget(self.le_ref_az, 1, 1)
+        g.addWidget(_lbl("θ:"), 1, 2)
         self.le_ref_th = _le("0", 36)
-        g.addWidget(self.le_ref_th, 1, 6)
+        g.addWidget(self.le_ref_th, 1, 3)
 
         body.addLayout(g)
         body.addSpacing(4)
@@ -565,7 +469,6 @@ class RibbonBar(QWidget):
         lay.addWidget(grp)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # ── NOTA ──────────────────────────────────────────────────────────────
         grp2, body2 = _group("NOTA")
         grp2.setMaximumWidth(155)
         body2.addStretch(1)
@@ -577,12 +480,11 @@ class RibbonBar(QWidget):
         lay.addWidget(grp2)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # ── VISUALIZACIÓN ─────────────────────────────────────────────────────
         grp3, body3 = _group("VISUALIZACIÓN")
+        grp3.setMaximumWidth(390)
         body3.setSpacing(5)
         body3.addStretch(1)
 
-        # Fila 1: Color / Elev / Sim
         gv = QGridLayout()
         gv.setHorizontalSpacing(5)
         gv.setVerticalSpacing(5)
@@ -609,8 +511,8 @@ class RibbonBar(QWidget):
 
         body3.addLayout(gv)
 
-        # Fila 2: checkboxes de vistas
         r3b = QHBoxLayout(); r3b.setSpacing(12)
+        r3b.addStretch()
         self._view_checks: dict[str, QCheckBox] = {}
         for label, mode in [("3D","3d"),("Esfera","sphere"),("Polar 2D","polar2d"),("Espectro","spectrum")]:
             chk = _chk(label); chk.setChecked(True)
@@ -624,13 +526,11 @@ class RibbonBar(QWidget):
         lay.addWidget(grp3)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # ── ESPECTRO ──────────────────────────────────────────────────────────
         grp4, body4 = _group("ESPECTRO")
         grp4.setMaximumWidth(195)
         body4.setSpacing(5)
         body4.addStretch(1)
 
-        # QGridLayout: col 0 = labels (misma ancho), col 1 = combos (alineados)
         ge = QGridLayout()
         ge.setHorizontalSpacing(5)
         ge.setVerticalSpacing(5)
@@ -654,7 +554,6 @@ class RibbonBar(QWidget):
         lay.addWidget(grp4)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # ── GUARDAR + STATUS ──────────────────────────────────────────────────
         grp5, body5 = _group("GUARDAR")
         grp5.setMaximumWidth(100)
         body5.addStretch(1)
@@ -665,7 +564,7 @@ class RibbonBar(QWidget):
         body5.addStretch(1)
         lay.addWidget(grp5)
 
-        self.lbl_dir_status = _lbl("Sin datos.", _C_HINT)
+        self.lbl_dir_status = _lbl("Sin datos.")
         self.lbl_dir_status.setWordWrap(True)
         self.lbl_dir_status.setMaximumWidth(130)
         self.lbl_dir_status.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -727,14 +626,24 @@ class RibbonBar(QWidget):
         try:
             hz_min = float(self.le_hz_min.text())
             hz_max = float(self.le_hz_max.text())
-            vad    = float(self.le_vad.text())
             ref_az = int(float(self.le_ref_az.text()))
             ref_th = int(float(self.le_ref_th.text()))
         except ValueError:
-            hz_min, hz_max, vad, ref_az, ref_th = 200.0, 8000.0, 30.0, 0, 0
+            hz_min, hz_max, ref_az, ref_th = 200.0, 8000.0, 0, 0
         self.sig_compute_dir.emit(
-            self.combo_bands.currentText(), hz_min, hz_max, vad, ref_az, ref_th
+            self.combo_bands.currentText(), hz_min, hz_max, ref_az, ref_th
         )
+
+    # ── API de tema ───────────────────────────────────────────────────────────
+
+    def _update_theme_icon(self, palette: dict):
+        """Actualiza el ícono del botón de toggle según el tema activo."""
+        if palette['name'] == 'dark':
+            self._btn_theme.setText("☀")
+            self._btn_theme.setToolTip("Cambiar a tema claro")
+        else:
+            self._btn_theme.setText("🌙")
+            self._btn_theme.setToolTip("Cambiar a tema oscuro")
 
     # ── Helpers internos ──────────────────────────────────────────────────────
 
@@ -749,8 +658,6 @@ class RibbonBar(QWidget):
         return ("none", "azimuth", "elevation", "both")[self.combo_sym.currentIndex()]
 
     def set_ma_loaded(self, ma):
-        """Llamar cuando se carga un MicArray para actualizar combos y habilitar botones."""
-        # Thetas
         self.combo_theta.blockSignals(True)
         self.combo_az.blockSignals(True)
         self.combo_align_theta.blockSignals(True)
@@ -780,7 +687,6 @@ class RibbonBar(QWidget):
         self.combo_align_theta.blockSignals(False)
         self.combo_note_theta.blockSignals(False)
 
-        # Habilitar botones
         self.btn_save_tensor.setEnabled(True)
         self.btn_hpf.setEnabled(True)
         self.btn_align_takes.setEnabled(True)
@@ -789,11 +695,9 @@ class RibbonBar(QWidget):
         self.btn_detect.setEnabled(True)
         self.btn_compute.setEnabled(ma._is_spl)
 
-        # Disparar render inicial del gráfico de procesamiento
         self._emit_plot_params()
 
     def set_notes_loaded(self, notes: list[str]):
-        """Actualiza el combo de notas en Directividad."""
         self.combo_nota.blockSignals(True)
         self.combo_nota.clear()
         self.combo_nota.addItem("Todo el audio")
@@ -802,7 +706,6 @@ class RibbonBar(QWidget):
         self.combo_nota.blockSignals(False)
 
     def set_dir_computed(self, thetas):
-        """Llamar tras calcular directividad para actualizar elev y habilitar guardar."""
         self.combo_el.blockSignals(True)
         self.combo_el.clear()
         self.combo_el.addItem("Auto (0°)")
@@ -816,7 +719,6 @@ class RibbonBar(QWidget):
         self.lbl_dir_status.setText(text)
 
     def get_dir_display_params(self) -> dict:
-        """Devuelve todos los parámetros de visualización de Directividad."""
         try:
             hz_min = float(self.le_hz_min.text())
             hz_max = float(self.le_hz_max.text())
@@ -840,7 +742,7 @@ class RibbonBar(QWidget):
 
 def _panel_base() -> tuple[QWidget, QHBoxLayout]:
     w = QWidget()
-    w.setStyleSheet(f"background: {_BG_RIBBON};")
+    w.setObjectName("ribbon_panel")
     lay = QHBoxLayout(w)
     lay.setContentsMargins(6, 3, 6, 2)
     lay.setSpacing(0)

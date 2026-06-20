@@ -212,11 +212,10 @@ class TabDirectividad(QWidget):
             if sec.isVisible():
                 sec.set_band(index)
 
-    def _run_compute(self, bands: str, threshold: float, ref_az: int, ref_th: int):
+    def _run_compute(self, bands: str, ref_az: int, ref_th: int):
         ma = self._get_current_ma()
         ma.compute_directivity(
             bands          = bands,
-            threshold_spl  = threshold,
             ref_azimuth    = ref_az,
             ref_theta_plot = ref_th,
         )
@@ -385,14 +384,14 @@ class TabDirectividad(QWidget):
             )
 
     def compute(self, bands: str, hz_min: float, hz_max: float,
-                vad: float, ref_az: int, ref_th: int):
+                ref_az: int, ref_th: int):
         if self._ma is None or (self._worker and self._worker.isRunning()):
             return
         self._hz_min = hz_min
         self._hz_max = hz_max
         self.log.emit("[Directividad] Calculando…")
         self._worker = Worker(
-            lambda: self._run_compute(bands, vad, ref_az, ref_th)
+            lambda: self._run_compute(bands, ref_az, ref_th)
         )
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_compute_done)
@@ -437,3 +436,8 @@ class TabDirectividad(QWidget):
             self._apply_view_checks(view_checks)
 
         self._refresh_display()
+
+    def apply_theme(self, palette: dict):
+        """Propaga el cambio de tema a todas las secciones de visualización."""
+        for sec in self._sections.values():
+            sec.view.apply_theme(palette)

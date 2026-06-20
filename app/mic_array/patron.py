@@ -1087,7 +1087,7 @@ class MicArray:
 
         print(f"\n  compute_leq_notes done — {len(self.notes)} notas  |  bands={bands}  method={method}")
 
-    def compute_directivity_notes(self, bands='1/3', threshold_spl=30,
+    def compute_directivity_notes(self, bands='1/3',
                                    ref_azimuth=0, ref_theta_plot=0):
         """
         Runs compute_directivity() on each note in self.notes.
@@ -1096,7 +1096,6 @@ class MicArray:
         Parameters
         ----------
         bands          : str    '1/3' or 'octave'
-        threshold_spl  : float  VAD threshold in dB SPL (default 30)
         ref_azimuth    : int    reference azimuth for normalization (default 0)
         ref_theta_plot : int    reference theta for normalization (default 0)
         """
@@ -1107,7 +1106,6 @@ class MicArray:
             print(f"  {nota} ...", end=' ')
             ma_nota.compute_directivity(
                 bands=bands,
-                threshold_spl=threshold_spl,
                 ref_azimuth=ref_azimuth,
                 ref_theta_plot=ref_theta_plot,
             )
@@ -1115,21 +1113,16 @@ class MicArray:
 
         print(f"\n  compute_directivity_notes done — {len(self.notes)} notas  |  bands={bands}")
 
-    def compute_spl(self, bands='1/3', threshold_spl=30, window_ms=50):
+    def compute_spl(self, bands='1/3'):
         """
-        Computes RMS-based SPL over active frames (VAD) for every position.
+        Computes RMS-based SPL over the full signal for every position.
 
-        Requires to_spl() to have been called first. Frames with short-term RMS
-        below threshold_spl are excluded so silence and pauses don't affect the result.
-
-        Per-band SPL uses FFT-based rectangular bands (same as method='fft' in
-        compute_leq). For the polar pattern this is sufficient.
+        Requires to_spl() to have been called first.
+        Per-band SPL uses FFT-based rectangular bands (same as method='fft' in compute_leq).
 
         Parameters
         ----------
-        bands         : str   '1/3' or 'octave' (default: '1/3')
-        threshold_spl : float frames below this dB SPL are treated as silence (default: 30)
-        window_ms     : float VAD window length in ms (default: 50)
+        bands : str   '1/3' or 'octave' (default: '1/3')
 
         Stores
         ------
@@ -1154,13 +1147,11 @@ class MicArray:
         for i_az in range(self.n_angles):
             for i_th in range(self.n_thetas):
                 signal = self.tensor[i_az, i_th, :].astype(np.float64)
-                mask   = _vad_mask(signal, self.sr, threshold_spl, window_ms, P_REF)
-                active = signal[mask]
 
-                if len(active) >= 2:
-                    rms = np.sqrt(np.mean(active ** 2))
+                if len(signal) >= 2:
+                    rms = np.sqrt(np.mean(signal ** 2))
                     global_[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
-                    _, band_levels = fb.leq(active, p_ref=P_REF, method='fft')
+                    _, band_levels = fb.leq(signal, p_ref=P_REF, method='fft')
                     levels[i_az, i_th, :] = band_levels
 
                 done += 1
@@ -1171,10 +1162,9 @@ class MicArray:
         self.spl_levels = levels
         self.spl_global = global_
 
-        print(f"\n  compute_spl done — {bands} octava  |  shape {levels.shape}"
-              f"  |  threshold {threshold_spl} dB SPL")
+        print(f"\n  compute_spl done — {bands} octava  |  shape {levels.shape}")
 
-    def compute_directivity(self, bands='1/3', threshold_spl=30, window_ms=50,
+    def compute_directivity(self, bands='1/3',
                             ref_theta='ref', ref_azimuth=0, ref_theta_plot=0):
         """
         Computes the directivity pattern in 1/3-octave bands.
@@ -1197,8 +1187,6 @@ class MicArray:
         Parameters
         ----------
         bands           : str          '1/3' or 'octave' (default: '1/3')
-        threshold_spl   : float        VAD threshold in dB SPL (default: 30)
-        window_ms       : float        VAD window in ms (default: 50)
         ref_theta       : int or 'ref' mic used as per-take emission reference (default: 'ref')
         ref_azimuth     : int          azimuth used as emission reference and plot origin (default: 0)
         ref_theta_plot  : int or 'ref' theta of the plot reference direction (default: 0)
@@ -1231,13 +1219,11 @@ class MicArray:
         for i_az in range(self.n_angles):
             for i_th in range(self.n_thetas):
                 signal = self.tensor[i_az, i_th, :].astype(np.float64)
-                mask   = _vad_mask(signal, self.sr, threshold_spl, window_ms, P_REF)
-                active = signal[mask]
 
-                if len(active) >= 2:
-                    rms = np.sqrt(np.mean(active ** 2))
+                if len(signal) >= 2:
+                    rms = np.sqrt(np.mean(signal ** 2))
                     spl_global[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
-                    _, band_levels = fb.leq(active, p_ref=P_REF, method='fft')
+                    _, band_levels = fb.leq(signal, p_ref=P_REF, method='fft')
                     spl_levels[i_az, i_th, :] = band_levels
 
                 done += 1
@@ -1271,8 +1257,7 @@ class MicArray:
 
         th_plot_label = 'ref' if ref_theta_plot == 'ref' else f'{ref_theta_plot}°'
         print(f"\n  compute_directivity done — {bands} octava  |  shape {dir_levels.shape}"
-              f"  |  ref_mic='{ref_theta}'  |  ref_plot=({ref_azimuth}°, {th_plot_label})"
-              f"  |  threshold {threshold_spl} dB SPL")
+              f"  |  ref_mic='{ref_theta}'  |  ref_plot=({ref_azimuth}°, {th_plot_label})")
 
     def plot_leq_global(self, theta='ref', yrange=None, title=None):
         """
@@ -2805,31 +2790,6 @@ class MicArray:
 
 
 # ── Module-level helpers (not part of the class) ─────────────────────────────
-
-def _vad_mask(signal, sr, threshold_spl, window_ms=50, p_ref=20e-6):
-    """
-    Returns a boolean mask marking active frames (short-term RMS >= threshold_spl dB SPL).
-    Uses non-overlapping windows of window_ms ms.
-    """
-    window  = max(1, int(window_ms / 1000 * sr))
-    n       = len(signal)
-    n_full  = (n // window) * window
-
-    if n_full > 0:
-        chunks  = signal[:n_full].reshape(-1, window)
-        rms_vec = np.sqrt(np.mean(chunks ** 2, axis=1))
-        active  = 20 * np.log10(rms_vec / p_ref + 1e-12) >= threshold_spl
-        mask    = np.repeat(active, window)
-    else:
-        mask = np.array([], dtype=bool)
-
-    if n_full < n:
-        tail   = signal[n_full:]
-        rms_t  = np.sqrt(np.mean(tail ** 2))
-        active_tail = 20 * np.log10(rms_t / p_ref + 1e-12) >= threshold_spl
-        mask = np.concatenate([mask, np.full(len(tail), active_tail)])
-
-    return mask.astype(bool)
 
 
 def _gcc_phat(sig1, sig2):

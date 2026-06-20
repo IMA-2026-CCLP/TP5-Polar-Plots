@@ -42,7 +42,6 @@ def save_results(
     ma,
     notes_list: list[str] | None = None,
     bands: str = '1/3',
-    threshold_spl: float = 30,
     ref_azimuth: int = 0,
     ref_theta_plot: int = 0,
 ) -> None:
@@ -55,7 +54,6 @@ def save_results(
     ma             : MicArray con compute_directivity() ya ejecutado
     notes_list     : lista de notas a incluir (None = todas si hay)
     bands          : resolución de bandas usada
-    threshold_spl  : umbral VAD usado
     ref_azimuth    : azimuth de referencia
     ref_theta_plot : theta de referencia del plot
     """
@@ -70,7 +68,6 @@ def save_results(
 
     meta = {
         "bands":          bands,
-        "threshold_spl":  threshold_spl,
         "ref_azimuth":    ref_azimuth,
         "ref_theta_plot": ref_theta_plot,
         "saved_at":       datetime.now().isoformat(timespec='seconds'),

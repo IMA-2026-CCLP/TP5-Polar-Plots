@@ -9,8 +9,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QTextCursor
 
-from ui.styles               import QSS
+from ui.styles               import QSS, get_qss
 from ui.ribbon               import RibbonBar
+from ui                      import theme as _theme
 from ui.tab_carga            import TabCarga
 from ui.tab_preprocesamiento import TabPreprocesamiento
 from ui.tab_calibracion      import TabCalibracion
@@ -23,7 +24,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Polar Pattern Analyzer")
+        self.setWindowTitle("Polar Pattern CCLP")
         self.setMinimumSize(1200, 750)
         self.resize(1440, 860)
         self.setStyleSheet(QSS)
@@ -66,12 +67,7 @@ class MainWindow(QMainWindow):
 
         self._setup_log_dock()
 
-        self.statusBar().setStyleSheet("""
-            QStatusBar {
-                background: #12141e; border-top: 1px solid #2a2d3e;
-                color: #5a6080; font-size: 8.5pt; padding: 0 12px;
-            }
-        """)
+        self._update_statusbar_style(_theme.current())
         self.statusBar().showMessage("Listo.")
 
     # ── Conexiones ────────────────────────────────────────────────────────────
@@ -107,6 +103,9 @@ class MainWindow(QMainWindow):
         rb.sig_save_dir_npz.connect(self._on_save_dir_npz)
         rb.sig_dir_display_changed.connect(self._on_dir_display_changed)
 
+        # ── Tema
+        rb.sig_theme_toggled.connect(self._toggle_theme)
+
         # ── Señales de retorno de las vistas
         self.view_archivo.ma_ready.connect(self._on_ma_ready)
         self.view_archivo.log.connect(self._append_log)
@@ -119,6 +118,23 @@ class MainWindow(QMainWindow):
 
         self.view_dir.log.connect(self._append_log)
         self.view_dir.computed.connect(self._on_dir_computed)
+
+    # ── Tema ──────────────────────────────────────────────────────────────────
+
+    def _toggle_theme(self):
+        import plot.balloon as _balloon
+        p = _theme.toggle()
+        _balloon.set_theme(p)
+        self.setStyleSheet(get_qss(p))
+        self.ribbon._update_theme_icon(p)
+        self._update_statusbar_style(p)
+        self.view_dir.apply_theme(p)
+
+    def _update_statusbar_style(self, p: dict):
+        self.statusBar().setStyleSheet(
+            f"QStatusBar {{ background: {p['bg_dark']}; border-top: 1px solid {p['border']};"
+            f" color: {p['text_muted']}; font-size: 8.5pt; padding: 0 12px; }}"
+        )
 
     # ── Slots de navegación ───────────────────────────────────────────────────
 
@@ -163,7 +179,6 @@ class MainWindow(QMainWindow):
                 filepath       = path,
                 ma             = self._ma,
                 bands          = rb.combo_bands.currentText(),
-                threshold_spl  = float(rb.le_vad.text() or 30),
                 ref_azimuth    = int(float(rb.le_ref_az.text() or 0)),
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
             )
@@ -200,8 +215,8 @@ class MainWindow(QMainWindow):
 
     # ── Slots de Directividad ─────────────────────────────────────────────────
 
-    def _on_compute_dir(self, bands, hz_min, hz_max, vad, ref_az, ref_th):
-        self.view_dir.compute(bands, hz_min, hz_max, vad, ref_az, ref_th)
+    def _on_compute_dir(self, bands, hz_min, hz_max, ref_az, ref_th):
+        self.view_dir.compute(bands, hz_min, hz_max, ref_az, ref_th)
 
     def _on_save_dir_npz(self):
         self._on_save_polar_npz()

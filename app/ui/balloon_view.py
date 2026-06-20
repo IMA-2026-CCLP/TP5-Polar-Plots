@@ -74,7 +74,6 @@ class BalloonView(QWidget):
         self._page = _SilentPage(self._web)
         self._page.hover_data.connect(self.point_hovered)
         self._web.setPage(self._page)
-        self._web.setStyleSheet("background:#1a1d27;")
 
         self._placeholder = QLabel(
             "Calculá la directividad\npara ver el patrón polar aquí."
@@ -82,15 +81,22 @@ class BalloonView(QWidget):
         self._placeholder.setAlignment(
             __import__('PyQt6.QtCore', fromlist=['Qt']).Qt.AlignmentFlag.AlignCenter
         )
-        self._placeholder.setStyleSheet("""
-            color: #4a5070; font-size: 13pt; background: #1a1d27;
-            border: 2px dashed #2a2d3e; border-radius: 16px; padding: 40px;
-        """)
+
+        from ui import theme as _t
+        self._apply_theme_styles(_t.current())
         self._placeholder.setFont(QFont("Segoe UI", 12))
 
         layout.addWidget(self._placeholder)
         layout.addWidget(self._web)
         self._web.hide()
+
+    def _apply_theme_styles(self, palette: dict):
+        bg = palette['plot_bg']
+        self._web.setStyleSheet(f"background:{bg};")
+        self._placeholder.setStyleSheet(
+            f"color: {palette['text_muted']}; font-size: 13pt; background: {bg};"
+            f" border: 2px dashed {palette['border']}; border-radius: 16px; padding: 40px;"
+        )
 
     def _set_html_safe(self, html: str):
         self._web.setHtml(html)
@@ -166,6 +172,12 @@ class BalloonView(QWidget):
         self._web.hide()
         self._placeholder.show()
 
+    def apply_theme(self, palette: dict):
+        """Aplica la nueva paleta y re-renderiza el plot activo."""
+        self._apply_theme_styles(palette)
+        if self._levels is not None:
+            self._render()
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _filtered(self):
@@ -232,8 +244,10 @@ class BalloonView(QWidget):
                     global_mode = self._spec_global,
                 )
             else:
+                from ui import theme as _t
+                _p = _t.current()
                 html = (
-                    "<html><body style='background:#1a1d27;color:#4a5070;"
+                    f"<html><body style='background:{_p['plot_bg']};color:{_p['text_muted']};"
                     "display:flex;align-items:center;justify-content:center;height:100%;'>"
                     "<p>Sin espectro de referencia disponible.</p></body></html>"
                 )

@@ -20,10 +20,36 @@ COLORSCALES = {
 
 # ── Helpers comunes ───────────────────────────────────────────────────────────
 
-_DARK_BG  = "#1a1d27"
-_GRID_COL = "#2e3248"
-_TEXT_COL = "#e0e0e0"
-_FONT_CSS = "Inter, 'Segoe UI', sans-serif"
+_DARK_BG        = "#1a1d27"
+_GRID_COL       = "#2e3248"
+_TEXT_COL       = "#e0e0e0"
+_FONT_CSS       = "Inter, 'Segoe UI', sans-serif"
+_SPEC_BG        = "#1e2134"
+_RING_LINE      = "rgba(255,255,255,0.12)"
+_RING_TEXT      = "rgba(200,200,200,0.5)"
+_POLAR_AXIS     = "rgba(255,255,255,0.2)"
+_POLAR_GRID     = "rgba(255,255,255,0.1)"
+_LEGEND_BG      = "rgba(255,255,255,0.04)"
+_OVERLAY_BG     = "rgba(255,255,255,.08)"
+_OVERLAY_BORDER = "rgba(255,255,255,.15)"
+
+
+def set_theme(palette: dict) -> None:
+    """Actualiza los colores del módulo según la paleta de tema activa."""
+    global _DARK_BG, _GRID_COL, _TEXT_COL, _SPEC_BG
+    global _RING_LINE, _RING_TEXT, _POLAR_AXIS, _POLAR_GRID
+    global _LEGEND_BG, _OVERLAY_BG, _OVERLAY_BORDER
+    _DARK_BG        = palette['plot_bg']
+    _GRID_COL       = palette['plot_grid']
+    _TEXT_COL       = palette['plot_text']
+    _SPEC_BG        = palette['spec_plot_bg']
+    _RING_LINE      = palette['polar_ring_line']
+    _RING_TEXT      = palette['polar_ring_text']
+    _POLAR_AXIS     = palette['polar_axis_line']
+    _POLAR_GRID     = palette['polar_axis_grid']
+    _LEGEND_BG      = palette['legend_bg']
+    _OVERLAY_BG     = palette['overlay_bg']
+    _OVERLAY_BORDER = palette['overlay_border']
 
 
 def _axes_traces(axis_len: float = 1.15) -> list:
@@ -270,9 +296,9 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str) -> str:
   #plot {{ width:100%; height:100%; }}
   #info-overlay {{
     position:absolute; bottom:14px; left:14px;
-    background:rgba(255,255,255,.08); backdrop-filter:blur(6px);
-    border:1px solid rgba(255,255,255,.15); border-radius:8px;
-    padding:8px 14px; color:#c8ccd8; font-family:{_FONT_CSS};
+    background:{_OVERLAY_BG}; backdrop-filter:blur(6px);
+    border:1px solid {_OVERLAY_BORDER}; border-radius:8px;
+    padding:8px 14px; color:{_TEXT_COL}; font-family:{_FONT_CSS};
     font-size:12px; pointer-events:none; line-height:1.7;
   }}
 </style>
@@ -608,7 +634,7 @@ def build_polar2d_html(
             "type": "scatterpolar",
             "r": [r_ring] * 361, "theta": theta_ring.tolist(),
             "mode": "lines",
-            "line": {"color": "rgba(255,255,255,0.12)", "width": 1, "dash": "dot"},
+            "line": {"color": _RING_LINE, "width": 1, "dash": "dot"},
             "hovertemplate": f"{db:g} dBr<extra></extra>",
             "showlegend": False,
         })
@@ -617,7 +643,7 @@ def build_polar2d_html(
             "r": [r_ring], "theta": [92],
             "mode": "text",
             "text": [f"{db:g}"],
-            "textfont": {"color": "rgba(200,200,200,0.5)", "size": 9},
+            "textfont": {"color": _RING_TEXT, "size": 9},
             "hoverinfo": "skip", "showlegend": False,
         })
 
@@ -647,12 +673,12 @@ def build_polar2d_html(
             "radialaxis": {
                 "visible": True, "range": [0, 1],
                 "showticklabels": False, "showgrid": False,
-                "linecolor": "rgba(255,255,255,0.1)",
+                "linecolor": _POLAR_GRID,
             },
             "angularaxis": {
                 "tickfont": {"color": _TEXT_COL, "size": 11},
-                "linecolor": "rgba(255,255,255,0.2)",
-                "gridcolor": "rgba(255,255,255,0.1)",
+                "linecolor": _POLAR_AXIS,
+                "gridcolor": _POLAR_GRID,
                 "direction": "counterclockwise", "rotation": 90,
             },
         },
@@ -752,7 +778,7 @@ def build_spectrum_html(
 
     layout = {
         "paper_bgcolor": _DARK_BG,
-        "plot_bgcolor":  "#1e2134",
+        "plot_bgcolor":  _SPEC_BG,
         "margin":  {"l": 65, "r": 20, "t": 45, "b": 70},
         "barmode": "overlay",
         "xaxis": {
@@ -774,7 +800,7 @@ def build_spectrum_html(
         },
         "legend": {
             "font":    {"color": _TEXT_COL, "size": 9},
-            "bgcolor": "rgba(255,255,255,0.04)",
+            "bgcolor": _LEGEND_BG,
             "x": 1.01, "y": 1,
         },
         "hovermode":  "x unified" if global_mode else "x",
