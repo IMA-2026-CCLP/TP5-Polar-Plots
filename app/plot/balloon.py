@@ -448,6 +448,8 @@ def build_polar2d_html(
     band_index: int,
     el_index:   Optional[int] = None,
     colorscale: str = "Plasma",
+    min_db:     Optional[float] = None,
+    max_db:     Optional[float] = None,
 ) -> str:
     """
     Gráfico polar 2D.
@@ -518,15 +520,19 @@ def build_polar2d_html(
     gmax  = float(np.nanmax(r_full - ref_val)) if valid.any() else 0.0
     r_rel = np.where(valid, r_full - ref_val, -60.0)
 
-    dyn_range = 30.0   # eje de -30 a 0 dB
+    # Rango dinámico: user-defined o 30 dB por defecto
+    r_floor = min_db if min_db is not None else -30.0
+    r_ceil  = max_db if max_db is not None else 0.0
+    dyn_range = r_ceil - r_floor   # positivo
 
     # Cerrar polígono
     az_closed = np.append(az_full, az_full[0])
     r_closed  = np.append(r_rel,   r_rel[0])
     r_abs_cl  = np.append(r_full,  r_full[0])
 
-    # Mapear dB → radio normalizado 0-1 (solo para posicionar el trazo)
-    def db_to_r(db): return np.clip(db / dyn_range + 1, 0, 1)
+    # Mapear dB relativo → radio normalizado 0-1
+    def db_to_r(db):
+        return np.clip((np.asarray(db, float) - r_floor) / dyn_range, 0, 1)
 
     r_plot = db_to_r(r_closed)
 
@@ -535,12 +541,15 @@ def build_polar2d_html(
         for az, v in zip(az_closed, r_abs_cl)
     ]
 
-    # ── Anillos de referencia ─────────────────────────────────────────────────
-    ref_db_rings = [-5, -10, -15, -20, -25, -30]
+    # ── Anillos de referencia (cada 5 dB dentro del rango) ───────────────────
+    step = 5.0
+    ring_vals = np.arange(np.ceil(r_floor / step) * step, r_ceil + 0.01, step)
+    ring_vals = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
+    ref_db_rings = [float(v) for v in ring_vals]
     ring_traces  = []
     theta_ring   = np.linspace(0, 360, 361)
     for db in ref_db_rings:
-        r_ring = db_to_r(np.array([db]))[0]
+        r_ring = float(db_to_r(db))
         ring_traces.append({
             "type": "scatterpolar",
             "r": [r_ring] * 361, "theta": theta_ring.tolist(),

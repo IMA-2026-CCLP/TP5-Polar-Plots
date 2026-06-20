@@ -93,32 +93,24 @@ class MainWindow(QMainWindow):
 
     def _make_top_bar(self) -> QWidget:
         bar = QWidget()
-        bar.setFixedHeight(56)
-        bar.setStyleSheet("""
-            QWidget { background: #12141e; border-bottom: 1px solid #2a2d3e; }
-        """)
+        bar.setFixedHeight(36)
+        bar.setStyleSheet(
+            "QWidget { background: #12141e; border-bottom: 1px solid #2a2d3e; }"
+        )
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(20, 0, 20, 0)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(8)
 
         dot = QLabel("⬡")
-        dot.setStyleSheet("color:#5865a0; font-size:18pt; background:transparent; border:none;")
+        dot.setStyleSheet("color:#5865a0; font-size:14pt; background:transparent; border:none;")
         lay.addWidget(dot)
 
-        lbl = QLabel("Polar Pattern Analyzer")
-        lbl.setObjectName("label_title")
-        lbl.setStyleSheet(
-            "font-size:14pt; font-weight:700; color:#e8ecf4;"
-            "background:transparent; border:none;"
-        )
-        lay.addWidget(lbl)
-        lay.addStretch()
-
         self.lbl_tensor_info = QLabel("")
-        self.lbl_tensor_info.setObjectName("label_subtitle")
         self.lbl_tensor_info.setStyleSheet(
-            "color:#5a6080; font-size:9pt; background:transparent; border:none;"
+            "color:#5a6080; font-size:8.5pt; background:transparent; border:none;"
         )
         lay.addWidget(self.lbl_tensor_info)
+        lay.addStretch()
 
         return bar
 

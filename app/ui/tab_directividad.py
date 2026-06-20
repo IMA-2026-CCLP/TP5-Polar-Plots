@@ -3,9 +3,9 @@ ui/tab_directividad.py — Tab Directividad: cómputo y visualización multi-pan
 """
 import numpy as np
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit,
-    QComboBox, QFileDialog, QScrollArea, QFrame,
+    QComboBox, QFileDialog, QFrame,
     QCheckBox, QSplitter,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -149,167 +149,187 @@ class TabDirectividad(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
+        root.addWidget(self._make_ribbon())
+        root.addWidget(self._make_right_panel(), 1)
 
-        left = self._make_left_panel()
-        left.setMinimumWidth(200)
-        splitter.addWidget(left)
-        splitter.addWidget(self._make_right_panel())
-        splitter.setSizes([280, 900])
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+    # ── Ribbon ────────────────────────────────────────────────────────────
 
-        root.addWidget(splitter)
+    _RIBBON_STYLE = """
+        QWidget#dir_ribbon {
+            background: #161829;
+            border-bottom: 1px solid #2a2d3e;
+        }
+        QWidget#dir_ribbon QLabel {
+            color: #8892b0; font-size: 8pt;
+        }
+        QWidget#dir_ribbon QPushButton {
+            background: #1e2134; border: 1px solid #3a3d55;
+            border-radius: 4px; color: #c8d0e8;
+            font-size: 8pt; padding: 3px 8px; min-height: 20px;
+        }
+        QWidget#dir_ribbon QPushButton:hover  { background: #2a2d45; }
+        QWidget#dir_ribbon QPushButton#btn_primary {
+            background: #3d4f9f; border-color: #5865c0; color: #fff;
+        }
+        QWidget#dir_ribbon QPushButton#btn_primary:hover { background: #4a5db8; }
+        QWidget#dir_ribbon QPushButton:disabled { color: #3a3d55; border-color: #252840; }
+        QWidget#dir_ribbon QComboBox {
+            background: #1e2134; border: 1px solid #3a3d55;
+            border-radius: 3px; color: #c8d0e8;
+            font-size: 8pt; padding: 2px 4px; min-height: 18px;
+        }
+        QWidget#dir_ribbon QComboBox::drop-down { border: none; width: 14px; }
+        QWidget#dir_ribbon QLineEdit {
+            background: #1e2134; border: 1px solid #3a3d55;
+            border-radius: 3px; color: #c8d0e8;
+            font-size: 8pt; padding: 2px 4px; min-height: 18px;
+        }
+        QWidget#dir_ribbon QCheckBox {
+            color: #8892b0; font-size: 8pt; spacing: 4px;
+        }
+    """
 
-    # ── Panel izquierdo ───────────────────────────────────────────────────
+    def _make_ribbon(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("dir_ribbon")
+        bar.setFixedHeight(110)
+        bar.setStyleSheet(self._RIBBON_STYLE)
 
-    def _make_left_panel(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(8, 4, 8, 2)
+        lay.setSpacing(0)
 
-        container = QWidget()
-        lay = QVBoxLayout(container)
-        lay.setContentsMargins(12, 12, 12, 12)
-        lay.setSpacing(14)
-
-        lay.addWidget(self._make_group_compute())
-        lay.addWidget(self._make_group_nota())
-        lay.addWidget(self._make_group_display())
-        lay.addWidget(self._make_group_spectrum())
-        lay.addWidget(self._make_group_export())
-        lay.addWidget(self._make_status())
+        lay.addWidget(self._rg_compute())
+        lay.addWidget(_dir_vsep())
+        lay.addWidget(self._rg_nota())
+        lay.addWidget(_dir_vsep())
+        lay.addWidget(self._rg_display())
+        lay.addWidget(_dir_vsep())
+        lay.addWidget(self._rg_spectrum())
+        lay.addWidget(_dir_vsep())
+        lay.addWidget(self._rg_export())
         lay.addStretch()
 
-        scroll.setWidget(container)
-        return scroll
+        return bar
 
-    def _make_group_compute(self) -> QGroupBox:
-        g = QGroupBox("CÓMPUTO")
-        lay = QVBoxLayout(g)
-        lay.setSpacing(8)
+    def _rg_compute(self) -> QWidget:
+        w, body = _dir_group("CÓMPUTO")
 
-        def row(label, widget):
-            r = QHBoxLayout()
-            r.addWidget(QLabel(label))
-            r.addStretch()
-            r.addWidget(widget)
-            lay.addLayout(r)
-
-        self.combo_bands = QComboBox()
+        r1 = QHBoxLayout(); r1.setSpacing(5)
+        r1.addWidget(QLabel("Bandas:"))
+        self.combo_bands = QComboBox(); self.combo_bands.setFixedWidth(60)
         self.combo_bands.addItems(["1/3", "octave"])
-        row("Bandas:", self.combo_bands)
-
-        hz_row = QHBoxLayout()
-        hz_row.addWidget(QLabel("Hz mín:"))
-        self.le_hz_min = _le(200, 68)
-        hz_row.addWidget(self.le_hz_min)
-        hz_row.addSpacing(4)
-        hz_row.addWidget(QLabel("máx:"))
-        self.le_hz_max = _le(8000, 68)
-        hz_row.addWidget(self.le_hz_max)
-        lay.addLayout(hz_row)
+        r1.addWidget(self.combo_bands)
+        r1.addSpacing(6)
+        r1.addWidget(QLabel("Hz:"))
+        self.le_hz_min = _le(200, 56); self.le_hz_min.setPlaceholderText("mín")
         self.le_hz_min.editingFinished.connect(self._on_hz_range_changed)
+        r1.addWidget(self.le_hz_min)
+        r1.addWidget(QLabel("–"))
+        self.le_hz_max = _le(8000, 60); self.le_hz_max.setPlaceholderText("máx")
         self.le_hz_max.editingFinished.connect(self._on_hz_range_changed)
+        r1.addWidget(self.le_hz_max)
+        body.addLayout(r1)
 
-        self.le_threshold = _le(30, 90, "dB SPL")
-        row("Umbral VAD:", self.le_threshold)
+        r2 = QHBoxLayout(); r2.setSpacing(5)
+        r2.addWidget(QLabel("VAD(dBSPL):"))
+        self.le_threshold = _le(30, 48)
+        r2.addWidget(self.le_threshold)
+        r2.addSpacing(6)
+        r2.addWidget(QLabel("Ref Az:"))
+        self.le_ref_az = _le(0, 48)
+        r2.addWidget(self.le_ref_az)
+        r2.addWidget(QLabel("θ:"))
+        self.le_ref_th = _le(0, 48)
+        r2.addWidget(self.le_ref_th)
+        body.addLayout(r2)
 
-        self.le_ref_az = _le(0, 70, "°")
-        row("Ref azimuth:", self.le_ref_az)
-
-        self.le_ref_th = _le(0, 70, "°")
-        row("Ref theta plot:", self.le_ref_th)
+        body.addStretch()
 
         self.btn_compute = QPushButton("Calcular directividad")
         self.btn_compute.setObjectName("btn_primary")
         self.btn_compute.setEnabled(False)
         self.btn_compute.clicked.connect(self._on_compute)
-        lay.addWidget(self.btn_compute)
+        body.addWidget(self.btn_compute)
 
-        return g
+        return w
 
-    def _make_group_nota(self) -> QGroupBox:
-        g = QGroupBox("NOTA")
-        lay = QVBoxLayout(g)
-        self.combo_nota = QComboBox()
+    def _rg_nota(self) -> QWidget:
+        w, body = _dir_group("NOTA")
+        body.addStretch()
+        self.combo_nota = QComboBox(); self.combo_nota.setFixedWidth(130)
         self.combo_nota.addItem("Todo el audio")
         self.combo_nota.currentTextChanged.connect(self._on_nota_changed)
-        lay.addWidget(self.combo_nota)
-        return g
+        body.addWidget(self.combo_nota)
+        body.addStretch()
+        return w
 
-    def _make_group_display(self) -> QGroupBox:
-        g = QGroupBox("VISUALIZACIÓN")
-        lay = QVBoxLayout(g)
-        lay.setSpacing(8)
+    def _rg_display(self) -> QWidget:
+        w, body = _dir_group("VISUALIZACIÓN")
 
-        lay.addWidget(QLabel("Colorscale:"))
-        self.combo_cs = QComboBox()
+        r1 = QHBoxLayout(); r1.setSpacing(5)
+        r1.addWidget(QLabel("Colorscale:"))
+        self.combo_cs = QComboBox(); self.combo_cs.setFixedWidth(90)
         self.combo_cs.addItems(list(COLORSCALES.keys()))
         self.combo_cs.setCurrentText("Plasma")
         self.combo_cs.currentTextChanged.connect(self._on_colorscale_changed)
-        lay.addWidget(self.combo_cs)
-
-        lay.addWidget(QLabel("Elevación (2D/Espectro):"))
-        self.combo_el = QComboBox()
-        self.combo_el.addItem("Automático (0°)")
+        r1.addWidget(self.combo_cs)
+        r1.addSpacing(6)
+        r1.addWidget(QLabel("Elev:"))
+        self.combo_el = QComboBox(); self.combo_el.setFixedWidth(90)
+        self.combo_el.addItem("Auto (0°)")
         self.combo_el.currentIndexChanged.connect(self._on_el_changed)
-        lay.addWidget(self.combo_el)
+        r1.addWidget(self.combo_el)
+        body.addLayout(r1)
 
-        lay.addWidget(QLabel("Vistas activas:"))
+        r2 = QHBoxLayout(); r2.setSpacing(10)
         self._view_checks: dict[str, QCheckBox] = {}
-        for label, mode in [
-            ("Superficie 3D", "3d"),
-            ("Esfera",        "sphere"),
-            ("Polar 2D",      "polar2d"),
-            ("Espectro",      "spectrum"),
-        ]:
-            chk = QCheckBox(label)
-            chk.setChecked(mode == "3d")
+        for label, mode in [("3D","3d"),("Esfera","sphere"),("Polar 2D","polar2d"),("Espectro","spectrum")]:
+            chk = QCheckBox(label); chk.setChecked(True)
             chk.toggled.connect(lambda checked, m=mode: self._on_view_toggled(m, checked))
             self._view_checks[mode] = chk
-            lay.addWidget(chk)
+            r2.addWidget(chk)
+        body.addLayout(r2)
 
-        return g
+        return w
 
-    def _make_group_spectrum(self) -> QGroupBox:
-        g = QGroupBox("ESPECTRO")
-        lay = QVBoxLayout(g)
-        lay.setSpacing(8)
+    def _rg_spectrum(self) -> QWidget:
+        w, body = _dir_group("ESPECTRO")
 
-        lay.addWidget(QLabel("Datos:"))
-        self.combo_spec_data = QComboBox()
+        r1 = QHBoxLayout(); r1.setSpacing(4)
+        r1.addWidget(QLabel("Datos:"))
+        self.combo_spec_data = QComboBox(); self.combo_spec_data.setFixedWidth(140)
         self.combo_spec_data.addItems(["Crudo (sin igualar)", "Igualado (post-delta)"])
         self.combo_spec_data.currentIndexChanged.connect(lambda _: self._refresh_display())
-        lay.addWidget(self.combo_spec_data)
+        r1.addWidget(self.combo_spec_data)
+        body.addLayout(r1)
 
-        lay.addWidget(QLabel("Vista:"))
-        self.combo_spec_view = QComboBox()
+        r2 = QHBoxLayout(); r2.setSpacing(4)
+        r2.addWidget(QLabel("Vista:"))
+        self.combo_spec_view = QComboBox(); self.combo_spec_view.setFixedWidth(140)
         self.combo_spec_view.addItems(["Global (media ± σ)", "0° a 180°"])
         self.combo_spec_view.currentIndexChanged.connect(lambda _: self._refresh_display())
-        lay.addWidget(self.combo_spec_view)
+        r2.addWidget(self.combo_spec_view)
+        body.addLayout(r2)
 
-        return g
+        return w
 
-    def _make_group_export(self) -> QGroupBox:
-        g = QGroupBox("EXPORTAR")
-        lay = QVBoxLayout(g)
-        self.btn_save_npz = QPushButton("Guardar resultados .npz")
+    def _rg_export(self) -> QWidget:
+        w, body = _dir_group("EXPORTAR")
+
+        self.btn_save_npz = QPushButton("Guardar .npz")
         self.btn_save_npz.setEnabled(False)
         self.btn_save_npz.clicked.connect(self._on_save_npz)
-        lay.addWidget(self.btn_save_npz)
-        return g
+        body.addWidget(self.btn_save_npz)
 
-    def _make_status(self) -> QWidget:
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
-        self.lbl_status = QLabel("Sin datos de directividad.")
-        self.lbl_status.setObjectName("label_hint")
+        body.addStretch()
+
+        self.lbl_status = QLabel("Sin datos.")
+        self.lbl_status.setStyleSheet("color:#4a5070; font-size:7.5pt;")
         self.lbl_status.setWordWrap(True)
-        lay.addWidget(self.lbl_status)
+        self.lbl_status.setFixedWidth(140)
+        body.addWidget(self.lbl_status)
+
         return w
 
     # ── Panel derecho (vistas) ────────────────────────────────────────────
@@ -320,21 +340,35 @@ class TabDirectividad(QWidget):
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(4)
 
-        # Splitter vertical con las 4 vistas
-        self._views_splitter = QSplitter(Qt.Orientation.Vertical)
-        self._views_splitter.setChildrenCollapsible(True)
-
         self._sections: dict[str, _ViewSection] = {
             "3d":       _ViewSection("Superficie 3D", "3d"),
             "sphere":   _ViewSection("Esfera",        "sphere"),
             "polar2d":  _ViewSection("Polar 2D",      "polar2d"),
             "spectrum": _ViewSection("Espectro",      "spectrum"),
         }
-        for section in self._sections.values():
-            self._views_splitter.addWidget(section)
-            section.hide()
 
-        self._sections["3d"].show()   # solo 3D activo por defecto
+        # Grilla 2×2 con splitters anidados
+        self._row_top = QSplitter(Qt.Orientation.Horizontal)
+        self._row_top.setChildrenCollapsible(True)
+        self._row_top.addWidget(self._sections["3d"])
+        self._row_top.addWidget(self._sections["sphere"])
+
+        self._row_bot = QSplitter(Qt.Orientation.Horizontal)
+        self._row_bot.setChildrenCollapsible(True)
+        self._row_bot.addWidget(self._sections["polar2d"])
+        self._row_bot.addWidget(self._sections["spectrum"])
+
+        self._views_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._views_splitter.setChildrenCollapsible(True)
+        self._views_splitter.addWidget(self._row_top)
+        self._views_splitter.addWidget(self._row_bot)
+
+        # Por defecto: todas las vistas visibles en 2×2
+
+        # Tamaños iguales en ambas filas y columnas
+        self._views_splitter.setSizes([500, 500])
+        self._row_top.setSizes([500, 500])
+        self._row_bot.setSizes([500, 500])
 
         lay.addWidget(self._views_splitter, 1)
 
@@ -354,7 +388,11 @@ class TabDirectividad(QWidget):
                 self._update_section(mode)
         else:
             section.hide()
-        # band_selector solo cuando hay alguna vista no-espectro visible
+        # Usar estado del checkbox (isVisible() falla cuando el padre está oculto)
+        top_vis = self._view_checks["3d"].isChecked() or self._view_checks["sphere"].isChecked()
+        bot_vis = self._view_checks["polar2d"].isChecked() or self._view_checks["spectrum"].isChecked()
+        self._row_top.setVisible(top_vis)
+        self._row_bot.setVisible(bot_vis)
         self._update_band_selector_visibility()
 
     def _on_colorscale_changed(self, name: str):
@@ -545,16 +583,15 @@ class TabDirectividad(QWidget):
     def _update_el_combo(self, thetas: np.ndarray):
         self.combo_el.blockSignals(True)
         self.combo_el.clear()
-        self.combo_el.addItem("Automático (0°)")
+        self.combo_el.addItem("Auto (0°)")
         for t in thetas:
             self.combo_el.addItem(f"{t:.0f}°")
         self.combo_el.blockSignals(False)
 
     def _update_band_selector_visibility(self):
         any_non_spectrum = any(
-            sec.isVisible()
-            for mode, sec in self._sections.items()
-            if mode != "spectrum"
+            self._view_checks[mode].isChecked()
+            for mode in ("3d", "sphere", "polar2d")
         )
         self.band_selector.setVisible(any_non_spectrum)
 
@@ -614,3 +651,32 @@ class TabDirectividad(QWidget):
         if ma.dir_levels is not None:
             self._show_results(ma)
             self.btn_save_npz.setEnabled(True)
+
+
+# ── Helpers de construcción del Ribbon ────────────────────────────────────────
+
+def _dir_group(title: str) -> tuple[QWidget, QVBoxLayout]:
+    outer = QWidget()
+    vlay = QVBoxLayout(outer)
+    vlay.setContentsMargins(10, 4, 10, 2)
+    vlay.setSpacing(3)
+
+    body = QVBoxLayout()
+    body.setSpacing(3)
+    vlay.addLayout(body, 1)
+
+    lbl = QLabel(title)
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl.setStyleSheet(
+        "color:#4a5070; font-size:7.5pt; background:transparent; border:none;"
+    )
+    vlay.addWidget(lbl)
+    return outer, body
+
+
+def _dir_vsep() -> QFrame:
+    sep = QFrame()
+    sep.setFrameShape(QFrame.Shape.VLine)
+    sep.setStyleSheet("color: #2a2d3e;")
+    sep.setFixedWidth(1)
+    return sep

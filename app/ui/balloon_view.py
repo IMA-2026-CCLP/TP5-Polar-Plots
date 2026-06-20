@@ -213,6 +213,7 @@ class BalloonView(QWidget):
                 band_hz=band_hz, band_index=bi,
                 el_index=self._el_index,
                 colorscale=self._colorscale,
+                min_db=self._min_db, max_db=self._max_db,
             )
         elif self._view_mode == "spectrum":
             if self._ref_spectrum is not None:
