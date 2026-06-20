@@ -91,6 +91,9 @@ class BalloonView(QWidget):
         layout.addWidget(self._web)
         self._web.hide()
 
+    def _set_html_safe(self, html: str):
+        self._web.setHtml(html)
+
     # ── API pública ───────────────────────────────────────────────────────────
 
     def set_data(
@@ -228,6 +231,6 @@ class BalloonView(QWidget):
         else:
             return
 
-        self._web.setHtml(html, QUrl("about:blank"))
+        self._set_html_safe(html)
         self._placeholder.hide()
         self._web.show()

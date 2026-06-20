@@ -158,6 +158,14 @@ def _build_hemisphere_grid(
             i_b    = int(np.argmin(np.abs(thetas - e_back)))
             R_dB[i_e, :] = _build_full_ring(lev_2d[:, i_f], lev_2d[:, i_b])
 
+    # Guardar nivel del cénit (el=90°) antes de excluirlo de la grilla
+    zenith_dB: Optional[float] = None
+    if any(abs(e - 90.0) < 1e-3 for e in front_elevs):
+        i_f90     = int(np.argmin(np.abs(thetas - 90.0)))
+        col90     = lev_2d[:, i_f90]
+        valid90   = col90[np.isfinite(col90)]
+        zenith_dB = float(10 * np.log10(np.mean(10 ** (valid90 / 10)))) if len(valid90) else 0.0
+
     vmin = float(R_dB.min())
     vmax = float(R_dB.max())
 
@@ -175,7 +183,6 @@ def _build_hemisphere_grid(
             phi_new  = phi_new[phi_new <= 360]
             elev_new = np.arange(0, max_elev_grid + interp_deg, interp_deg, dtype=float)
             elev_new = elev_new[elev_new <= max_elev_grid]
-            # Recortar R_dB a solo las filas que vamos a interpolar (sin el cénit)
             mask_orig = front_elevs <= max_elev_grid
             spl  = RectBivariateSpline(elev_orig[mask_orig], phi_orig,
                                        R_dB[mask_orig, :], kx=3, ky=3)
@@ -192,7 +199,46 @@ def _build_hemisphere_grid(
         elev_rad = np.radians(elev_orig[mask_orig])
         R_dB     = R_dB[mask_orig, :]
 
-    return R_dB, phi_rad, elev_rad, vmin, vmax
+    return R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB
+
+
+def _mirror_grid(X, Y, Z, C):
+    """Espeja el hemisferio superior al inferior (reflejo en Z=0).
+    Devuelve (X_all, Y_all, Z_all, C_all) con la parte inferior primero."""
+    X_lo = np.flipud(X[1:])      # filas 1..n sin el ecuador (evita duplicar el=0°)
+    Y_lo = np.flipud(Y[1:])
+    Z_lo = -np.flipud(Z[1:])     # Z negado → por debajo del ecuador
+    C_lo = np.flipud(C[1:])
+    return (np.vstack([X_lo, X]),
+            np.vstack([Y_lo, Y]),
+            np.vstack([Z_lo, Z]),
+            np.vstack([C_lo, C]))
+
+
+def _cap_mesh_trace(ring_X, ring_Y, ring_Z, apex_x, apex_y, apex_z,
+                    ring_colors, apex_color, cmin, cmax, cs_name) -> dict:
+    """mesh3d en abanico desde el anillo polar hasta el punto ápice (cénit/nadir)."""
+    n = len(ring_X) - 1           # excluir el punto de cierre duplicado
+    xs = np.append(ring_X[:n], apex_x)
+    ys = np.append(ring_Y[:n], apex_y)
+    zs = np.append(ring_Z[:n], apex_z)
+    apex_idx = n
+    colors   = np.append(ring_colors[:n], apex_color)
+    i_tri = list(range(n))
+    j_tri = [(k + 1) % n for k in range(n)]
+    k_tri = [apex_idx] * n
+    return {
+        "type": "mesh3d",
+        "x": xs.tolist(), "y": ys.tolist(), "z": zs.tolist(),
+        "i": i_tri, "j": j_tri, "k": k_tri,
+        "intensity": colors.tolist(),
+        "intensitymode": "vertex",
+        "colorscale": COLORSCALES.get(cs_name, "Plasma"),
+        "cmin": float(cmin), "cmax": float(cmax),
+        "showscale": False,
+        "hoverinfo": "skip",
+        "lighting": {"ambient": 0.7, "diffuse": 0.7, "specular": 0.2},
+    }
 
 
 def _wrap_html(traces_json: str, layout_json: str, info_html: str) -> str:
@@ -264,7 +310,7 @@ def _close_azimuth(arr):
 def build_balloon_html(
     levels:     np.ndarray,
     azimuths:   np.ndarray,
-    elevations: np.ndarray,   # todos los thetas numéricos
+    elevations: np.ndarray,
     band_hz:    float,
     band_index: int,
     colorscale: str = "Plasma",
@@ -272,15 +318,9 @@ def build_balloon_html(
     min_db:     Optional[float] = None,
     max_db:     Optional[float] = None,
 ) -> str:
-    """
-    Globo 3D de directividad. Idem plot_polar_3d en patron.py:
-    - Combina front/back theta pares para cubrir 360° en azimuth
-    - Promedio energético en las costuras φ=0° y φ=180°
-    - Interpolación bicúbica a 2° con RectBivariateSpline
-    """
-    lev_2d = levels[:, :, band_index]   # (n_az, n_th)
+    lev_2d = levels[:, :, band_index]
 
-    R_dB, phi_rad, elev_rad, vmin, vmax = _build_hemisphere_grid(
+    R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
         lev_2d, azimuths, elevations, interp_deg=2.0
     )
 
@@ -292,21 +332,43 @@ def build_balloon_html(
     if normalize:
         R_r = np.clip((R_dB - vmin) / span, 0.01, 1.0)
     else:
-        R_r = R_dB + abs(vmin) + 1.0
+        R_r = np.clip(R_dB + abs(vmin) + 1.0, 0.01, None)
 
     E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
     X = R_r * np.cos(E) * np.cos(P)
     Y = R_r * np.cos(E) * np.sin(P)
     Z = R_r * np.sin(E)
 
-    trace  = _surface_trace(X, Y, Z, R_clip, cmin, cmax, colorscale)
-    traces = [trace] + _axes_traces()
-    layout = _scene_layout(f"Superficie 3D — {freq_label(band_hz)} Hz")
+    # Espejo: agregar hemisferio inferior
+    X_all, Y_all, Z_all, C_all = _mirror_grid(X, Y, Z, R_clip)
 
+    traces = [_surface_trace(X_all, Y_all, Z_all, C_all, cmin, cmax, colorscale)]
+
+    # Caps de cénit y nadir con mesh3d
+    if zenith_dB is not None:
+        z_norm  = float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
+        z_color = float(np.clip(zenith_dB, cmin, cmax))
+        # cénit (arriba)
+        traces.append(_cap_mesh_trace(
+            X_all[-1], Y_all[-1], Z_all[-1],
+            0.0, 0.0, z_norm,
+            C_all[-1], z_color, cmin, cmax, colorscale,
+        ))
+        # nadir (abajo, espejo)
+        traces.append(_cap_mesh_trace(
+            X_all[0], Y_all[0], Z_all[0],
+            0.0, 0.0, -z_norm,
+            C_all[0], z_color, cmin, cmax, colorscale,
+        ))
+
+    traces += _axes_traces()
+    layout  = _scene_layout(f"Superficie 3D — {freq_label(band_hz)} Hz")
+
+    zenith_str = f" &nbsp;|&nbsp; <b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
     info = (
         f"<b>Banda:</b> {freq_label(band_hz)} Hz &nbsp;|&nbsp;"
         f"<b>Máx:</b> {vmax:.1f} dB &nbsp;|&nbsp;"
-        f"<b>Mín:</b> {vmin:.1f} dB<br>"
+        f"<b>Mín:</b> {vmin:.1f} dB{zenith_str}<br>"
         f"<b>Rango dinámico:</b> {vmax - vmin:.1f} dB"
     )
     return _wrap_html(json.dumps(traces), json.dumps(layout), info)
@@ -330,7 +392,7 @@ def build_sphere_html(
     """
     lev_2d = levels[:, :, band_index]
 
-    R_dB, phi_rad, elev_rad, vmin, vmax = _build_hemisphere_grid(
+    R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
         lev_2d, azimuths, elevations, interp_deg=2.0
     )
 
@@ -344,14 +406,33 @@ def build_sphere_html(
     Y = np.cos(E) * np.sin(P)
     Z = np.sin(E)
 
-    trace  = _surface_trace(X, Y, Z, R_clip, cmin, cmax, colorscale)
-    traces = [trace] + _axes_traces()
-    layout = _scene_layout(f"Esfera de Directividad — {freq_label(band_hz)} Hz")
+    # Espejo: agregar hemisferio inferior
+    X_all, Y_all, Z_all, C_all = _mirror_grid(X, Y, Z, R_clip)
 
+    traces = [_surface_trace(X_all, Y_all, Z_all, C_all, cmin, cmax, colorscale)]
+
+    # Caps de cénit y nadir con mesh3d
+    if zenith_dB is not None:
+        z_color = float(np.clip(zenith_dB, cmin, cmax))
+        traces.append(_cap_mesh_trace(
+            X_all[-1], Y_all[-1], Z_all[-1],
+            0.0, 0.0, 1.0,
+            C_all[-1], z_color, cmin, cmax, colorscale,
+        ))
+        traces.append(_cap_mesh_trace(
+            X_all[0], Y_all[0], Z_all[0],
+            0.0, 0.0, -1.0,
+            C_all[0], z_color, cmin, cmax, colorscale,
+        ))
+
+    traces += _axes_traces()
+    layout  = _scene_layout(f"Esfera de Directividad — {freq_label(band_hz)} Hz")
+
+    zenith_str = f" &nbsp;|&nbsp; <b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
     info = (
         f"<b>Banda:</b> {freq_label(band_hz)} Hz &nbsp;|&nbsp;"
         f"<b>Máx:</b> {vmax:.1f} dB &nbsp;|&nbsp;"
-        f"<b>Mín:</b> {vmin:.1f} dB<br>"
+        f"<b>Mín:</b> {vmin:.1f} dB{zenith_str}<br>"
         f"<b>Dinámica:</b> {vmax - vmin:.1f} dB"
     )
     return _wrap_html(json.dumps(traces), json.dumps(layout), info)

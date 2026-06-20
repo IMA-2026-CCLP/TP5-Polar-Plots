@@ -7,8 +7,8 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QPushButton, QLabel, QLineEdit, QFileDialog,
-    QCheckBox, QDoubleSpinBox, QRadioButton, QButtonGroup,
-    QStackedWidget, QScrollArea, QFrame, QSizePolicy,
+    QRadioButton, QButtonGroup,
+    QStackedWidget, QScrollArea, QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -44,7 +44,6 @@ class TabCarga(QWidget):
         lay.setSpacing(16)
 
         lay.addWidget(self._make_group_fuente())
-        lay.addWidget(self._make_group_preprocesamiento())
         lay.addWidget(self._make_group_acciones())
         lay.addWidget(self._make_status_bar())
         lay.addStretch()
@@ -250,23 +249,7 @@ class TabCarga(QWidget):
         if not carpeta or not array_pattern:
             raise ValueError("Especificá la carpeta y el patrón de archivos.")
 
-        ma = MicArray.from_audio(carpeta, array_pattern, ref_pattern)
-
-        if self.chk_hpf.isChecked():
-            ma.hpf(self.spin_hpf.value())
-
-        if self.chk_align_takes.isChecked():
-            theta = 'ref' if ref_pattern else ma.thetas[0]
-            ma.align_takes(
-                target_onset = self.spin_onset.value(),
-                theta        = theta,
-                threshold_dB = self.spin_thresh_at.value(),
-            )
-
-        if self.chk_align_ref.isChecked():
-            ma.align_to_ref()
-
-        return ma
+        return MicArray.from_audio(carpeta, array_pattern, ref_pattern)
 
     def _load_from_npz(self):
         from mic_array.patron import MicArray

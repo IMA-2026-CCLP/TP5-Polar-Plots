@@ -2553,6 +2553,148 @@ class MicArray:
         )
         fig.show()
 
+    def plot_html(self, azimuth=None, theta=None, title=None,
+                  envelope=True, dB=False, floor_dB=-80, yrange=None,
+                  max_pts=3000) -> str:
+        """Igual a plot() pero devuelve el HTML en lugar de mostrarlo.
+        max_pts limita los puntos por traza para mantener el HTML liviano."""
+        orig = self.downsampling_graph
+        n_samples = self.tensor.shape[2]
+        self.downsampling_graph = max(1, n_samples // max_pts)
+        try:
+            # Construimos la figura de la misma forma que plot() pero sin fig.show()
+            P_REF = 20e-6 if self._is_spl else 1.0
+            def to_dB(ds):
+                return np.maximum(20 * np.log10(np.abs(ds) / P_REF + 1e-12), floor_dB)
+
+            fig = go.Figure()
+
+            if azimuth is not None and theta is not None:
+                i_az       = self._az_to_row(azimuth)
+                i_th       = self._th_to_col(theta)
+                signal     = self.tensor[i_az, i_th, :]
+                ds, factor = self._prepare(signal, envelope)
+                if dB: ds  = to_dB(ds)
+                t          = np.arange(len(ds)) * factor / self.sr
+                th_label   = "ref" if theta == 'ref' else f"{theta}°"
+                fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
+                                         line=dict(width=1),
+                                         name=f"{th_label} — {azimuth}°"))
+                auto_title = f"theta {th_label} dado el azimut {azimuth}°"
+                height     = 400
+
+            elif azimuth is not None:
+                i_az = self._az_to_row(azimuth)
+                for el in self.thetas:
+                    i_th       = self._th_to_col(el)
+                    signal     = self.tensor[i_az, i_th, :]
+                    ds, factor = self._prepare(signal, envelope)
+                    if dB: ds  = to_dB(ds)
+                    t          = np.arange(len(ds)) * factor / self.sr
+                    label      = "ref" if el == 'ref' else f"{el}°"
+                    fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
+                                             line=dict(width=1), name=label))
+                auto_title = f"Thetaes dado el azimut {azimuth}°"
+                height     = 500
+
+            else:
+                i_th     = self._th_to_col(theta)
+                th_label = "ref" if theta == 'ref' else f"{theta}°"
+                for az in self.angles:
+                    i_az       = self._az_to_row(az)
+                    signal     = self.tensor[i_az, i_th, :]
+                    ds, factor = self._prepare(signal, envelope)
+                    if dB: ds  = to_dB(ds)
+                    t          = np.arange(len(ds)) * factor / self.sr
+                    fig.add_trace(go.Scatter(x=t, y=ds, mode='lines',
+                                             line=dict(width=1), name=f"{az}°"))
+                auto_title = f"Azimuts dada la theta {th_label}"
+                height     = 500
+
+            axis_style = dict(gridcolor='lightgrey', showline=True,
+                              linecolor='black', linewidth=1, mirror=False)
+            if dB:
+                if yrange is not None:
+                    y_axis = dict(**axis_style, range=yrange)
+                else:
+                    all_y = [tr.y for tr in fig.data if tr.y is not None]
+                    # Ignorar el piso de ruido (valores en floor_dB) para
+                    # que el rango muestre la señal útil, no el silencio
+                    all_vals = np.concatenate([np.asarray(y) for y in all_y])
+                    signal_vals = all_vals[all_vals > floor_dB + 3]
+                    if len(signal_vals):
+                        y_min = float(np.percentile(signal_vals, 5))
+                        y_max = float(np.max(all_vals))
+                    else:
+                        y_min, y_max = floor_dB, 0.0
+                    margin = (y_max - y_min) * 0.05
+                    y_axis = dict(**axis_style, range=[y_min - margin, y_max + margin])
+                y_label = "dB SPL" if self._is_spl else "dBFS"
+            else:
+                y_axis  = dict(**axis_style, range=yrange) if yrange else axis_style
+                y_label = "Amplitude"
+
+            fig.update_layout(
+                title=title if title is not None else auto_title,
+                xaxis_title="Time (s)",
+                yaxis_title=y_label,
+                plot_bgcolor='white',
+                xaxis=axis_style,
+                yaxis=y_axis,
+                autosize=True,
+                margin=dict(l=60, r=20, t=50, b=50),
+            )
+            html = fig.to_html(
+                full_html=True,
+                include_plotlyjs='cdn',
+                config={'responsive': True},
+            )
+            # Forzar que body y su div hijo ocupen el 100% del viewport
+            css = ('<style>'
+                   'html,body{margin:0;padding:0;height:100%;overflow:hidden;}'
+                   'body>div{height:100%;}'
+                   '</style>')
+            return html.replace('</head>', css + '</head>', 1)
+        finally:
+            self.downsampling_graph = orig
+
+    def plot_rms_takes_html(self, theta='ref', floor_dB=-60, yrange=None) -> str:
+        """Igual a plot_rms_takes() pero devuelve el HTML."""
+        i_th = self._th_to_col(theta)
+        rms_dB = [
+            20 * np.log10(np.sqrt(np.mean(self.tensor[i_az, i_th, :] ** 2)) + 1e-12)
+            for i_az in range(self.n_angles)
+        ]
+        label = "ref" if theta == 'ref' else f"{theta}°"
+        fig = go.Figure(go.Bar(
+            x=[f"{a}°" for a in self.angles],
+            y=[r - floor_dB for r in rms_dB],
+            base=floor_dB,
+            marker_color='steelblue',
+            text=[f"{r:.1f}" for r in rms_dB],
+            textposition='outside',
+        ))
+        fig.update_layout(
+            title=f"RMS por toma — theta {label}",
+            xaxis_title="Azimut",
+            yaxis=dict(title="dBFS", range=yrange if yrange else [floor_dB, 0],
+                       gridcolor='lightgrey'),
+            plot_bgcolor='white',
+            xaxis=dict(gridcolor='lightgrey'),
+            autosize=True,
+            margin=dict(l=60, r=20, t=50, b=50),
+        )
+        html = fig.to_html(
+            full_html=True,
+            include_plotlyjs='cdn',
+            config={'responsive': True},
+        )
+        css = ('<style>'
+               'html,body{margin:0;padding:0;height:100%;overflow:hidden;}'
+               'body>div{height:100%;}'
+               '</style>')
+        return html.replace('</head>', css + '</head>', 1)
+
     def plot_leq(self, azimuth=None, theta=None, title=None, vrange=None,
                  colorscale='Viridis', frange=None):
         """

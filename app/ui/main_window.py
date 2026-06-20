@@ -9,11 +9,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QTextCursor
 
-from ui.styles           import QSS
-from ui.tab_carga        import TabCarga
-from ui.tab_calibracion  import TabCalibracion
-from ui.tab_notas        import TabNotas
-from ui.tab_directividad import TabDirectividad
+from ui.styles                import QSS
+from ui.tab_carga             import TabCarga
+from ui.tab_preprocesamiento  import TabPreprocesamiento
+from ui.tab_calibracion       import TabCalibracion
+from ui.tab_notas             import TabNotas
+from ui.tab_directividad      import TabDirectividad
 
 
 class MainWindow(QMainWindow):
@@ -40,18 +41,23 @@ class MainWindow(QMainWindow):
         # Tabs
         self.tabs = QTabWidget()
         self.tab_carga       = TabCarga()
+        self.tab_prepro      = TabPreprocesamiento()
         self.tab_calibracion = TabCalibracion()
         self.tab_notas       = TabNotas()
         self.tab_dir         = TabDirectividad()
 
-        self.tabs.addTab(self.tab_carga,       "1 · Carga")
-        self.tabs.addTab(self.tab_calibracion, "2 · Calibración")
-        self.tabs.addTab(self.tab_notas,       "3 · Notas")
-        self.tabs.addTab(self.tab_dir,         "4 · Directividad")
+        self.tabs.addTab(self.tab_carga,       "Carga")
+        self.tabs.addTab(self.tab_prepro,      "Preprocesamiento")
+        self.tabs.addTab(self.tab_calibracion, "Calibración")
+        self.tabs.addTab(self.tab_notas,       "Detección de notas")
+        self.tabs.addTab(self.tab_dir,         "Directividad")
 
         # Señales de propagación de MicArray entre tabs
         self.tab_carga.ma_ready.connect(self._on_ma_ready)
         self.tab_carga.log.connect(self._append_log)
+
+        self.tab_prepro.ma_updated.connect(self._on_ma_ready)
+        self.tab_prepro.log.connect(self._append_log)
 
         self.tab_calibracion.ma_updated.connect(self._on_ma_ready)
         self.tab_calibracion.log.connect(self._append_log)
@@ -143,6 +149,7 @@ class MainWindow(QMainWindow):
             f"Notas: {len(ma.notes) if ma.notes else 0}"
         )
         # Propagar a todos los tabs
+        self.tab_prepro.set_ma(ma)
         self.tab_calibracion.set_ma(ma)
         self.tab_notas.set_ma(ma)
         self.tab_dir.set_ma(ma)
