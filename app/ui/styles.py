@@ -152,7 +152,8 @@ QComboBox::drop-down {{
 QComboBox QAbstractItemView {{
     background: {p['bg_panel']};
     border: 1px solid {p['border']};
-    selection-background-color: {p['border']};
+    selection-background-color: {p['accent']};
+    selection-color: #ffffff;
     border-radius: 6px;
     color: {p['text']};
 }}
@@ -431,6 +432,7 @@ QFrame#ribbon_sep {{
 }}
 QStackedWidget#ribbon_stack, QWidget#ribbon_panel {{
     background: {p['rb_panel']};
+    border-bottom: none;
 }}
 QWidget#ribbon_vsep {{
     background: {p['rb_sep']};
@@ -493,7 +495,8 @@ QWidget#ribbon_panel QComboBox QAbstractItemView {{
     background: {p['bg_panel']};
     border: 1px solid {p['border']};
     color: {p['text']};
-    selection-background-color: {p['border']};
+    selection-background-color: {p['accent']};
+    selection-color: #ffffff;
 }}
 QWidget#ribbon_panel QCheckBox {{
     color: {p['text']};

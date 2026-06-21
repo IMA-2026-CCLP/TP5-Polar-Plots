@@ -2,18 +2,71 @@
 ui/tab_directividad.py — Directividad: cómputo y visualización multi-panel.
 Los controles están en el ribbon global (ui/ribbon.py).
 """
+import io
+import sys
+import traceback
+
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit,
-    QSplitter,
+    QSplitter, QProgressDialog, QFileDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
 
 from core.worker import Worker
 from ui.balloon_view import BalloonView
 from ui.band_selector import BandSelectorWidget
 from plot.balloon import COLORSCALES
+
+
+# ── Worker para cómputo batch (todo el audio + todas las notas) ───────────────
+
+class _ComputeAllWorker(QThread):
+    log      = pyqtSignal(str)
+    progress = pyqtSignal(int, int, str)   # actual, total, etiqueta
+    all_done = pyqtSignal()
+    error    = pyqtSignal(str)
+
+    def __init__(self, ma, bands, ref_az, ref_th, parent=None):
+        super().__init__(parent)
+        self._ma     = ma
+        self._bands  = bands
+        self._ref_az = ref_az
+        self._ref_th = ref_th
+
+    def run(self):
+        class _Cap(io.TextIOBase):
+            def __init__(self, sig):
+                super().__init__(); self._s = sig
+            def write(self, t):
+                if t.strip(): self._s.emit(t.rstrip())
+                return len(t)
+            def flush(self): pass
+
+        old_out = sys.stdout
+        sys.stdout = _Cap(self.log)
+        try:
+            tasks = [("Todo el audio", self._ma)]
+            if self._ma.notes:
+                tasks += list(self._ma.notes.items())
+
+            total = len(tasks)
+            for i, (label, ma) in enumerate(tasks):
+                self.progress.emit(i, total, label)
+                ma.compute_directivity(
+                    bands          = self._bands,
+                    ref_azimuth    = self._ref_az,
+                    ref_theta_plot = self._ref_th,
+                )
+                self.log.emit(f"[Directividad] {label} — OK")
+
+            self.progress.emit(total, total, "")
+            self.all_done.emit()
+        except Exception:
+            self.error.emit(traceback.format_exc())
+        finally:
+            sys.stdout = old_out
 
 
 def _le(default="", width=75, placeholder="") -> QLineEdit:
@@ -29,7 +82,8 @@ class _ViewSection(QWidget):
     Panel para un único modo de visualización.
     Incluye barra de escala independiente (min/max dB) con modo auto por defecto.
     """
-    log = pyqtSignal(str)
+    log            = pyqtSignal(str)
+    save_requested = pyqtSignal(str)   # emite el modo ("3d", "sphere", etc.)
 
     def __init__(self, title: str, mode: str, parent=None):
         super().__init__(parent)
@@ -74,16 +128,24 @@ class _ViewSection(QWidget):
         self.le_max.editingFinished.connect(self._apply_scale)
         h.addWidget(self.le_max)
 
-        btn_rst = QPushButton("↺")
-        btn_rst.setToolTip("Volver a escala automática")
-        btn_rst.setFixedSize(22, 22)
-        btn_rst.setStyleSheet(
+        _hdr_btn_ss = (
             "QPushButton{background:#1e2238;border:1px solid #3a3f60;"
             "border-radius:3px;color:#9aa6cc;font-size:10pt;padding:0;}"
             "QPushButton:hover{background:#2a2d45;}"
         )
+        btn_rst = QPushButton("↺")
+        btn_rst.setToolTip("Volver a escala automática")
+        btn_rst.setFixedSize(22, 22)
+        btn_rst.setStyleSheet(_hdr_btn_ss)
         btn_rst.clicked.connect(self._reset_scale)
         h.addWidget(btn_rst)
+
+        btn_save = QPushButton("⬇")
+        btn_save.setToolTip("Guardar imagen…")
+        btn_save.setFixedSize(22, 22)
+        btn_save.setStyleSheet(_hdr_btn_ss)
+        btn_save.clicked.connect(lambda: self.save_requested.emit(self._mode))
+        h.addWidget(btn_save)
 
         lay.addWidget(hdr)
 
@@ -173,8 +235,9 @@ class TabDirectividad(QWidget):
             "polar2d":  _ViewSection("Polar 2D",      "polar2d"),
             "spectrum": _ViewSection("Espectro",      "spectrum"),
         }
-        for sec in self._sections.values():
+        for mode, sec in self._sections.items():
             sec.log.connect(self.log)
+            sec.save_requested.connect(self._save_section)
 
         # Grilla 2×2 con splitters anidados
         self._row_top = QSplitter(Qt.Orientation.Horizontal)
@@ -398,6 +461,60 @@ class TabDirectividad(QWidget):
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
+    def compute_all(self, bands: str, hz_min: float, hz_max: float,
+                    ref_az: int, ref_th: int):
+        """Calcula directividad para todo el audio y todas las notas en batch."""
+        if self._ma is None or (self._worker and self._worker.isRunning()):
+            return
+        self._hz_min = hz_min
+        self._hz_max = hz_max
+
+        n_notes = len(self._ma.notes) if self._ma.notes else 0
+        n_total = 1 + n_notes
+
+        dlg = QProgressDialog("Iniciando…", None, 0, n_total, self.window())
+        dlg.setWindowTitle("Calculando directividad")
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setValue(0)
+
+        self._worker = _ComputeAllWorker(self._ma, bands, ref_az, ref_th)
+        self._worker.log.connect(self.log)
+        self._worker.progress.connect(
+            lambda cur, tot, lbl, _d=dlg: (
+                _d.setLabelText(f"Calculando: {lbl}" if lbl else "Finalizando…"),
+                _d.setValue(cur),
+            )
+        )
+        self._worker.all_done.connect(lambda _d=dlg: self._on_all_done(_d))
+        self._worker.error.connect(lambda msg, _d=dlg: (
+            _d.close(), self._on_error(msg)
+        ))
+
+        self.log.emit(
+            f"[Directividad] Iniciando cómputo — "
+            f"1 audio completo + {n_notes} nota(s)…"
+        )
+        self._worker.start()
+
+    def _on_all_done(self, dlg: QProgressDialog):
+        dlg.setValue(dlg.maximum())
+        dlg.close()
+        # Mostrar resultados del audio completo por defecto
+        self._nota = "Todo el audio"
+        self._show_results(self._ma)
+        if self._ma.dir_levels is not None:
+            status = (
+                f"Dir. calculada — {self._ma.dir_levels.shape}  |  "
+                f"{self._ma.dir_freqs[0]:.0f}–{self._ma.dir_freqs[-1]:.0f} Hz"
+            )
+            self.computed.emit(
+                np.array([t for t in self._ma.thetas if t != 'ref'],
+                         dtype=np.float32),
+                status,
+            )
+        self.log.emit("[Directividad] Todas las configuraciones calculadas.")
+
     def load_from_npz(self, data: dict):
         """Carga resultados desde el dict devuelto por data_store.load_results()."""
         self._full_levels   = data['dir_levels'].astype(np.float32)
@@ -415,8 +532,9 @@ class TabDirectividad(QWidget):
         Actualiza todos los parámetros de visualización con los valores
         devueltos por ribbon.get_dir_display_params().
         """
-        self._hz_min      = params.get('hz_min', 200.0)
-        self._hz_max      = params.get('hz_max', 8000.0)
+        old_nota          = self._nota
+        self._hz_min      = params.get('hz_min', 315.0)
+        self._hz_max      = params.get('hz_max', 10000.0)
         self._sym         = params.get('symmetry', 'none')
         self._nota        = params.get('nota', 'Todo el audio')
         self._spec_data   = params.get('spec_data', 0)
@@ -435,7 +553,51 @@ class TabDirectividad(QWidget):
         if view_checks:
             self._apply_view_checks(view_checks)
 
+        # Si cambió la nota, recargar datos desde el MA correspondiente
+        if self._nota != old_nota:
+            current_ma = self._get_current_ma()
+            if current_ma is not None and current_ma.dir_levels is not None:
+                self._show_results(current_ma)
+                return
+
         self._refresh_display()
+
+    def _save_section(self, mode: str):
+        """Guarda la imagen de la sección indicada mediante un diálogo de archivo."""
+        if self._full_bands is None:
+            self.log.emit("[Dir] Sin datos para guardar.")
+            return
+
+        _mode_labels = {
+            "3d":       "superficie_3d",
+            "sphere":   "esfera",
+            "polar2d":  "polar_2d",
+            "spectrum": "espectro",
+        }
+        mode_label = _mode_labels.get(mode, mode)
+        nota = (self._nota
+                .replace("Todo el audio", "todo")
+                .replace(" ", "_"))
+
+        if mode != "spectrum":
+            bi   = min(self._current_band_idx, len(self._full_bands) - 1)
+            freq = int(round(float(self._full_bands[bi])))
+            suggested = f"dir_{mode_label}_{freq}Hz_{nota}.png"
+        else:
+            suggested = f"dir_{mode_label}_{nota}.png"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar imagen", suggested,
+            "PNG (*.png);;JPEG (*.jpg *.jpeg)"
+        )
+        if not path:
+            return
+
+        pixmap = self._sections[mode].view._web.grab()
+        if pixmap.save(path):
+            self.log.emit(f"[Dir] Imagen guardada → {path}")
+        else:
+            self.log.emit(f"[ERROR] No se pudo guardar la imagen en {path}")
 
     def apply_theme(self, palette: dict):
         """Propaga el cambio de tema a todas las secciones de visualización."""

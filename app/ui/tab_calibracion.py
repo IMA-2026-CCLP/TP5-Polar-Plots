@@ -40,7 +40,6 @@ class TabCalibracion(QWidget):
         lay.setSpacing(16)
 
         lay.addWidget(self._make_group_cal())
-        lay.addWidget(self._make_group_spl())
         lay.addWidget(self._make_status())
         lay.addStretch()
 
@@ -91,27 +90,6 @@ class TabCalibracion(QWidget):
         self.btn_calibrar.setEnabled(False)
         self.btn_calibrar.clicked.connect(self._on_calibrar)
         lay.addWidget(self.btn_calibrar)
-
-        return g
-
-    def _make_group_spl(self) -> QGroupBox:
-        g = QGroupBox("CONVERSIÓN A SPL")
-        lay = QVBoxLayout(g)
-
-        lbl = QLabel(
-            "Convierte el tensor de unidades FS a Pascal (Pa), "
-            "usando los factores K calculados en la calibración.\n"
-            "Debe ejecutarse antes de compute_directivity()."
-        )
-        lbl.setObjectName("label_hint")
-        lbl.setWordWrap(True)
-        lay.addWidget(lbl)
-
-        self.btn_to_spl = QPushButton("Convertir a SPL")
-        self.btn_to_spl.setObjectName("btn_primary")
-        self.btn_to_spl.setEnabled(False)
-        self.btn_to_spl.clicked.connect(self._on_to_spl)
-        lay.addWidget(self.btn_to_spl)
 
         return g
 
@@ -171,34 +149,11 @@ class TabCalibracion(QWidget):
         self._ma = ma
         self._refresh_status()
         self.btn_calibrar.setEnabled(True)
-        self.btn_to_spl.setEnabled(not ma._is_spl)
         self.log.emit("[Calibración] Calibración completada.")
-        self.ma_updated.emit(ma)
-
-    def _on_to_spl(self):
-        if self._ma is None or (self._worker and self._worker.isRunning()):
-            return
-        self.btn_to_spl.setEnabled(False)
-        self._worker = Worker(self._run_to_spl)
-        self._worker.log.connect(self.log)
-        self._worker.finished.connect(self._on_spl_done)
-        self._worker.error.connect(self._on_error)
-        self._worker.start()
-
-    def _run_to_spl(self):
-        self._ma.to_spl()
-        return self._ma
-
-    def _on_spl_done(self, ma):
-        self._ma = ma
-        self._refresh_status()
-        self.btn_to_spl.setEnabled(False)  # ya no se puede aplicar dos veces
-        self.log.emit("[Calibración] Tensor convertido a SPL (Pa).")
         self.ma_updated.emit(ma)
 
     def _on_error(self, msg: str):
         self.btn_calibrar.setEnabled(True)
-        self.btn_to_spl.setEnabled(self._ma is not None and self._ma.calibration is not None)
         self.log.emit(f"[ERROR]\n{msg}")
 
     def _refresh_status(self):
@@ -217,5 +172,4 @@ class TabCalibracion(QWidget):
     def set_ma(self, ma):
         self._ma = ma
         self.btn_calibrar.setEnabled(True)
-        self.btn_to_spl.setEnabled(ma.calibration is not None and not ma._is_spl)
         self._refresh_status()

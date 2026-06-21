@@ -144,7 +144,9 @@ class RibbonBar(QWidget):
       sig_open_calibracion()
       sig_plot_params(object, object, bool, bool, object)
       # Notas
-      sig_detect_notes(float, float, float, object)
+      sig_detect_notes(float, float, float, float, object)
+      sig_edit_scale()
+      sig_preset_changed(str)
       # Directividad
       sig_compute_dir(str, float, float, int, int)
       sig_save_dir_npz()
@@ -164,9 +166,14 @@ class RibbonBar(QWidget):
     sig_align_takes     = pyqtSignal(float, float, object)
     sig_align_ref       = pyqtSignal()
     sig_open_calibracion= pyqtSignal()
+    sig_to_spl          = pyqtSignal()
     sig_plot_params     = pyqtSignal(object, object, bool, bool, object)
 
-    sig_detect_notes    = pyqtSignal(float, float, float, object)
+    sig_detect_notes    = pyqtSignal(float, float, float, float, object)
+    sig_edit_scale      = pyqtSignal()
+    sig_preset_changed  = pyqtSignal(str)
+    sig_save_mask       = pyqtSignal()
+    sig_load_mask       = pyqtSignal()
 
     sig_compute_dir     = pyqtSignal(str, float, float, int, int)
     sig_save_dir_npz    = pyqtSignal()
@@ -311,7 +318,9 @@ class RibbonBar(QWidget):
         c3.addLayout(mn_row); c3.addLayout(mx_row)
         cols.addLayout(c3)
 
+        body.addStretch(1)
         body.addLayout(cols)
+        body.addStretch(1)
 
         for sig in (self.combo_theta.currentIndexChanged, self.combo_az.currentIndexChanged):
             sig.connect(lambda _: self._emit_plot_params())
@@ -331,13 +340,14 @@ class RibbonBar(QWidget):
         self.le_hpf = _le("200", 68, "Hz")
         fq_row.addWidget(self.le_hpf)
         fq_row.addStretch()
+        body2.addStretch(1)
         body2.addLayout(fq_row)
-        body2.addStretch()
-
-        self.btn_hpf = _svg_tool_btn(_HPF_ICON_PATH, 'Aplicar', 66)
+        body2.addSpacing(5)
+        self.btn_hpf = _accent_btn("Aplicar HPF")
         self.btn_hpf.setEnabled(False)
         self.btn_hpf.clicked.connect(self._emit_hpf)
-        body2.addWidget(self.btn_hpf, alignment=Qt.AlignmentFlag.AlignHCenter)
+        body2.addWidget(self.btn_hpf)
+        body2.addStretch(1)
 
         lay.addWidget(grp2)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
@@ -358,10 +368,9 @@ class RibbonBar(QWidget):
         al_row.addWidget(_lbl("Mic Ref:"))
         self.combo_align_theta = _combo(80)
         al_row.addWidget(self.combo_align_theta)
+        body3.addStretch(1)
         body3.addLayout(al_row)
-
-        body3.addStretch()
-
+        body3.addSpacing(5)
         btn_row = QHBoxLayout(); btn_row.setSpacing(8)
         self.btn_align_takes = _accent_btn("Alinear tomas")
         self.btn_align_takes.setEnabled(False)
@@ -372,16 +381,24 @@ class RibbonBar(QWidget):
         self.btn_align_ref.clicked.connect(self.sig_align_ref)
         btn_row.addWidget(self.btn_align_ref)
         body3.addLayout(btn_row)
+        body3.addStretch(1)
 
         lay.addWidget(grp3)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
         grp4, body4 = _group("CALIBRAR")
-        body4.addStretch()
-        self.btn_calibrar = _tool_btn('fa5s.sliders-h', 'Calibrar', 78)
+        body4.addStretch(1)
+        btn_cal_row = QHBoxLayout(); btn_cal_row.setSpacing(4)
+        self.btn_calibrar = _tool_btn('fa5s.sliders-h', 'Calibrar', 72)
         self.btn_calibrar.setEnabled(False)
         self.btn_calibrar.clicked.connect(self.sig_open_calibracion)
-        body4.addWidget(self.btn_calibrar, alignment=Qt.AlignmentFlag.AlignHCenter)
+        btn_cal_row.addWidget(self.btn_calibrar)
+        self.btn_to_spl = _accent_btn("Convertir SPL")
+        self.btn_to_spl.setEnabled(False)
+        self.btn_to_spl.clicked.connect(self.sig_to_spl)
+        btn_cal_row.addWidget(self.btn_to_spl)
+        body4.addLayout(btn_cal_row)
+        body4.addStretch(1)
         lay.addWidget(grp4)
 
         lay.addStretch()
@@ -390,34 +407,84 @@ class RibbonBar(QWidget):
     # ── Panel Notas ───────────────────────────────────────────────────────────
 
     def _panel_notas(self) -> QWidget:
+        from ui.tab_notas import SCALE_PRESETS
         w, lay = _panel_base()
 
-        grp, body = _group("DETECCIÓN")
-        r1 = QHBoxLayout(); r1.setSpacing(4)
-        r1.addWidget(_lbl("Min dur (s):"))
-        self.le_note_dur = _le("0.3", 48)
-        r1.addWidget(self.le_note_dur)
-        r1.addWidget(_lbl("Margen (s):"))
-        self.le_note_margin = _le("0.05", 48)
-        r1.addWidget(self.le_note_margin)
-        body.addLayout(r1)
+        # ── ESCALA ───────────────────────────────────────────────────────────
+        grp, body = _group("ESCALA")
+        grp.setMaximumWidth(210)
+        body.addStretch(1)
+        pr_row = QHBoxLayout(); pr_row.setSpacing(4)
+        self.combo_note_preset = _combo(130)
+        for name in SCALE_PRESETS:
+            self.combo_note_preset.addItem(name)
+        self.combo_note_preset.currentTextChanged.connect(
+            lambda name: self.sig_preset_changed.emit(name)
+        )
+        pr_row.addWidget(self.combo_note_preset)
+        self.btn_edit_scale = QToolButton()
+        self.btn_edit_scale.setText("Editar")
+        self.btn_edit_scale.clicked.connect(self.sig_edit_scale)
+        pr_row.addWidget(self.btn_edit_scale)
+        body.addLayout(pr_row)
+        body.addStretch(1)
+        lay.addWidget(grp)
+        lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        r2 = QHBoxLayout(); r2.setSpacing(4)
-        r2.addWidget(_lbl("Umbral (dBFS):"))
-        self.le_note_thresh = _le("-40", 48)
-        r2.addWidget(self.le_note_thresh)
+        # ── DETECCIÓN ─────────────────────────────────────────────────────────
+        grp2, body2 = _group("DETECCIÓN")
+        body2.addStretch(1)
+
+        r1 = QHBoxLayout(); r1.setSpacing(5)
+        r1.addWidget(_lbl("Tol (¢):"))
+        self.le_note_tol = _le("50", 42)
+        r1.addWidget(self.le_note_tol)
+        r1.addSpacing(8)
+        r1.addWidget(_lbl("Pureza:"))
+        self.le_note_purity = _le("0.8", 40)
+        r1.addWidget(self.le_note_purity)
+        r1.addSpacing(8)
+        r1.addWidget(_lbl("Inicio (s):"))
+        self.le_note_start = _le("0.0", 38)
+        r1.addWidget(self.le_note_start)
+        r1.addSpacing(8)
+        r1.addWidget(_lbl("Grad:"))
+        self.le_note_grad = _le("25", 36)
+        r1.addWidget(self.le_note_grad)
+        r1.addStretch()
+        body2.addLayout(r1)
+
+        r2 = QHBoxLayout(); r2.setSpacing(5)
         r2.addWidget(_lbl("Ref θ:"))
-        self.combo_note_theta = _combo(72)
+        self.combo_note_theta = _combo(80)
         r2.addWidget(self.combo_note_theta)
-        body.addLayout(r2)
-
-        body.addStretch()
-
-        self.btn_detect = _tool_btn('fa5s.music', 'Detectar\nnotas', 80)
+        r2.addSpacing(12)
+        self.btn_detect = _accent_btn("♪  Detectar notas")
         self.btn_detect.setEnabled(False)
         self.btn_detect.clicked.connect(self._emit_detect_notes)
-        body.addWidget(self.btn_detect, alignment=Qt.AlignmentFlag.AlignHCenter)
-        lay.addWidget(grp)
+        r2.addWidget(self.btn_detect)
+        r2.addStretch()
+        body2.addLayout(r2)
+        body2.addStretch(1)
+        lay.addWidget(grp2)
+
+        lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        # ── MÁSCARA ──────────────────────────────────────────────────────────
+        grp3, body3 = _group("MÁSCARA")
+        grp3.setMaximumWidth(130)
+        body3.addStretch(1)
+        btn_row3 = QHBoxLayout(); btn_row3.setSpacing(4)
+        self.btn_save_mask = _tool_btn('fa5s.save', 'Guardar\nmáscara', 60)
+        self.btn_save_mask.setEnabled(False)
+        self.btn_save_mask.clicked.connect(self.sig_save_mask)
+        btn_row3.addWidget(self.btn_save_mask)
+        self.btn_load_mask = _tool_btn('fa5s.folder-open', 'Cargar\nmáscara', 60)
+        self.btn_load_mask.clicked.connect(self.sig_load_mask)
+        btn_row3.addWidget(self.btn_load_mask)
+        body3.addLayout(btn_row3)
+        body3.addStretch(1)
+        lay.addWidget(grp3)
 
         lay.addStretch()
         return w
@@ -443,11 +510,11 @@ class RibbonBar(QWidget):
         self.combo_bands.addItems(["1/3", "octave"])
         g.addWidget(self.combo_bands, 0, 1)
         g.addWidget(_lbl("Hz:"), 0, 2)
-        self.le_hz_min = _le("200", 44, "mín")
+        self.le_hz_min = _le("315", 44, "mín")
         self.le_hz_min.editingFinished.connect(self.sig_dir_display_changed)
         g.addWidget(self.le_hz_min, 0, 3)
         g.addWidget(_lbl("–"), 0, 4, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.le_hz_max = _le("8000", 48, "máx")
+        self.le_hz_max = _le("10000", 48, "máx")
         self.le_hz_max.editingFinished.connect(self.sig_dir_display_changed)
         g.addWidget(self.le_hz_max, 0, 5)
 
@@ -614,13 +681,14 @@ class RibbonBar(QWidget):
 
     def _emit_detect_notes(self):
         try:
-            dur    = float(self.le_note_dur.text())
-            margin = float(self.le_note_margin.text())
-            thresh = float(self.le_note_thresh.text())
+            tol   = float(self.le_note_tol.text())
+            pur   = float(self.le_note_purity.text())
+            start = float(self.le_note_start.text())
+            grad  = float(self.le_note_grad.text())
         except ValueError:
-            dur, margin, thresh = 0.3, 0.05, -40.0
+            tol, pur, start, grad = 50.0, 0.8, 0.0, 25.0
         theta = self._parse_theta(self.combo_note_theta.currentText())
-        self.sig_detect_notes.emit(dur, margin, thresh, theta)
+        self.sig_detect_notes.emit(tol, pur, start, grad, theta)
 
     def _emit_compute_dir(self):
         try:
@@ -629,7 +697,7 @@ class RibbonBar(QWidget):
             ref_az = int(float(self.le_ref_az.text()))
             ref_th = int(float(self.le_ref_th.text()))
         except ValueError:
-            hz_min, hz_max, ref_az, ref_th = 200.0, 8000.0, 0, 0
+            hz_min, hz_max, ref_az, ref_th = 315.0, 10000.0, 0, 0
         self.sig_compute_dir.emit(
             self.combo_bands.currentText(), hz_min, hz_max, ref_az, ref_th
         )
@@ -692,6 +760,7 @@ class RibbonBar(QWidget):
         self.btn_align_takes.setEnabled(True)
         self.btn_align_ref.setEnabled(True)
         self.btn_calibrar.setEnabled(True)
+        self.btn_to_spl.setEnabled(ma.calibration is not None and not ma._is_spl)
         self.btn_detect.setEnabled(True)
         self.btn_compute.setEnabled(ma._is_spl)
 
@@ -723,7 +792,7 @@ class RibbonBar(QWidget):
             hz_min = float(self.le_hz_min.text())
             hz_max = float(self.le_hz_max.text())
         except ValueError:
-            hz_min, hz_max = 200.0, 8000.0
+            hz_min, hz_max = 315.0, 10000.0
         el_idx = None if self.combo_el.currentIndex() == 0 else self.combo_el.currentIndex() - 1
         return dict(
             hz_min       = hz_min,
@@ -744,7 +813,7 @@ def _panel_base() -> tuple[QWidget, QHBoxLayout]:
     w = QWidget()
     w.setObjectName("ribbon_panel")
     lay = QHBoxLayout(w)
-    lay.setContentsMargins(6, 3, 6, 2)
+    lay.setContentsMargins(6, 6, 6, 0)
     lay.setSpacing(0)
     return w, lay
 

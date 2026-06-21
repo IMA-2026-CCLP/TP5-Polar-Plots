@@ -285,7 +285,9 @@ def _cap_mesh_trace(ring_X, ring_Y, ring_Z, apex_x, apex_y, apex_z,
     }
 
 
-def _wrap_html(traces_json: str, layout_json: str, info_html: str) -> str:
+def _wrap_html(traces_json: str, layout_json: str, info_html: str,
+               scroll_zoom: bool = False) -> str:
+    sz = 'true' if scroll_zoom else 'false'
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -312,7 +314,8 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str) -> str:
   var traces = {traces_json};
   var layout = {layout_json};
   var cfg = {{ responsive:true, displayModeBar:true,
-    modeBarButtonsToRemove:['sendDataToCloud'], displaylogo:false }};
+    modeBarButtonsToRemove:['sendDataToCloud'], displaylogo:false,
+    scrollZoom:{sz} }};
   Plotly.newPlot('plot', traces, layout, cfg);
 }})();
 </script>
@@ -691,7 +694,8 @@ def build_polar2d_html(
         f"<b>Máx:</b> {gmax:.1f} dB &nbsp;|&nbsp;"
         f"<b>Dinámica:</b> {gmax-gmin:.1f} dB"
     )
-    return _wrap_html(json.dumps(ring_traces + [main_trace]), json.dumps(layout), info)
+    return _wrap_html(json.dumps(ring_traces + [main_trace]), json.dumps(layout), info,
+                      scroll_zoom=True)
 
 
 # ── 4. Espectro del micrófono de referencia (barras 1/3 octava) ───────────────
@@ -811,7 +815,8 @@ def build_spectrum_html(
         f"<b>Mic ref — {desc}</b> &nbsp;|&nbsp;"
         f"<b>Bandas:</b> {range_str}"
     )
-    return _wrap_html(json.dumps(traces), json.dumps(layout), info)
+    return _wrap_html(json.dumps(traces), json.dumps(layout), info,
+                      scroll_zoom=True)
 
 
 def _az_colors(n: int) -> list:

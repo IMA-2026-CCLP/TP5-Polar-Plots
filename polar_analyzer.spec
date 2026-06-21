@@ -41,6 +41,15 @@ _wep_src = os.path.join(
 if os.path.exists(_wep_src):
     app_datas.append((_wep_src, "."))  # copia a la raíz de _internal
 
+# ── Recolectar pyqtgraph (editor F0 interactivo) ──────────────────────────────
+try:
+    pyqg_datas, pyqg_bins, pyqg_hidden = collect_all("pyqtgraph")
+    app_datas   += pyqg_datas
+    pyqt_bins   += pyqg_bins
+    pyqt_hidden += pyqg_hidden
+except Exception:
+    pass
+
 # ── Datos adicionales de librosa (archivos de parámetros de audio) ─────────────
 try:
     librosa_datas, _, _ = collect_all("librosa")
@@ -77,6 +86,10 @@ hidden = pyqt_hidden + [
     "plotly",
     "plotly.graph_objects",
     "plotly.express",
+    # pyqtgraph — backend Qt6 (solo widgets 2D, sin PyOpenGL)
+    "pyqtgraph",
+    "pyqtgraph.graphicsItems",
+    "pyqtgraph.widgets",
 ]
 
 a = Analysis(

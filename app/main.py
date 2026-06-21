@@ -19,6 +19,8 @@ from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 
 from ui.main_window import MainWindow
+from ui.styles import get_qss
+from ui.theme import DARK
 
 _ICON_PATH = os.path.join(os.path.dirname(__file__), 'ui', 'icons', 'logo.ico')
 if not os.path.exists(_ICON_PATH):
@@ -38,6 +40,9 @@ def main():
                    "SF Pro Display" if sys.platform == "darwin" else "Ubuntu")
     font.setPointSize(10)
     app.setFont(font)
+
+    # Aplicar en QApplication para que los popups (combos, menús) hereden el tema.
+    app.setStyleSheet(get_qss(DARK))
 
     window = MainWindow()
     window.show()

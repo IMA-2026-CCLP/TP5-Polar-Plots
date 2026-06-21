@@ -4,10 +4,12 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox,
-    QFileDialog,
+    QFileDialog, QToolButton, QApplication,
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QTextCursor
+
+from core.worker import Worker
 
 from ui.styles               import QSS, get_qss
 from ui.ribbon               import RibbonBar
@@ -15,7 +17,7 @@ from ui                      import theme as _theme
 from ui.tab_carga            import TabCarga
 from ui.tab_preprocesamiento import TabPreprocesamiento
 from ui.tab_calibracion      import TabCalibracion
-from ui.tab_notas            import TabNotas
+from ui.tab_notas            import TabNotas, ScaleEditorDialog
 from ui.tab_directividad     import TabDirectividad
 from core.data_store         import load_results, save_results
 
@@ -94,9 +96,14 @@ class MainWindow(QMainWindow):
         rb.sig_align_takes.connect(self._on_align_takes)
         rb.sig_align_ref.connect(self._on_align_ref)
         rb.sig_open_calibracion.connect(self._open_calibracion_dialog)
+        rb.sig_to_spl.connect(self._on_to_spl)
 
         # ── Notas
         rb.sig_detect_notes.connect(self._on_detect_notes)
+        rb.sig_edit_scale.connect(self._on_edit_scale)
+        rb.sig_preset_changed.connect(self.view_notas._set_scale_from_preset)
+        rb.sig_save_mask.connect(self._on_save_mask)
+        rb.sig_load_mask.connect(self._on_load_mask)
 
         # ── Directividad
         rb.sig_compute_dir.connect(self._on_compute_dir)
@@ -115,6 +122,7 @@ class MainWindow(QMainWindow):
 
         self.view_notas.ma_updated.connect(self._on_ma_ready)
         self.view_notas.log.connect(self._append_log)
+        self.view_notas.log.connect(self._on_notas_log)
 
         self.view_dir.log.connect(self._append_log)
         self.view_dir.computed.connect(self._on_dir_computed)
@@ -125,10 +133,13 @@ class MainWindow(QMainWindow):
         import plot.balloon as _balloon
         p = _theme.toggle()
         _balloon.set_theme(p)
-        self.setStyleSheet(get_qss(p))
+        qss = get_qss(p)
+        QApplication.instance().setStyleSheet(qss)
+        self.setStyleSheet(qss)
         self.ribbon._update_theme_icon(p)
         self._update_statusbar_style(p)
         self.view_dir.apply_theme(p)
+        self.view_notas.apply_theme(p)
 
     def _update_statusbar_style(self, p: dict):
         self.statusBar().setStyleSheet(
@@ -200,6 +211,29 @@ class MainWindow(QMainWindow):
     def _on_align_ref(self):
         self.view_prepro.align_ref()
 
+    def _on_to_spl(self):
+        if self._ma is None or self._ma._is_spl:
+            return
+        self.ribbon.btn_to_spl.setEnabled(False)
+
+        def _run():
+            self._ma.to_spl()
+            return self._ma
+
+        def _done(ma):
+            self._on_ma_ready(ma)
+            self._append_log("[Calibración] Tensor convertido a SPL (Pa).")
+
+        def _err(msg):
+            self.ribbon.btn_to_spl.setEnabled(True)
+            self._append_log(f"[ERROR] to_spl:\n{msg}")
+
+        self._spl_worker = Worker(_run)
+        self._spl_worker.finished.connect(_done)
+        self._spl_worker.error.connect(_err)
+        self._spl_worker.log.connect(self._append_log)
+        self._spl_worker.start()
+
     def _open_calibracion_dialog(self):
         if self._ma is None:
             return
@@ -210,13 +244,37 @@ class MainWindow(QMainWindow):
 
     # ── Slots de Notas ────────────────────────────────────────────────────────
 
-    def _on_detect_notes(self, dur, margin, thresh, ref_theta):
-        self.view_notas.detect_notes(dur, margin, thresh, ref_theta)
+    def _on_detect_notes(self, tol, purity, start_s, grad, ref_theta):
+        self.view_notas.detect_notes(tol, purity, start_s, grad, ref_theta)
+
+    def _on_notas_log(self, msg: str):
+        if "Detección completada" in msg or "Máscara cargada" in msg:
+            self.ribbon.btn_save_mask.setEnabled(True)
+
+    def _on_edit_scale(self):
+        dlg = ScaleEditorDialog(self.view_notas.get_scale(), self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.view_notas.set_scale(dlg.get_scale())
+
+    def _on_save_mask(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar máscara de segmentos", "", "Máscara (*.json)"
+        )
+        if path:
+            self.view_notas.save_mask(path)
+
+    def _on_load_mask(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Cargar máscara de segmentos", "", "Máscara (*.json)"
+        )
+        if path:
+            self.view_notas.load_mask(path)
+            self.ribbon.btn_save_mask.setEnabled(True)
 
     # ── Slots de Directividad ─────────────────────────────────────────────────
 
     def _on_compute_dir(self, bands, hz_min, hz_max, ref_az, ref_th):
-        self.view_dir.compute(bands, hz_min, hz_max, ref_az, ref_th)
+        self.view_dir.compute_all(bands, hz_min, hz_max, ref_az, ref_th)
 
     def _on_save_dir_npz(self):
         self._on_save_polar_npz()
@@ -255,16 +313,56 @@ class MainWindow(QMainWindow):
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setFont(QFont("Consolas", 9))
+        self._log.setMinimumHeight(48)
 
-        dock = QDockWidget("Log", self)
-        dock.setWidget(self._log)
-        dock.setFeatures(
+        self._log_dock = QDockWidget("Log", self)
+        self._log_dock.setWidget(self._log)
+        self._log_dock.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable |
             QDockWidget.DockWidgetFeature.DockWidgetFloatable |
             QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
-        dock.setMaximumHeight(180)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
+        # altura inicial al estar en la parte inferior
+        self.resizeDocks([self._log_dock], [150], Qt.Orientation.Vertical)
+
+        # ajustar restricciones de tamaño según dónde está anclado
+        self._log_dock.dockLocationChanged.connect(self._on_log_dock_location)
+        self._log_dock.topLevelChanged.connect(self._on_log_floating)
+
+        # botón toggle en la barra de estado
+        self._btn_log = QToolButton()
+        self._btn_log.setText("Log ▾")
+        self._btn_log.setCheckable(True)
+        self._btn_log.setChecked(True)
+        self._btn_log.setToolTip("Mostrar / ocultar log")
+        self._btn_log.clicked.connect(self._toggle_log)
+        self._log_dock.visibilityChanged.connect(self._on_log_visibility)
+        self.statusBar().addPermanentWidget(self._btn_log)
+
+    def _on_log_dock_location(self, area):
+        _MAX = 16_777_215
+        sides = (Qt.DockWidgetArea.LeftDockWidgetArea,
+                 Qt.DockWidgetArea.RightDockWidgetArea)
+        if area in sides:
+            self._log_dock.setMaximumHeight(_MAX)
+            self._log_dock.setMaximumWidth(320)
+        else:
+            self._log_dock.setMaximumHeight(300)
+            self._log_dock.setMaximumWidth(_MAX)
+
+    def _on_log_floating(self, floating: bool):
+        _MAX = 16_777_215
+        if floating:
+            self._log_dock.setMaximumHeight(_MAX)
+            self._log_dock.setMaximumWidth(_MAX)
+
+    def _toggle_log(self):
+        self._log_dock.setVisible(not self._log_dock.isVisible())
+
+    def _on_log_visibility(self, visible: bool):
+        self._btn_log.setChecked(visible)
+        self._btn_log.setText("Log ▾" if visible else "Log ▸")
 
     def _append_log(self, text: str):
         self._log.moveCursor(QTextCursor.MoveOperation.End)
