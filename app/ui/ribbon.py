@@ -163,11 +163,12 @@ class RibbonBar(QWidget):
     sig_save_polar_npz  = pyqtSignal()
 
     sig_apply_hpf       = pyqtSignal(float)
-    sig_align_takes     = pyqtSignal(float, float, object)
-    sig_align_ref       = pyqtSignal()
+    sig_align_takes     = pyqtSignal(float, float, object, float)   # onset, thresh, theta, window_ms
+    sig_align_preview   = pyqtSignal(float, float, object)
+    sig_align_ref       = pyqtSignal(object)                        # energy_threshold_dB (float or None)
     sig_open_calibracion= pyqtSignal()
     sig_to_spl          = pyqtSignal()
-    sig_plot_params     = pyqtSignal(object, object, bool, bool, object)
+    sig_plot_params     = pyqtSignal(object, object, bool, bool, object, float)
 
     sig_detect_notes    = pyqtSignal(float, float, float, float, object)
     sig_edit_scale      = pyqtSignal()
@@ -304,8 +305,14 @@ class RibbonBar(QWidget):
 
         c2 = QVBoxLayout(); c2.setSpacing(4)
         self.chk_envelope = _chk("Envolvente"); self.chk_envelope.setChecked(True)
+        self.chk_envelope.setToolTip("Envolvente suave (transformada de Hilbert)")
         self.chk_db = _chk("dB"); self.chk_db.toggled.connect(self._on_db_toggled)
         c2.addWidget(self.chk_envelope); c2.addWidget(self.chk_db)
+        sm_row = QHBoxLayout(); sm_row.setSpacing(4)
+        sm_row.addWidget(_lbl("Suav"))
+        self.le_smooth = _le("20", 40); sm_row.addWidget(self.le_smooth)
+        sm_row.addWidget(_lbl("ms")); sm_row.addStretch()
+        c2.addLayout(sm_row)
         cols.addLayout(c2)
 
         c3 = QVBoxLayout(); c3.setSpacing(4)
@@ -326,6 +333,8 @@ class RibbonBar(QWidget):
             sig.connect(lambda _: self._emit_plot_params())
         for chk in (self.chk_envelope, self.chk_db):
             chk.toggled.connect(lambda _: self._emit_plot_params())
+        self.le_smooth.editingFinished.connect(self._emit_plot_params)
+        self.chk_envelope.toggled.connect(self.le_smooth.setEnabled)
         for le in (self.le_ymin, self.le_ymax):
             le.editingFinished.connect(self._emit_plot_params)
 
@@ -365,11 +374,31 @@ class RibbonBar(QWidget):
         al_row.addWidget(self.le_thresh)
         al_row.addWidget(_lbl("dBFS"))
         al_row.addSpacing(6)
+        al_row.addWidget(_lbl("Ventana:"))
+        self.le_window_ms = _le("50", 44)
+        al_row.addWidget(self.le_window_ms)
+        al_row.addWidget(_lbl("ms"))
+        al_row.addSpacing(6)
         al_row.addWidget(_lbl("Mic Ref:"))
         self.combo_align_theta = _combo(80)
         al_row.addWidget(self.combo_align_theta)
+
+        gcc_row = QHBoxLayout(); gcc_row.setSpacing(6)
+        gcc_row.addWidget(_lbl("Umbral GCC:"))
+        self.le_gcc_thresh = _le("", 50)
+        self.le_gcc_thresh.setPlaceholderText("dBFS")
+        self.le_gcc_thresh.setToolTip(
+            "Umbral de energía para GCC-PHAT (dBFS).\n"
+            "Dejar vacío para usar toda la señal."
+        )
+        gcc_row.addWidget(self.le_gcc_thresh)
+        gcc_row.addWidget(_lbl("dBFS"))
+        gcc_row.addStretch()
+
         body3.addStretch(1)
         body3.addLayout(al_row)
+        body3.addSpacing(3)
+        body3.addLayout(gcc_row)
         body3.addSpacing(5)
         btn_row = QHBoxLayout(); btn_row.setSpacing(8)
         self.btn_align_takes = _accent_btn("Alinear tomas")
@@ -378,10 +407,17 @@ class RibbonBar(QWidget):
         btn_row.addWidget(self.btn_align_takes)
         self.btn_align_ref = _accent_btn("Alinear Mics")
         self.btn_align_ref.setEnabled(False)
-        self.btn_align_ref.clicked.connect(self.sig_align_ref)
+        self.btn_align_ref.clicked.connect(self._emit_align_ref)
         btn_row.addWidget(self.btn_align_ref)
         body3.addLayout(btn_row)
         body3.addStretch(1)
+
+        # Feedback en vivo del cursor de onset al cambiar parámetros de alineación
+        self.le_onset.editingFinished.connect(self._emit_align_preview)
+        self.le_thresh.editingFinished.connect(self._emit_align_preview)
+        self.combo_align_theta.currentIndexChanged.connect(
+            lambda _: self._emit_align_preview()
+        )
 
         lay.addWidget(grp3)
         lay.addWidget(_vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
@@ -651,7 +687,8 @@ class RibbonBar(QWidget):
         self._emit_plot_params()
 
     def _emit_plot_params(self):
-        theta   = self._parse_theta(self.combo_theta.currentText())
+        th_text = self.combo_theta.currentText()
+        theta   = None if th_text == "Todos" else self._parse_theta(th_text)
         az_text = self.combo_az.currentText()
         azimuth = None if az_text == "Todos" else _safe_int(az_text.rstrip("°"))
         env     = self.chk_envelope.isChecked()
@@ -661,7 +698,11 @@ class RibbonBar(QWidget):
             yrange = [float(mn), float(mx)] if mn and mx else None
         except ValueError:
             yrange = None
-        self.sig_plot_params.emit(theta, azimuth, env, db, yrange)
+        try:
+            smoothing = float(self.le_smooth.text())
+        except ValueError:
+            smoothing = 20.0
+        self.sig_plot_params.emit(theta, azimuth, env, db, yrange, smoothing)
 
     def _emit_hpf(self):
         try:
@@ -676,8 +717,29 @@ class RibbonBar(QWidget):
             thresh = float(self.le_thresh.text())
         except ValueError:
             onset, thresh = 1.0, -40.0
+        try:
+            window_ms = float(self.le_window_ms.text())
+        except ValueError:
+            window_ms = 50.0
         theta = self._parse_theta(self.combo_align_theta.currentText())
-        self.sig_align_takes.emit(onset, thresh, theta)
+        self.sig_align_takes.emit(onset, thresh, theta, window_ms)
+
+    def _emit_align_ref(self):
+        txt = self.le_gcc_thresh.text().strip()
+        try:
+            gcc_thresh = float(txt) if txt else None
+        except ValueError:
+            gcc_thresh = None
+        self.sig_align_ref.emit(gcc_thresh)
+
+    def _emit_align_preview(self):
+        try:
+            onset  = float(self.le_onset.text())
+            thresh = float(self.le_thresh.text())
+        except ValueError:
+            onset, thresh = 1.0, -40.0
+        theta = self._parse_theta(self.combo_align_theta.currentText())
+        self.sig_align_preview.emit(onset, thresh, theta)
 
     def _emit_detect_notes(self):
         try:
@@ -718,7 +780,8 @@ class RibbonBar(QWidget):
     def _parse_theta(self, text: str):
         if not text or text == "ref":
             return "ref"
-        return _safe_int(text.rstrip("°")) or "ref"
+        v = _safe_int(text.rstrip("°"))
+        return v if v is not None else "ref"
 
     # ── API pública ───────────────────────────────────────────────────────────
 
@@ -734,6 +797,7 @@ class RibbonBar(QWidget):
         self.combo_theta.clear()
         self.combo_align_theta.clear()
         self.combo_note_theta.clear()
+        self.combo_theta.addItem("Todos")          # índice 0 — overlay de todos los thetas
         for th in ma.thetas:
             lbl = "ref" if th == "ref" else f"{th}°"
             self.combo_theta.addItem(lbl)
@@ -741,7 +805,7 @@ class RibbonBar(QWidget):
             self.combo_note_theta.addItem(lbl)
 
         ref_idx = next((i for i, t in enumerate(ma.thetas) if t == "ref"), 0)
-        self.combo_theta.setCurrentIndex(ref_idx)
+        self.combo_theta.setCurrentIndex(ref_idx + 1)  # +1 por el "Todos" al inicio
         self.combo_align_theta.setCurrentIndex(ref_idx)
         self.combo_note_theta.setCurrentIndex(ref_idx)
 
@@ -765,6 +829,7 @@ class RibbonBar(QWidget):
         self.btn_compute.setEnabled(ma._is_spl)
 
         self._emit_plot_params()
+        self._emit_align_preview()
 
     def set_notes_loaded(self, notes: list[str]):
         self.combo_nota.blockSignals(True)

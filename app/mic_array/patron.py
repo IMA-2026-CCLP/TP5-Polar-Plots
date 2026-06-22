@@ -489,7 +489,7 @@ class MicArray:
     # Alignment / Processing methods
     # ──────────────────────────────────────────────────────────────────────────
 
-    def align_takes(self, target_onset=1.0, theta='ref', threshold_dB=-40):
+    def align_takes(self, target_onset=1.0, theta='ref', threshold_dB=-40, window_ms=50):
         """
         Aligns all azimuth takes so their onset lands at target_onset seconds.
 
@@ -502,9 +502,11 @@ class MicArray:
         Parameters
         ----------
         target_onset  : float          desired onset time in seconds (default: 1.0)
-        theta     : int or 'ref'   theta used to detect onset (default: 'ref')
+        theta         : int or 'ref'   theta used to detect onset (default: 'ref')
         threshold_dB  : float          RMS level in dBFS that defines the onset
                                        (default: -40). Lower → more sensitive.
+        window_ms     : float          sliding window size in ms for onset detection
+                                       (default: 50). Uses 50% overlap.
         """
         if not self.tensor.flags['WRITEABLE']:
             self.tensor = np.array(self.tensor, dtype=np.float32)
@@ -514,11 +516,12 @@ class MicArray:
         th_label       = 'ref' if theta == 'ref' else f'{theta}°'
 
         print(f"  Target onset : {target_onset:.2f} s  ({target_samples} smp)")
-        print(f"  Ref theta: {th_label}  |  threshold = {threshold_dB} dBFS\n")
+        print(f"  Ref theta: {th_label}  |  threshold = {threshold_dB} dBFS"
+              f"  |  window = {window_ms:.0f} ms\n")
 
         for i_az in range(self.n_angles):
             signal = self.tensor[i_az, i_th, :].astype(np.float64)
-            onset  = _detect_onset(signal, self.sr, threshold_dB=threshold_dB)
+            onset  = _detect_onset(signal, self.sr, window_ms=window_ms, threshold_dB=threshold_dB)
             shift  = target_samples - onset  # >0 → retrasa  |  <0 → adelanta
 
             if shift != 0:
@@ -535,7 +538,7 @@ class MicArray:
 
         print("\n  Take alignment done.")
 
-    def align_to_ref(self, theta='ref'):
+    def align_to_ref(self, theta='ref', energy_threshold_dB=None):
         """
         Aligns each theta to the reference using GCC-PHAT.
 
@@ -548,7 +551,10 @@ class MicArray:
 
         Parameters
         ----------
-        theta : int or 'ref'   reference theta label (default: 'ref')
+        theta                : int or 'ref'   reference theta label (default: 'ref')
+        energy_threshold_dB  : float or None  if set, only samples where the ref signal
+                                              exceeds this RMS level (dBFS) are used for
+                                              GCC-PHAT. Silences the noise-only regions.
         """
         if not self.tensor.flags['WRITEABLE']:
             self.tensor = np.array(self.tensor, dtype=np.float32)
@@ -556,12 +562,14 @@ class MicArray:
         i_ref    = self._th_to_col(theta)
         other_ix = [i for i in range(self.n_thetas) if i != i_ref]
 
-        print(f"  Aligning {len(other_ix)} thetas to '{theta}'...\n")
+        thr_str = f"{energy_threshold_dB} dBFS" if energy_threshold_dB is not None else "desactivado"
+        print(f"  Aligning {len(other_ix)} thetas to '{theta}'  |  umbral energía GCC: {thr_str}\n")
 
         for i_az in range(self.n_angles):
             ref_sig = self.tensor[i_az, i_ref, :].astype(np.float64)
 
-            tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_e, :].astype(np.float64))
+            tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_e, :].astype(np.float64),
+                               energy_threshold_dB=energy_threshold_dB)
                      for i_e in other_ix]
 
             tau = int(np.round(np.mean(tdoas)))
@@ -2792,12 +2800,26 @@ class MicArray:
 # ── Module-level helpers (not part of the class) ─────────────────────────────
 
 
-def _gcc_phat(sig1, sig2):
+def _gcc_phat(sig1, sig2, energy_threshold_dB=None):
     """
     Estimates the TDOA between sig1 and sig2 using GCC-PHAT.
 
     Returns the delay in samples: positive means sig1 arrives later than sig2.
+
+    If energy_threshold_dB is set, samples where sig1 RMS (in 512-sample frames)
+    is below that level are zeroed out in both signals before correlation, so
+    silent/noisy regions don't contaminate the result.
     """
+    if energy_threshold_dB is not None:
+        threshold = 10 ** (energy_threshold_dB / 20)
+        frame     = 512
+        mask      = np.zeros(len(sig1), dtype=np.float64)
+        for i in range(0, len(sig1) - frame + 1, frame):
+            if np.sqrt(np.mean(sig1[i:i + frame] ** 2)) > threshold:
+                mask[i:i + frame] = 1.0
+        sig1 = sig1 * mask
+        sig2 = sig2 * mask
+
     n     = len(sig1) + len(sig2) - 1
     n_fft = 2 ** int(np.ceil(np.log2(n)))
 
@@ -2817,15 +2839,18 @@ def _gcc_phat(sig1, sig2):
 
 def _detect_onset(signal, sr, window_ms=50, threshold_dB=-40):
     """
-    Detects the onset of a signal using a fixed absolute RMS threshold in dBFS.
-    Returns the sample index of the first window that exceeds threshold_dB.
+    Detects the onset of a signal using a sliding median with 50% overlap.
+
+    Uses the median of |signal| within each window (more robust to click noise
+    than RMS/mean). Returns the sample index of the first window that exceeds
+    threshold_dB.
     """
-    window    = int(window_ms / 1000 * sr)
+    window    = max(1, int(window_ms / 1000 * sr))
+    hop       = window // 2
     threshold = 10 ** (threshold_dB / 20)
 
-    for i in range(0, len(signal) - window, window):
-        rms = np.sqrt(np.mean(signal[i:i + window] ** 2))
-        if rms > threshold:
+    for i in range(0, len(signal) - window, hop):
+        if np.median(np.abs(signal[i:i + window])) > threshold:
             return i
 
     return 0

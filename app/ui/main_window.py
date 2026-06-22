@@ -94,6 +94,7 @@ class MainWindow(QMainWindow):
         rb.sig_plot_params.connect(self._on_plot_params)
         rb.sig_apply_hpf.connect(self._on_apply_hpf)
         rb.sig_align_takes.connect(self._on_align_takes)
+        rb.sig_align_preview.connect(self._on_align_preview)
         rb.sig_align_ref.connect(self._on_align_ref)
         rb.sig_open_calibracion.connect(self._open_calibracion_dialog)
         rb.sig_to_spl.connect(self._on_to_spl)
@@ -140,6 +141,7 @@ class MainWindow(QMainWindow):
         self._update_statusbar_style(p)
         self.view_dir.apply_theme(p)
         self.view_notas.apply_theme(p)
+        self.view_prepro.apply_theme(p)
 
     def _update_statusbar_style(self, p: dict):
         self.statusBar().setStyleSheet(
@@ -199,17 +201,20 @@ class MainWindow(QMainWindow):
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
 
-    def _on_plot_params(self, theta, azimuth, env, db, yrange):
-        self.view_prepro.refresh_plot(theta, azimuth, env, db, yrange)
+    def _on_plot_params(self, theta, azimuth, env, db, yrange, smoothing):
+        self.view_prepro.refresh_plot(theta, azimuth, env, db, yrange, smoothing)
 
     def _on_apply_hpf(self, hz: float):
         self.view_prepro.apply_hpf(hz)
 
-    def _on_align_takes(self, onset, thresh, theta):
-        self.view_prepro.align_takes(onset, thresh, theta)
+    def _on_align_takes(self, onset, thresh, theta, window_ms):
+        self.view_prepro.align_takes(onset, thresh, theta, window_ms)
 
-    def _on_align_ref(self):
-        self.view_prepro.align_ref()
+    def _on_align_preview(self, onset, thresh, theta):
+        self.view_prepro.set_align_params(onset, thresh, theta)
+
+    def _on_align_ref(self, gcc_thresh):
+        self.view_prepro.align_ref(gcc_thresh)
 
     def _on_to_spl(self):
         if self._ma is None or self._ma._is_spl:
