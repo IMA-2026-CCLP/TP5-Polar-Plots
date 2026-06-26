@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: #0a0b0e; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+</style>
+</helmet>
+
+<div style="{{ themeVars }}width:1280px;height:800px;background:var(--bg,#15171c);border:1px solid var(--line,#2a2e37);border-radius:13px;overflow:hidden;display:flex;flex-direction:column;color:var(--text,#e8eaef);font-family:var(--font,'IBM Plex Sans'),sans-serif;box-shadow:0 24px 70px rgba(0,0,0,.5)">
+
+  <!-- ══════ TAB BAR ══════ -->
+  <div style="height:50px;flex:none;background:var(--bar,#1b1e24);border-bottom:1px solid var(--line,#2a2e37);display:flex;align-items:center;padding:0 16px;gap:16px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <svg width="27" height="27" viewBox="0 0 32 32" fill="none" style="flex:none">
+        <circle cx="16" cy="16" r="13.5" stroke="var(--accent,#2dd4bf)" stroke-opacity="0.28" stroke-width="1.5"></circle>
+        <circle cx="16" cy="16" r="8.5" stroke="var(--accent,#2dd4bf)" stroke-opacity="0.4" stroke-width="1.2"></circle>
+        <path d="M16 16 C 8 13.4 7.6 5 16 2 C 24.4 5 24 13.4 16 16 Z" fill="var(--accent,#2dd4bf)"></path>
+        <path d="M16 16 C 12 14.8 11.8 9.5 16 8 C 20.2 9.5 20 14.8 16 16 Z" fill="var(--bar,#1b1e24)" fill-opacity="0.55"></path>
+        <circle cx="16" cy="16" r="2.4" fill="var(--accent,#2dd4bf)"></circle>
+      </svg>
+      <div style="line-height:1.05">
+        <div style="font-family:var(--head,'Space Grotesk'),sans-serif;font-size:14.5px;font-weight:600;letter-spacing:-0.01em">Polar Pattern Analyzer</div>
+        <div style="font-size:8px;letter-spacing:0.22em;color:var(--muted,#686d77);font-weight:500">ACOUSTIC DIRECTIVITY</div>
+      </div>
+      <div style="font-family:var(--mono,'IBM Plex Mono'),monospace;font-size:10px;color:var(--text2,#969ba6);border:1px solid var(--line,#2a2e37);border-radius:5px;padding:2px 6px;margin-left:2px">v2.1</div>
+    </div>
+    <div style="display:flex;align-items:stretch;height:100%;margin-left:6px">
+      <div onClick="{{ setTab0 }}" style="{{ tab0 }}">Archivo</div>
+      <div onClick="{{ setTab1 }}" style="{{ tab1 }}">Procesamiento</div>
+      <div onClick="{{ setTab2 }}" style="{{ tab2 }}">Notas</div>
+      <div onClick="{{ setTab3 }}" style="{{ tab3 }}">Directividad</div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;font-family:var(--mono,'IBM Plex Mono'),monospace;font-size:11px;color:var(--text2,#969ba6);background:var(--sunken,#0f1115);border:1px solid var(--line,#2a2e37);border-radius:7px;padding:5px 10px">
+      <span style="width:7px;height:7px;border-radius:50%;background:var(--ok,#46d39a)"></span>9 × 72 · 48 kHz · SPL ✓
+    </div>
+    <div style="display:flex;background:var(--sunken,#0f1115);border:1px solid var(--line,#2a2e37);border-radius:8px;padding:3px;gap:3px">
+      <div onClick="{{ setG }}" style="{{ segG }}">☾ Oscuro</div>
+      <div onClick="{{ setD }}" style="{{ segD }}">☀ Claro</div>
+    </div>
+    <div style="width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--text2,#969ba6);font-size:13px;background:var(--sunken,#0f1115);border:1px solid var(--line,#2a2e37)">?</div>
+  </div>
+
+  <!-- ══════ RIBBON ══════ -->
+  <div style="height:112px;flex:none;background:var(--rib,#1d2027);border-bottom:1px solid var(--line,#2a2e37);overflow:hidden">
+
+    <!-- RIBBON · ARCHIVO -->
+    <div style="height:100%;display:{{ dArchivo }};align-items:stretch;padding:10px 14px 8px">
+      <div style="display:flex;flex-direction:column;padding:0 18px">
+        <div style="flex:1;display:flex;align-items:center;gap:10px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:62px"><div style="width:42px;height:42px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--accent,#2dd4bf);font-family:var(--mono),monospace;font-size:13px;font-weight:700;letter-spacing:0.01em">.wav</div><span style="font-size:10px;text-align:center;line-height:1.1">Cargar audio</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:62px"><div style="width:42px;height:42px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--accent,#2dd4bf)">⤓</div><span style="font-size:10px;text-align:center;line-height:1.1">Cargar sesión</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:62px"><div style="width:42px;height:42px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--accent,#2dd4bf)">⤒</div><span style="font-size:10px;text-align:center;line-height:1.1">Guardar sesión</span></div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">AUDIO / SESIÓN</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 18px">
+        <div style="flex:1;display:flex;align-items:center;gap:10px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:64px"><div style="width:42px;height:42px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--accent,#2dd4bf)">▦</div><span style="font-size:10px;text-align:center;line-height:1.1">Cargar NPZ polar</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:64px"><div style="width:42px;height:42px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--accent,#2dd4bf)">⤴</div><span style="font-size:10px;text-align:center;line-height:1.1">Guardar NPZ polar</span></div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">PATRÓN POLAR</div>
+      </div>
+    </div>
+
+    <!-- RIBBON · PROCESAMIENTO -->
+    <div style="height:100%;display:{{ dProc }};align-items:stretch;padding:10px 14px 8px">
+      <div style="display:flex;flex-direction:column;padding:0 14px">
+        <div style="flex:1;display:flex;align-items:center;gap:14px">
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text2);width:24px">θ</span><div style="display:inline-flex;align-items:center;justify-content:space-between;gap:8px;width:84px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 9px;font-size:11px;font-family:var(--mono),monospace">ref <span style="color:var(--muted)">▾</span></div></div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text2);width:24px">Az</span><div style="display:inline-flex;align-items:center;gap:8px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 9px;font-size:11px;font-family:var(--mono),monospace;width:84px;justify-content:space-between">Todos <span style="color:var(--muted)">▾</span></div></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text)"><span style="width:15px;height:15px;border-radius:4px;background:var(--accent,#2dd4bf);display:inline-flex;align-items:center;justify-content:center;color:var(--accent-ink,#06302b);font-size:10px">✓</span>Envolvente</label>
+            <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text)"><span style="width:15px;height:15px;border-radius:4px;border:1px solid var(--line2,#363b46);display:inline-block"></span>dB</label>
+          </div>
+          <div style="display:flex;align-items:center;gap:5px"><span style="font-size:11px;color:var(--text2)">Suav</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">20</span><span style="font-size:11px;color:var(--muted)">ms</span></div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">VISTA</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 14px;justify-content:center">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:7px">
+          <div style="display:flex;align-items:center;gap:5px"><span style="font-size:11px;color:var(--text2)">Frec</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 8px">200</span><span style="font-size:11px;color:var(--muted)">Hz</span></div>
+          <button style="border:none;border-radius:7px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-weight:600;font-size:11px;padding:6px 12px;cursor:pointer;font-family:var(--font),sans-serif">Aplicar HPF</button>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">HPF</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 14px">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--text2)">Onset</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">1.0</span><span style="font-size:10px;color:var(--muted)">s</span>
+            <span style="font-size:11px;color:var(--text2)">Umbral</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">-40</span>
+            <span style="font-size:11px;color:var(--text2)">Vent</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">50</span><span style="font-size:10px;color:var(--muted)">ms</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+            <button style="border:none;border-radius:7px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-weight:600;font-size:11px;padding:6px 12px;cursor:pointer;font-family:var(--font),sans-serif">Alinear tomas</button>
+            <button style="border:1px solid var(--line2,#363b46);border-radius:7px;background:var(--sunken,#0f1115);color:var(--text);font-size:11px;padding:6px 12px;cursor:pointer;font-family:var(--font),sans-serif">Alinear Mics</button>
+          </div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">ALINEACIÓN</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 14px;justify-content:center">
+        <div style="flex:1;display:flex;align-items:center;gap:10px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:58px"><div style="width:40px;height:40px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--accent,#2dd4bf)">⚙</div><span style="font-size:10px">Calibrar</span></div>
+          <button style="border:none;border-radius:7px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-weight:600;font-size:11px;padding:7px 12px;cursor:pointer;font-family:var(--font),sans-serif">Convertir SPL</button>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">CALIBRAR</div>
+      </div>
+    </div>
+
+    <!-- RIBBON · NOTAS -->
+    <div style="height:100%;display:{{ dNotas }};align-items:stretch;padding:10px 14px 8px">
+      <div style="display:flex;flex-direction:column;padding:0 16px;justify-content:center">
+        <div style="flex:1;display:flex;align-items:center;gap:6px">
+          <div style="display:inline-flex;align-items:center;justify-content:space-between;gap:8px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:7px 10px;font-size:12px;width:120px">Fa mayor <span style="color:var(--muted)">▾</span></div>
+          <button style="border:1px solid var(--line2,#363b46);border-radius:6px;background:var(--sunken,#0f1115);color:var(--text);font-size:11px;padding:6px 12px;cursor:pointer;font-family:var(--font),sans-serif">Editar</button>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">ESCALA</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 16px">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:9px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-size:11px;color:var(--text2)">Tol ¢</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">50</span></div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-size:11px;color:var(--text2)">Pureza</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">0.8</span></div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-size:11px;color:var(--text2)">Inicio</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">0.0</span></div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-size:11px;color:var(--text2)">Grad</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 7px">25</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-size:11px;color:var(--text2)">Ref θ</span><div style="display:inline-flex;align-items:center;gap:8px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 9px;font-size:11px;font-family:var(--mono),monospace">ref <span style="color:var(--muted)">▾</span></div></div>
+            <button style="border:none;border-radius:7px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-weight:600;font-size:11px;padding:6px 14px;cursor:pointer;font-family:var(--font),sans-serif">♪ Detectar notas</button>
+          </div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">DETECCIÓN</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 14px;justify-content:center">
+        <div style="flex:1;display:flex;align-items:center;gap:10px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:58px"><div style="width:40px;height:40px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--accent,#2dd4bf)">⤒</div><span style="font-size:10px;text-align:center;line-height:1.1">Guardar máscara</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:58px"><div style="width:40px;height:40px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--accent,#2dd4bf)">⤓</div><span style="font-size:10px;text-align:center;line-height:1.1">Cargar máscara</span></div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">MÁSCARA</div>
+      </div>
+    </div>
+
+    <!-- RIBBON · DIRECTIVIDAD -->
+    <div style="height:100%;display:{{ dDir }};align-items:stretch;padding:10px 14px 8px">
+      <div style="display:flex;flex-direction:column;padding:0 16px">
+        <div style="flex:1;display:flex;align-items:center;gap:14px">
+          <div style="display:grid;grid-template-columns:auto auto;gap:7px 8px;align-items:center">
+            <span style="font-size:11px;color:var(--text2)">Bandas</span>
+            <div style="display:inline-flex;align-items:center;gap:8px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 9px;font-size:11px;font-family:var(--mono),monospace">1/3 <span style="color:var(--muted)">▾</span></div>
+            <span style="font-size:11px;color:var(--text2)">Rango</span>
+            <div style="display:inline-flex;align-items:center;gap:5px;font-family:var(--mono),monospace;font-size:11px">
+              <span style="background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 8px">315</span><span style="color:var(--muted)">–</span><span style="background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 8px">10000</span><span style="color:var(--muted)">Hz</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text2);width:42px">Ref Az</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 8px">0°</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text2);width:42px">Ref θ</span><span style="font-family:var(--mono),monospace;font-size:11px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 8px">0°</span></div>
+          </div>
+          <button style="border:none;border-radius:7px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-family:var(--font),sans-serif;font-weight:600;font-size:12px;padding:7px 16px;cursor:pointer;display:flex;align-items:center;gap:6px"><span style="font-size:9px">▶</span>Calcular</button>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">CÁLCULO DIRECTIVIDAD</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 14px;justify-content:center">
+        <div style="flex:1;display:flex;align-items:center"><div style="display:inline-flex;align-items:center;justify-content:space-between;gap:8px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:7px 10px;font-size:12px;width:140px">Todo el audio <span style="color:var(--muted)">▾</span></div></div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">NOTA</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 14px">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:inline-flex;align-items:center;gap:6px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 9px;font-size:11px"><span style="color:var(--text2)">Color</span> Plasma <span style="color:var(--muted)">▾</span></div>
+            <div style="display:inline-flex;align-items:center;gap:6px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 9px;font-size:11px"><span style="color:var(--text2)">Elev</span> Auto <span style="color:var(--muted)">▾</span></div>
+            <div style="display:inline-flex;align-items:center;gap:6px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:6px;padding:5px 9px;font-size:11px"><span style="color:var(--text2)">Sim</span> XZ <span style="color:var(--muted)">▾</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;background:var(--accent-soft,rgba(45,212,191,.14));color:var(--accent,#2dd4bf);border:1px solid var(--accent-line,rgba(45,212,191,.4));border-radius:20px;padding:4px 11px">3D</span>
+            <span style="font-size:11px;background:var(--accent-soft,rgba(45,212,191,.14));color:var(--accent,#2dd4bf);border:1px solid var(--accent-line,rgba(45,212,191,.4));border-radius:20px;padding:4px 11px">Esfera</span>
+            <span style="font-size:11px;background:var(--accent-soft,rgba(45,212,191,.14));color:var(--accent,#2dd4bf);border:1px solid var(--accent-line,rgba(45,212,191,.4));border-radius:20px;padding:4px 11px">Polar 2D</span>
+            <span style="font-size:11px;background:var(--accent-soft,rgba(45,212,191,.14));color:var(--accent,#2dd4bf);border:1px solid var(--accent-line,rgba(45,212,191,.4));border-radius:20px;padding:4px 11px">Espectro</span>
+          </div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">VISUALIZACIÓN</div>
+      </div>
+      <div style="width:1px;background:var(--line,#2a2e37);margin:6px 0"></div>
+      <div style="display:flex;flex-direction:column;padding:0 14px;justify-content:center">
+        <div style="flex:1;display:flex;align-items:center">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text2);cursor:pointer;width:62px"><div style="width:42px;height:42px;border-radius:9px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--accent,#2dd4bf)">⤴</div><span style="font-size:10px;text-align:center;line-height:1.1">Exportar NPZ</span></div>
+        </div>
+        <div style="font-size:8.5px;letter-spacing:0.16em;color:var(--muted,#686d77);text-align:center;font-weight:600;padding-top:6px">GUARDAR</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ CONTENT ══════ -->
+  <div style="flex:1;position:relative;min-height:0">
+
+    <!-- CONTENT · ARCHIVO -->
+    <div style="position:absolute;inset:0;display:{{ dArchivo }};align-items:flex-start;justify-content:center;overflow:auto;padding:30px">
+      <div style="width:720px;max-width:100%;display:flex;flex-direction:column;gap:18px">
+        <div style="background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:11px;overflow:hidden">
+          <div style="padding:12px 18px;border-bottom:1px solid var(--line,#2a2e37);font-size:9px;letter-spacing:0.16em;color:var(--text2);font-weight:700">FUENTE</div>
+          <div style="padding:18px">
+            <div style="display:flex;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:8px;padding:3px;gap:3px;width:fit-content;margin-bottom:18px">
+              <span style="font-size:12px;padding:6px 16px;border-radius:6px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-weight:600">Audios crudos</span>
+              <span style="font-size:12px;padding:6px 16px;border-radius:6px;color:var(--text2)">Sesión .cclp</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div><div style="font-size:11px;color:var(--text2);margin-bottom:6px">Carpeta de audios</div><div style="display:flex;gap:8px"><div style="flex:1;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:7px;padding:9px 12px;font-size:12px;font-family:var(--mono),monospace;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">…/TP5-Polar-Plots/data/media</div><button style="border:1px solid var(--line2,#363b46);border-radius:7px;background:var(--card,#1c1f26);color:var(--text);font-size:12px;padding:0 16px;cursor:pointer;font-family:var(--font),sans-serif">Explorar…</button></div></div>
+              <div><div style="font-size:11px;color:var(--text2);margin-bottom:6px">Patrón archivos array</div><div style="background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:7px;padding:9px 12px;font-size:12px;font-family:var(--mono),monospace;color:var(--text)">mic_{MIC}_ang_forte_{H}.wav</div></div>
+              <div><div style="font-size:11px;color:var(--text2);margin-bottom:6px">Patrón referencia <span style="color:var(--muted)">(opcional)</span></div><div style="background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:7px;padding:9px 12px;font-size:12px;font-family:var(--mono),monospace;color:var(--text)">mic_ref_ang_forte_{H}.wav</div></div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px">
+          <button style="border:none;border-radius:9px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-weight:600;font-size:14px;padding:12px 28px;cursor:pointer;font-family:var(--font),sans-serif">Cargar y procesar</button>
+          <span style="font-size:12px;color:var(--muted)">Sin tensor cargado.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTENT · PROCESAMIENTO -->
+    <div style="position:absolute;inset:0;display:{{ dProc }};flex-direction:column;padding:9px">
+      <div style="flex:1;background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0">
+        <div style="height:34px;flex:none;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line,#2a2e37);gap:10px">
+          <span style="font-size:12px;font-weight:600">Señales — θ ref · todas las tomas</span>
+          <div style="flex:1"></div>
+          <span style="font-size:10px;color:var(--text2)">Arrastrá el cursor de onset para corregir alineación</span>
+        </div>
+        <div style="flex:1;position:relative;background:var(--plot,#0f1116);min-height:0;display:flex;align-items:center;justify-content:center">
+          <span style="font-family:var(--mono),monospace;font-size:11px;color:var(--muted);opacity:.6;letter-spacing:0.04em">⌁ forma de onda · pyqtgraph</span>
+        </div>
+        <div style="height:36px;flex:none;display:flex;align-items:center;padding:0 14px;border-top:1px solid var(--line,#2a2e37);gap:16px">
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)"><span style="width:14px;height:2px;background:var(--accent,#2dd4bf);display:inline-block"></span>Señal</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)"><span style="width:14px;height:2px;background:var(--text2,#969ba6);opacity:.5;display:inline-block"></span>Envolvente</span>
+          <div style="flex:1"></div>
+          <span style="font-family:var(--mono),monospace;font-size:11px;color:var(--accent)">onset · 1.00 s</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTENT · NOTAS -->
+    <div style="position:absolute;inset:0;display:{{ dNotas }};flex-direction:column;padding:9px;gap:9px">
+      <div style="flex:none;height:240px;background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:34px;flex:none;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line,#2a2e37);gap:10px"><span style="font-size:12px;font-weight:600">Segmentos detectados</span><span style="font-size:10px;color:var(--muted)">Doble clic en Start/End para editar</span><div style="flex:1"></div><button style="border:1px solid var(--line2,#363b46);border-radius:6px;background:var(--sunken,#0f1115);color:var(--text);font-size:11px;padding:5px 12px;cursor:pointer;font-family:var(--font),sans-serif">Aplicar ediciones</button><button style="border:none;border-radius:6px;background:var(--accent,#2dd4bf);color:var(--accent-ink,#06302b);font-weight:600;font-size:11px;padding:5px 12px;cursor:pointer;font-family:var(--font),sans-serif">Extraer notas</button></div>
+        <div style="flex:1;overflow:auto;font-family:var(--mono),monospace;font-size:11px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px;color:var(--text2);border-bottom:1px solid var(--line,#2a2e37);position:sticky;top:0;background:var(--card,#1c1f26);font-weight:600">
+            <span>Azimuth</span><span>Nota</span><span>Start (s)</span><span>End (s)</span><span>Purity</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px"><span>0°</span><span>Fa4</span><span>0.512</span><span>0.984</span><span style="color:var(--ok,#46d39a)">0.94</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px;background:var(--sunken,#0f1115)"><span>0°</span><span>Sol4</span><span>1.230</span><span>1.690</span><span style="color:var(--ok,#46d39a)">0.88</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px"><span>0°</span><span>La4</span><span>2.010</span><span>2.460</span><span style="color:var(--ok,#46d39a)">0.91</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px;background:var(--sunken,#0f1115)"><span>10°</span><span>Fa4</span><span>0.520</span><span>0.998</span><span style="color:var(--ok,#46d39a)">0.86</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px"><span>10°</span><span>Sol4</span><span>1.250</span><span>1.705</span><span style="color:var(--muted)">0.79</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px;background:var(--sunken,#0f1115)"><span>10°</span><span>La4</span><span>2.030</span><span>2.488</span><span style="color:var(--ok,#46d39a)">0.92</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:7px 14px"><span>20°</span><span>Fa4</span><span>0.531</span><span>1.004</span><span style="color:var(--ok,#46d39a)">0.83</span></div>
+        </div>
+      </div>
+      <div style="flex:1;background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0">
+        <div style="height:34px;flex:none;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line,#2a2e37);gap:10px"><span style="font-size:12px;font-weight:600">Piano roll — notas por ángulo</span><div style="flex:1"></div><span style="font-size:10px;color:var(--text2)">Eje X: tiempo · Eje Y: azimuth</span></div>
+        <div style="flex:1;position:relative;background:var(--plot,#0f1116);min-height:0;display:flex;align-items:center;justify-content:center">
+          <span style="font-family:var(--mono),monospace;font-size:11px;color:var(--muted);opacity:.6;letter-spacing:0.04em">▤ piano roll · pyqtgraph</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTENT · DIRECTIVIDAD -->
+    <div style="position:absolute;inset:0;display:{{ dDir }};flex-direction:column;padding:9px;gap:9px">
+      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:9px;min-height:0">
+
+        <div style="background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0">
+          <div style="height:31px;flex:none;display:flex;align-items:center;padding:0 11px;border-bottom:1px solid var(--line,#2a2e37)">
+            <span style="font-size:12px;font-weight:600">Superficie 3D</span><div style="flex:1"></div>
+            <span style="font-size:10px;color:var(--text2);margin-right:6px">Escala</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px">auto</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px;margin-left:4px">auto</span>
+            <span style="margin-left:8px;color:var(--muted);font-size:13px;cursor:pointer">↺</span><span style="margin-left:9px;color:var(--muted);font-size:13px;cursor:pointer">⤓</span>
+          </div>
+          <div style="flex:1;background:var(--plot,#0f1116);min-height:0;display:flex;align-items:center;justify-content:center">
+            <span style="font-family:var(--mono),monospace;font-size:11px;color:var(--muted);opacity:.55;letter-spacing:0.04em">⌖ superficie 3D · Plotly</span>
+          </div>
+        </div>
+
+        <div style="background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0">
+          <div style="height:31px;flex:none;display:flex;align-items:center;padding:0 11px;border-bottom:1px solid var(--line,#2a2e37)">
+            <span style="font-size:12px;font-weight:600">Esfera</span><div style="flex:1"></div>
+            <span style="font-size:10px;color:var(--text2);margin-right:6px">Escala</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px">auto</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px;margin-left:4px">auto</span>
+            <span style="margin-left:8px;color:var(--muted);font-size:13px;cursor:pointer">↺</span><span style="margin-left:9px;color:var(--muted);font-size:13px;cursor:pointer">⤓</span>
+          </div>
+          <div style="flex:1;background:var(--plot,#0f1116);min-height:0;display:flex;align-items:center;justify-content:center">
+            <span style="font-family:var(--mono),monospace;font-size:11px;color:var(--muted);opacity:.55;letter-spacing:0.04em">⌖ esfera · Plotly</span>
+          </div>
+        </div>
+
+        <div style="background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0">
+          <div style="height:31px;flex:none;display:flex;align-items:center;padding:0 11px;border-bottom:1px solid var(--line,#2a2e37)">
+            <span style="font-size:12px;font-weight:600">Polar 2D</span><div style="flex:1"></div>
+            <span style="font-size:10px;color:var(--text2);margin-right:6px">Escala</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px">-36</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px;margin-left:4px">0</span>
+            <span style="margin-left:8px;color:var(--muted);font-size:13px;cursor:pointer">↺</span><span style="margin-left:9px;color:var(--muted);font-size:13px;cursor:pointer">⤓</span>
+          </div>
+          <div style="flex:1;background:var(--plot,#0f1116);min-height:0;display:flex;align-items:center;justify-content:center">
+            <span style="font-family:var(--mono),monospace;font-size:11px;color:var(--muted);opacity:.55;letter-spacing:0.04em">⌖ polar 2D · Plotly</span>
+          </div>
+        </div>
+
+        <div style="background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0">
+          <div style="height:31px;flex:none;display:flex;align-items:center;padding:0 11px;border-bottom:1px solid var(--line,#2a2e37)">
+            <span style="font-size:12px;font-weight:600">Espectro</span><div style="flex:1"></div>
+            <span style="font-size:10px;color:var(--text2);margin-right:6px">Escala</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px">auto</span>
+            <span style="font-family:var(--mono),monospace;font-size:10px;color:var(--text2);background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);border-radius:5px;padding:2px 6px;margin-left:4px">auto</span>
+            <span style="margin-left:8px;color:var(--muted);font-size:13px;cursor:pointer">↺</span><span style="margin-left:9px;color:var(--muted);font-size:13px;cursor:pointer">⤓</span>
+          </div>
+          <div style="flex:1;background:var(--plot,#0f1116);min-height:0;display:flex;align-items:center;justify-content:center">
+            <span style="font-family:var(--mono),monospace;font-size:11px;color:var(--muted);opacity:.55;letter-spacing:0.04em">⌗ espectro (barras) · Plotly</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- BAND SELECTOR (estilo chips, como el original) -->
+      <div style="height:50px;flex:none;background:var(--card,#1c1f26);border:1px solid var(--line,#2a2e37);border-radius:9px;display:flex;align-items:center;padding:0 12px;gap:10px">
+        <span style="font-size:10px;letter-spacing:0.12em;color:var(--muted);font-weight:700;flex:none">BANDA</span>
+        <div style="width:28px;height:28px;flex:none;border-radius:7px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:12px;cursor:pointer">◀</div>
+        <div style="flex:1;display:flex;align-items:center;gap:5px;overflow:hidden">
+          <span style="{{ bandOff }}">315</span><span style="{{ bandOff }}">400</span><span style="{{ bandOff }}">500</span><span style="{{ bandOff }}">630</span><span style="{{ bandOff }}">800</span><span style="{{ bandOn }}">1k</span><span style="{{ bandOff }}">1.25k</span><span style="{{ bandOff }}">1.6k</span><span style="{{ bandOff }}">2k</span><span style="{{ bandOff }}">2.5k</span><span style="{{ bandOff }}">3.15k</span><span style="{{ bandOff }}">4k</span><span style="{{ bandOff }}">5k</span><span style="{{ bandOff }}">6.3k</span><span style="{{ bandOff }}">8k</span><span style="{{ bandOff }}">10k</span>
+        </div>
+        <div style="width:28px;height:28px;flex:none;border-radius:7px;background:var(--sunken,#0f1115);border:1px solid var(--line2,#363b46);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:12px;cursor:pointer">▶</div>
+        <span style="flex:none;font-family:var(--mono),monospace;font-size:13px;color:var(--accent);background:var(--accent-soft,rgba(45,212,191,.14));border:1px solid var(--accent-line,rgba(45,212,191,.4));border-radius:6px;padding:5px 12px;font-weight:500">1000 Hz</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ STATUS BAR ══════ -->
+  <div style="height:26px;flex:none;background:var(--sunken,#0f1115);border-top:1px solid var(--line,#2a2e37);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-family:var(--mono,'IBM Plex Mono'),monospace;font-size:10.5px;color:var(--muted)">
+    <span>{{ statusLeft }}</span>
+    <span style="display:flex;gap:16px"><span>θ ref · Az 0°</span><span style="color:var(--text2)">Log ▾</span></span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: 3, theme: 'dark' };
+  renderVals() {
+    const tab = this.state.tab;
+    const dark = this.state.theme === 'dark';
+
+    // Tema CLARO (Daylight): sobreescribe las variables; el OSCURO usa los fallbacks inline.
+    const light = "--bg:#eef0f4;--bar:#ffffff;--rib:#ffffff;--line:#dfe3ea;--line2:#cad0db;"
+      + "--text:#1b1e26;--text2:#545a66;--muted:#8a909c;--sunken:#f3f5f8;--card:#ffffff;--plot:#f7f8fb;"
+      + "--accent:#3b54d6;--accent-ink:#ffffff;--accent-soft:rgba(59,84,214,.10);--accent-line:rgba(59,84,214,.35);"
+      + "--ok:#1f9d63;--mer:rgba(0,0,0,.12);--font:'Manrope';--head:'Manrope';--mono:'JetBrains Mono';";
+    const themeVars = dark ? "" : light;
+
+    const tabBase = "display:flex;align-items:center;padding:0 16px;font-size:13px;cursor:pointer;";
+    const tabOn = tabBase + "font-weight:600;color:var(--text);border-bottom:2px solid var(--accent);";
+    const tabOff = tabBase + "color:var(--text2);border-bottom:2px solid transparent;";
+
+    const seg = "font-size:11px;padding:5px 11px;border-radius:6px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:5px;";
+    const segOn = seg + "background:var(--accent);color:var(--accent-ink);";
+    const segOff = seg + "color:var(--text2);";
+
+    const bandBase = "font-family:var(--mono),monospace;font-size:11px;padding:5px 8px;border-radius:6px;cursor:pointer;flex:none;";
+    const bandOff = bandBase + "color:var(--text2);background:var(--sunken);border:1px solid transparent;";
+    const bandOn = bandBase + "color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line);font-weight:600;";
+
+    const status = [
+      "Tensor (72, 8, 24) cargado · 9 mics · 48 kHz",
+      "Señales alineadas · onset 1.00 s",
+      "21 segmentos detectados · escala Fa mayor",
+      "Directividad calculada — 315–10000 Hz · 1/3 oct"
+    ][tab];
+
+    return {
+      themeVars,
+      tab0: tab === 0 ? tabOn : tabOff,
+      tab1: tab === 1 ? tabOn : tabOff,
+      tab2: tab === 2 ? tabOn : tabOff,
+      tab3: tab === 3 ? tabOn : tabOff,
+      setTab0: () => this.setState({ tab: 0 }),
+      setTab1: () => this.setState({ tab: 1 }),
+      setTab2: () => this.setState({ tab: 2 }),
+      setTab3: () => this.setState({ tab: 3 }),
+      dArchivo: tab === 0 ? "flex" : "none",
+      dProc: tab === 1 ? "flex" : "none",
+      dNotas: tab === 2 ? "flex" : "none",
+      dDir: tab === 3 ? "flex" : "none",
+      segG: dark ? segOn : segOff,
+      segD: dark ? segOff : segOn,
+      setG: () => this.setState({ theme: 'dark' }),
+      setD: () => this.setState({ theme: 'light' }),
+      bandOn, bandOff,
+      statusLeft: status,
+    };
+  }
+}
+</script>
+</body>
+</html>

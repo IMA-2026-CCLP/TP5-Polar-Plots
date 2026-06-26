@@ -29,6 +29,7 @@ class TabCarga(QWidget):
         self._worker: Worker | None = None
         self._ma = None
         self._current_mode = 'audio'
+        self._loaded_ui_state: dict = {}
         self._build_ui()
 
     # ── Construcción UI ───────────────────────────────────────────────────
@@ -102,10 +103,10 @@ class TabCarga(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
 
-        lay.addWidget(QLabel("Archivo tensor .npz:"))
+        lay.addWidget(QLabel("Archivo de sesión (.cclp / .npz):"))
         row = QHBoxLayout()
         self.edit_npz_path = QLineEdit()
-        self.edit_npz_path.setPlaceholderText("data/tensor/forte_aligned.npz")
+        self.edit_npz_path.setPlaceholderText("sesion.cclp")
         btn = QPushButton("Explorar…")
         btn.setFixedWidth(90)
         btn.clicked.connect(self._browse_npz)
@@ -210,7 +211,10 @@ class TabCarga(QWidget):
             self.edit_carpeta.setText(path)
 
     def _browse_npz(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Cargar tensor NPZ", "", "NPZ (*.npz)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Cargar sesión", "",
+            "Sesión CCLP (*.cclp);;NPZ tensor (*.npz)"
+        )
         if path:
             self.edit_npz_path.setText(path)
 
@@ -245,10 +249,16 @@ class TabCarga(QWidget):
 
     def _load_from_npz(self):
         from mic_array.patron import MicArray
+        from core.session import load_cclp
 
         path = self.edit_npz_path.text().strip()
         if not path:
-            raise ValueError("Especificá la ruta del archivo .npz.")
+            raise ValueError("Especificá la ruta del archivo.")
+        if path.endswith('.cclp'):
+            ma, ui_state = load_cclp(path)
+            self._loaded_ui_state = ui_state
+            return ma
+        self._loaded_ui_state = {}
         return MicArray.from_tensor(path)
 
     def _on_load_done(self, ma):
@@ -263,15 +273,21 @@ class TabCarga(QWidget):
         self.log.emit(f"[Carga] Tensor listo — {shape}")
         self.ma_ready.emit(ma)
 
-    def _on_guardar_npz(self):
+    def _on_guardar_npz(self, ui_state: dict | None = None):
         if self._ma is None:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar tensor", "", "NPZ (*.npz)"
+            self, "Guardar sesión", "",
+            "Sesión CCLP (*.cclp);;NPZ tensor (*.npz)"
         )
-        if path:
+        if not path:
+            return
+        if path.endswith('.cclp'):
+            from core.session import save_cclp
+            save_cclp(path, self._ma, ui_state or {})
+        else:
             self._ma.save(path)
-            self.log.emit(f"[Carga] Tensor guardado → {path}")
+        self.log.emit(f"[Carga] Sesión guardada → {path}")
 
     def _on_error(self, msg: str):
         self.btn_cargar.setEnabled(True)

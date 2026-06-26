@@ -12,7 +12,7 @@ from PyQt6.QtGui import QFont, QTextCursor
 from core.worker import Worker
 
 from ui.styles               import QSS, get_qss
-from ui.ribbon               import RibbonBar
+from ui.html_ribbon          import HtmlRibbon
 from ui                      import theme as _theme
 from ui.tab_carga            import TabCarga
 from ui.tab_preprocesamiento import TabPreprocesamiento
@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
         self.view_dir        = TabDirectividad()
 
         # Ribbon
-        self.ribbon = RibbonBar()
+        self.ribbon = HtmlRibbon()
 
         # Stack de contenido
         self._stack = QStackedWidget()
@@ -79,14 +79,10 @@ class MainWindow(QMainWindow):
 
         # Navegación
         rb.tab_changed.connect(self._on_tab_changed)
-        # Iniciar en Directividad
-        rb._tab_grp.button(3).setChecked(True)
-        rb._stack.setCurrentIndex(3)
-
         # ── Archivo
         rb.sig_load_audio.connect(lambda: self._show_archivo_mode('audio'))
         rb.sig_load_tensor.connect(lambda: self._show_archivo_mode('tensor'))
-        rb.sig_save_tensor.connect(self.view_archivo._on_guardar_npz)
+        rb.sig_save_tensor.connect(self._on_save_session)
         rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
         rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
 
@@ -159,6 +155,11 @@ class MainWindow(QMainWindow):
         self.view_archivo.set_source_mode(mode)
 
     # ── Slots de Archivo ──────────────────────────────────────────────────────
+
+    def _on_save_session(self):
+        self.view_archivo._on_guardar_npz(
+            ui_state=self.ribbon._bridge.state.copy()
+        )
 
     def _on_load_polar_npz(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -308,9 +309,18 @@ class MainWindow(QMainWindow):
         self.view_notas.set_ma(ma)
         self.view_dir.set_ma(ma)
 
+        # Restaurar ui_state si viene de un .cclp
+        ui = getattr(self.view_archivo, '_loaded_ui_state', {})
+        if ui:
+            self.ribbon._bridge.state.update(ui)
+            self.view_archivo._loaded_ui_state = {}
+
         self.ribbon.set_ma_loaded(ma)
         if ma.notes:
             self.ribbon.set_notes_loaded(list(ma.notes.keys()))
+        if ma.dir_levels is not None:
+            self.ribbon.set_dir_computed(ma.dir_freqs)
+            self.ribbon.set_dir_status("Sesión cargada")
 
     # ── Log ───────────────────────────────────────────────────────────────────
 

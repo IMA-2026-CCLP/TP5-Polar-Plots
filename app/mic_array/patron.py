@@ -97,7 +97,7 @@ class MicArray:
         ma = MicArray.from_tensor("data/tensores/forte.npy")
         """
         path = Path(path)
-        if path.suffix == '.npz':
+        if path.suffix in ('.npz', '.cclp'):
             data       = np.load(path, allow_pickle=True)
             tensor     = data['tensor']
             sr         = int(data['sr'])
@@ -373,7 +373,9 @@ class MicArray:
         ----------
         path : str or Path   destination file (e.g. "data/tensores/forte_aligned.npz")
         """
-        path = Path(path).with_suffix('.npz')
+        path = Path(path)
+        if path.suffix not in ('.npz', '.cclp'):
+            path = path.with_suffix('.npz')
         path.parent.mkdir(parents=True, exist_ok=True)
 
         tensor_to_save = self.tensor
