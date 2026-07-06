@@ -200,25 +200,25 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
   </div>
 
   <div class="tabs">
-    <div class="tab" id="tab0" onclick="switchTab(0)">Archivo</div>
-    <div class="tab" id="tab1" onclick="switchTab(1)">Procesamiento</div>
-    <div class="tab" id="tab2" onclick="switchTab(2)">Notas</div>
-    <div class="tab on" id="tab3" onclick="switchTab(3)">Directividad</div>
+    <div class="tab" id="tab0" onclick="switchTab(0)" title="Cargar audios WAV o sesiones .cclp / .npz guardadas">Archivo</div>
+    <div class="tab" id="tab1" onclick="switchTab(1)" title="Visualizar señales, aplicar filtros y alinear tomas">Procesamiento</div>
+    <div class="tab" id="tab2" onclick="switchTab(2)" title="Detectar y segmentar notas musicales en el audio">Notas</div>
+    <div class="tab on" id="tab3" onclick="switchTab(3)" title="Calcular y visualizar el patrón de directividad acústica">Directividad</div>
   </div>
 
   <div class="spacer"></div>
 
-  <div id="chip">
+  <div id="chip" title="Estado del tensor cargado en memoria">
     <span id="chip-dot"></span>
     <span id="chip-lbl">Sin datos</span>
   </div>
 
   <div class="seg">
-    <button class="seg-btn on" id="seg-dark"  onclick="setTheme('dark')">☾ Oscuro</button>
-    <button class="seg-btn"    id="seg-light" onclick="setTheme('light')">☀ Claro</button>
+    <button class="seg-btn on" id="seg-dark"  onclick="setTheme('dark')"  title="Cambiar a tema oscuro">☾ Oscuro</button>
+    <button class="seg-btn"    id="seg-light" onclick="setTheme('light')" title="Cambiar a tema claro">☀ Claro</button>
   </div>
 
-  <div style="width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:13px;background:var(--sunken);border:1px solid var(--line)">?</div>
+  <div style="width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:13px;background:var(--sunken);border:1px solid var(--line)" title="Ayuda">?</div>
 </div>
 
 <div id="rib-sep"></div>
@@ -230,15 +230,15 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
   <div class="rp" id="rp0">
     <div class="rg" style="padding:0 18px">
       <div class="rgb" style="gap:10px">
-        <div class="bico" onclick="B('loadAudio')">
+        <div class="bico" onclick="B('loadAudio')" title="Carga carpeta de audios WAV y construye el tensor de medición">
           <div class="bico-box" style="font-family:var(--mono);font-size:13px;font-weight:700">.wav</div>
           <span class="bico-lbl">Cargar audio</span>
         </div>
-        <div class="bico" id="bico-load-tensor" onclick="B('loadTensor')">
+        <div class="bico" id="bico-load-tensor" onclick="B('loadTensor')" title="Carga una sesión completa (.cclp) o tensor (.npz) guardado previamente">
           <div class="bico-box">⤓</div>
           <span class="bico-lbl">Cargar sesión</span>
         </div>
-        <div class="bico" id="bico-save-tensor" data-dis="1" onclick="if(!this.dataset.dis||this.dataset.dis==='0')B('saveTensor')">
+        <div class="bico" id="bico-save-tensor" data-dis="1" onclick="if(!this.dataset.dis||this.dataset.dis==='0')B('saveTensor')" title="Guarda toda la sesión actual (tensor + calibración + notas + directividad) en .cclp">
           <div class="bico-box">⤒</div>
           <span class="bico-lbl">Guardar sesión</span>
         </div>
@@ -248,11 +248,11 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     <div class="vs"></div>
     <div class="rg" style="padding:0 18px">
       <div class="rgb" style="gap:10px">
-        <div class="bico" onclick="B('loadPolarNpz')">
+        <div class="bico" onclick="B('loadPolarNpz')" title="Carga resultados de directividad exportados en formato .npz">
           <div class="bico-box">▦</div>
           <span class="bico-lbl">Cargar NPZ polar</span>
         </div>
-        <div class="bico" id="bico-save-polar" data-dis="1" onclick="if(!this.dataset.dis||this.dataset.dis==='0')B('savePolarNpz')">
+        <div class="bico" id="bico-save-polar" data-dis="1" onclick="if(!this.dataset.dis||this.dataset.dis==='0')B('savePolarNpz')" title="Exporta solo los resultados de directividad calculados como .npz">
           <div class="bico-box">⤴</div>
           <span class="bico-lbl">Guardar NPZ polar</span>
         </div>
@@ -270,25 +270,27 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
           <div class="row">
             <span class="lbl" style="width:22px">θ</span>
             <select class="inp" id="sel-theta" style="width:90px"
-              onchange="S('theta',this.value);B('emitPlotParams')">
+              onchange="S('theta',this.value);B('emitPlotParams')"
+              title="Elevación (ángulo vertical del micrófono) a visualizar en el gráfico">
               <option value="ref">ref</option>
             </select>
           </div>
           <div class="row">
             <span class="lbl" style="width:22px">Az</span>
             <select class="inp" id="sel-az" style="width:90px"
-              onchange="S('az',this.value);B('emitPlotParams')">
+              onchange="S('az',this.value);B('emitPlotParams')"
+              title="Azimuth (ángulo horizontal) a visualizar, o 'Todos' para superponer todas las tomas">
               <option value="Todos">Todos</option>
             </select>
           </div>
         </div>
         <div class="col">
-          <label class="chkrow">
+          <label class="chkrow" title="Muestra la envolvente de la señal calculada con la transformada de Hilbert">
             <input type="checkbox" id="chk-env" checked
               onchange="S('envelope',this.checked);B('emitPlotParams')">
             Envolvente
           </label>
-          <label class="chkrow">
+          <label class="chkrow" title="Convierte la envolvente a escala logarítmica en dB (requiere envolvente activa)">
             <input type="checkbox" id="chk-db"
               onchange="onDb(this.checked)">
             dB
@@ -296,7 +298,8 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
           <div class="row">
             <span class="lbl">Suav</span>
             <input class="inp" type="number" id="inp-smooth" value="20" style="width:44px"
-              onchange="S('smooth',+this.value);B('emitPlotParams')">
+              onchange="S('smooth',+this.value);B('emitPlotParams')"
+              title="Suavizado de la envolvente en milisegundos (media móvil). Valores mayores = curva más suave">
             <span class="lbl">ms</span>
           </div>
         </div>
@@ -304,12 +307,14 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
           <div class="row">
             <span class="lbl">Min</span>
             <input class="inp" type="number" id="inp-ymin" placeholder="-60" style="width:52px"
-              onchange="S('ymin',this.value?+this.value:null);B('emitPlotParams')">
+              onchange="S('ymin',this.value?+this.value:null);B('emitPlotParams')"
+              title="Límite inferior del eje Y del gráfico. Vacío = autoescala">
           </div>
           <div class="row">
             <span class="lbl">Max</span>
             <input class="inp" type="number" id="inp-ymax" placeholder="0" style="width:52px"
-              onchange="S('ymax',this.value?+this.value:null);B('emitPlotParams')">
+              onchange="S('ymax',this.value?+this.value:null);B('emitPlotParams')"
+              title="Límite superior del eje Y del gráfico. Vacío = autoescala">
           </div>
         </div>
       </div>
@@ -322,42 +327,65 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
         <div class="row">
           <span class="lbl">Frec</span>
           <input class="inp" type="number" id="inp-hpf" value="200" style="width:54px"
-            onchange="S('hpf_hz',+this.value)">
+            onchange="S('hpf_hz',+this.value)"
+            title="Frecuencia de corte del filtro pasa-altos en Hz (elimina componentes de baja frecuencia)">
           <span class="lbl">Hz</span>
         </div>
-        <button class="ba" id="btn-hpf" disabled onclick="B('applyHpf')">Aplicar HPF</button>
+        <button class="ba" id="btn-hpf" disabled onclick="B('applyHpf')"
+          title="Aplica el filtro pasa-altos de Butterworth al tensor cargado (operación irreversible en memoria)">Aplicar HPF</button>
       </div>
       <div class="rgl">HPF</div>
     </div>
     <div class="vs"></div>
     <!-- ALINEACIÓN -->
     <div class="rg" style="padding:0 12px">
-      <div class="rgb" style="flex-direction:column;justify-content:center;gap:8px">
-        <div class="row" style="gap:8px;flex-wrap:wrap">
-          <span class="lbl">Onset</span>
-          <input class="inp" type="number" id="inp-onset" value="1.0" step="0.1" style="width:50px"
-            onchange="S('onset',+this.value);B('emitAlignPreview')">
-          <span class="lbl">s</span>
-          <span class="lbl">Umbral</span>
-          <input class="inp" type="number" id="inp-thresh" value="-40" style="width:50px"
-            onchange="S('thresh',+this.value);B('emitAlignPreview')">
-          <span class="lbl">Vent</span>
-          <input class="inp" type="number" id="inp-window" value="50" style="width:44px"
-            onchange="S('window_ms',+this.value)">
-          <span class="lbl">ms</span>
-          <span class="lbl">Mic Ref</span>
-          <select class="inp" id="sel-align-theta" style="width:74px"
-            onchange="S('align_theta',this.value);B('emitAlignPreview')">
-            <option value="ref">ref</option>
-          </select>
+      <div class="rgb" style="gap:0">
+        <div class="col" style="gap:6px">
+          <div class="row" style="gap:10px">
+            <div class="row" style="gap:4px">
+              <span class="lbl">Onset</span>
+              <input class="inp" type="number" id="inp-onset" value="1.0" step="0.1" style="width:46px"
+                onchange="S('onset',+this.value);B('emitAlignPreview')"
+                title="Tiempo objetivo donde debe quedar el onset de cada toma tras la alineación (en segundos)">
+              <span class="lbl">s</span>
+            </div>
+            <div class="row" style="gap:4px">
+              <span class="lbl">Umbral</span>
+              <input class="inp" type="number" id="inp-thresh" value="-40" style="width:46px"
+                onchange="S('thresh',+this.value);B('emitAlignPreview')"
+                title="Nivel mínimo para detectar el comienzo del sonido (onset) en dBFS. Valores más bajos = más sensible">
+            </div>
+          </div>
+          <button class="ba" id="btn-align-takes" disabled onclick="B('alignTakes')" style="align-self:center"
+            title="Alinea temporalmente todas las tomas detectando el onset de cada una según el umbral configurado">Alinear tomas</button>
         </div>
-        <div class="row" style="gap:8px">
-          <span class="lbl">GCC thresh</span>
-          <input class="inp" type="number" id="inp-gcc" placeholder="dBFS" style="width:54px"
-            onchange="S('gcc_thresh',this.value?+this.value:null)">
-          <span class="lbl">dBFS</span>
-          <button class="ba" id="btn-align-takes" disabled onclick="B('alignTakes')" style="margin-left:8px">Alinear tomas</button>
-          <button class="bs" id="btn-align-ref"   disabled onclick="B('alignRef')">Alinear Mics</button>
+        <div class="vs" style="margin:0 14px;align-self:stretch"></div>
+        <div class="col" style="gap:6px">
+          <div class="row" style="gap:10px">
+            <div class="row" style="gap:4px">
+              <span class="lbl">Vent</span>
+              <input class="inp" type="number" id="inp-window" value="50" style="width:40px"
+                onchange="S('window_ms',+this.value)"
+                title="Ventana de análisis GCC-PHAT en milisegundos para la correlación cruzada entre micrófonos">
+              <span class="lbl">ms</span>
+            </div>
+            <div class="row" style="gap:4px">
+              <span class="lbl">Mic Ref</span>
+              <select class="inp" id="sel-align-theta" style="width:66px"
+                onchange="S('align_theta',this.value);B('emitAlignPreview')"
+                title="Micrófono de referencia respecto al cual se alinean los demás micrófonos">
+                <option value="ref">ref</option>
+              </select>
+            </div>
+            <div class="row" style="gap:4px">
+              <span class="lbl">GCC thresh</span>
+              <input class="inp" type="number" id="inp-gcc" placeholder="dBFS" style="width:50px"
+                onchange="S('gcc_thresh',this.value?+this.value:null)"
+                title="Nivel mínimo de la toma para ser considerada válida en GCC-PHAT. Vacío = sin filtrado">
+            </div>
+          </div>
+          <button class="ba" id="btn-align-ref" disabled onclick="B('alignRef')" style="align-self:center"
+            title="Alinea todos los micrófonos al micrófono de referencia usando correlación cruzada GCC-PHAT">Alinear Mics</button>
         </div>
       </div>
       <div class="rgl">ALINEACIÓN</div>
@@ -367,11 +395,13 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     <div class="rg" style="padding:0 12px">
       <div class="rgb" style="gap:10px">
         <div class="bico" id="bico-calibrar" data-dis="1"
-          onclick="if(this.dataset.dis==='0')B('openCalibracion')">
+          onclick="if(this.dataset.dis==='0')B('openCalibracion')"
+          title="Abre el panel para ingresar los niveles de calibración de cada micrófono">
           <div class="bico-box" style="font-size:16px">⚙</div>
           <span class="bico-lbl">Calibrar</span>
         </div>
-        <button class="ba" id="btn-to-spl" disabled onclick="B('toSpl')">Convertir SPL</button>
+        <button class="ba" id="btn-to-spl" disabled onclick="B('toSpl')"
+          title="Convierte el tensor de amplitud lineal (FS) a presión sonora en Pascales (dB SPL) usando la calibración cargada">Convertir SPL</button>
       </div>
       <div class="rgl">CALIBRAR</div>
     </div>
@@ -383,9 +413,11 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     <div class="rg" style="padding:0 14px">
       <div class="rgb" style="gap:8px">
         <select class="inp" id="sel-preset" style="width:130px"
-          onchange="B2('presetChanged',this.value)">
+          onchange="B2('presetChanged',this.value)"
+          title="Escala musical de referencia para la detección de notas (define qué frecuencias son notas válidas)">
         </select>
-        <button class="bs" onclick="B('editScale')">Editar</button>
+        <button class="bs" onclick="B('editScale')"
+          title="Abre el editor para crear o modificar una escala musical personalizada">Editar</button>
       </div>
       <div class="rgl">ESCALA</div>
     </div>
@@ -396,25 +428,31 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
         <div class="row" style="gap:10px">
           <span class="lbl">Tol ¢</span>
           <input class="inp" type="number" id="inp-tol" value="50" style="width:42px"
-            onchange="S('note_tol',+this.value)">
+            onchange="S('note_tol',+this.value)"
+            title="Tolerancia en cents para aceptar una frecuencia como nota de la escala (100 ¢ = 1 semitono)">
           <span class="lbl">Pureza</span>
           <input class="inp" type="number" id="inp-purity" value="0.8" step="0.05" style="width:40px"
-            onchange="S('note_purity',+this.value)">
+            onchange="S('note_purity',+this.value)"
+            title="Fracción mínima de energía espectral que debe concentrarse en la frecuencia de la nota (0–1). Mayor = más estricto">
           <span class="lbl">Inicio</span>
           <input class="inp" type="number" id="inp-start" value="0.0" step="0.1" style="width:38px"
-            onchange="S('note_start',+this.value)">
+            onchange="S('note_start',+this.value)"
+            title="Segundo a partir del cual se analiza la señal (omite el ataque inicial ruidoso)">
           <span class="lbl">Grad</span>
           <input class="inp" type="number" id="inp-grad" value="25" style="width:36px"
-            onchange="S('note_grad',+this.value)">
+            onchange="S('note_grad',+this.value)"
+            title="Gradiente mínimo de la envolvente para detectar el comienzo de una nota (pendiente de subida)">
         </div>
         <div class="row" style="gap:8px">
           <span class="lbl">Ref θ</span>
           <select class="inp" id="sel-note-theta" style="width:74px"
-            onchange="S('note_theta',this.value)">
+            onchange="S('note_theta',this.value)"
+            title="Micrófono de referencia usado para el análisis espectral durante la detección de notas">
             <option value="ref">ref</option>
           </select>
           <button class="ba" id="btn-detect" disabled onclick="B('detectNotes')"
-            style="margin-left:8px">♪ Detectar notas</button>
+            style="margin-left:8px"
+            title="Detecta y segmenta automáticamente las notas musicales presentes en el audio cargado">♪ Detectar notas</button>
         </div>
       </div>
       <div class="rgl">DETECCIÓN</div>
@@ -424,11 +462,13 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     <div class="rg" style="padding:0 14px">
       <div class="rgb" style="gap:10px">
         <div class="bico" id="bico-save-mask" data-dis="1"
-          onclick="if(this.dataset.dis==='0')B('saveMask')">
+          onclick="if(this.dataset.dis==='0')B('saveMask')"
+          title="Guarda la máscara de segmentación de notas detectadas como archivo reutilizable">
           <div class="bico-box">⤒</div>
           <span class="bico-lbl">Guardar máscara</span>
         </div>
-        <div class="bico" onclick="B('loadMask')">
+        <div class="bico" onclick="B('loadMask')"
+          title="Carga una máscara de notas guardada previamente para reutilizar la segmentación">
           <div class="bico-box">⤓</div>
           <span class="bico-lbl">Cargar máscara</span>
         </div>
@@ -445,32 +485,42 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
         <div style="display:grid;grid-template-columns:auto auto;gap:7px 8px;align-items:center">
           <span class="lbl">Bandas</span>
           <select class="inp" id="sel-bands" style="width:70px"
-            onchange="S('bands',this.value)">
+            onchange="S('bands',this.value)"
+            title="Resolución frecuencial: tercios de octava (1/3) para mayor detalle, o por octava">
             <option value="1/3">1/3</option>
             <option value="octave">octava</option>
           </select>
           <span class="lbl">Hz</span>
           <div class="row" style="gap:4px">
             <input class="inp" type="number" id="inp-hz-min" value="315" style="width:52px"
-              onchange="S('hz_min',+this.value);B('dirDisplayChanged')">
+              onchange="S('hz_min',+this.value);B('dirDisplayChanged')"
+              title="Frecuencia mínima del rango a mostrar en los gráficos de directividad (Hz)">
             <span class="lbl">–</span>
             <input class="inp" type="number" id="inp-hz-max" value="10000" style="width:58px"
-              onchange="S('hz_max',+this.value);B('dirDisplayChanged')">
+              onchange="S('hz_max',+this.value);B('dirDisplayChanged')"
+              title="Frecuencia máxima del rango a mostrar en los gráficos de directividad (Hz)">
           </div>
         </div>
         <div class="col">
           <div class="row">
             <span class="lbl" style="width:44px">Ref Az</span>
-            <input class="inp" type="number" id="inp-ref-az" value="0" style="width:40px"
-              onchange="S('ref_az',+this.value)">
+            <select class="inp" id="sel-ref-az" style="width:60px"
+              onchange="S('ref_az',+this.value)"
+              title="Azimuth del punto de referencia para normalizar la directividad (0° = frente al instrumento)">
+              <option value="0">0°</option>
+            </select>
           </div>
           <div class="row">
             <span class="lbl" style="width:44px">Ref θ</span>
-            <input class="inp" type="number" id="inp-ref-th" value="0" style="width:40px"
-              onchange="S('ref_th',+this.value)">
+            <select class="inp" id="sel-ref-th" style="width:60px"
+              onchange="S('ref_th',+this.value)"
+              title="Elevación del punto de referencia para normalizar la directividad (0° = plano horizontal)">
+              <option value="0">0°</option>
+            </select>
           </div>
         </div>
-        <button class="ba" id="btn-compute" disabled onclick="B('computeDir')">▶ Calcular</button>
+        <button class="ba" id="btn-compute" disabled onclick="B('computeDir')"
+          title="Calcula el patrón de directividad completo a partir del tensor en SPL (requiere calibración aplicada)">▶ Calcular</button>
       </div>
       <div class="rgl">CÁLCULO DIRECTIVIDAD</div>
     </div>
@@ -479,7 +529,8 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     <div class="rg" style="padding:0 12px">
       <div class="rgb">
         <select class="inp" id="sel-nota" style="width:140px"
-          onchange="S('nota',this.value);B('dirDisplayChanged')">
+          onchange="S('nota',this.value);B('dirDisplayChanged')"
+          title="Selecciona la nota a graficar o 'Todo el audio' para usar el tensor completo">
           <option>Todo el audio</option>
         </select>
       </div>
@@ -493,22 +544,35 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
           <div class="row" style="gap:5px">
             <span class="lbl">Color</span>
             <select class="inp" id="sel-cs" style="width:90px"
-              onchange="S('colorscale',this.value);B('dirDisplayChanged')">
+              onchange="S('colorscale',this.value);B('dirDisplayChanged')"
+              title="Paleta de colores para los gráficos de directividad">
               <option>Plasma</option><option>Viridis</option><option>Turbo</option>
               <option>Inferno</option><option>Magma</option><option>Cividis</option>
             </select>
           </div>
           <div class="row" style="gap:5px">
+            <span class="lbl">Plano</span>
+            <select class="inp" id="sel-plane" style="width:110px"
+              onchange="onPlaneChanged(this.value)"
+              title="Plano del corte polar 2D: XY (horizontal, elevación fija), XZ o YZ (verticales, pasan por el cénit)">
+              <option value="XY">XY (horizontal)</option>
+              <option value="XZ">XZ (vertical, Az 0°/180°)</option>
+              <option value="YZ">YZ (vertical, Az 90°/270°)</option>
+            </select>
+          </div>
+          <div class="row" style="gap:5px">
             <span class="lbl">Elev</span>
             <select class="inp" id="sel-el" style="width:80px"
-              onchange="S('el_idx',this.selectedIndex===0?null:this.selectedIndex-1);B('dirDisplayChanged')">
+              onchange="S('el_idx',this.selectedIndex===0?null:this.selectedIndex-1);B('dirDisplayChanged')"
+              title="Ángulo de elevación a mostrar en el gráfico polar 2D (corte horizontal del patrón). Sólo aplica al plano XY.">
               <option>Auto (0°)</option>
             </select>
           </div>
           <div class="row" style="gap:5px">
             <span class="lbl">Sim</span>
             <select class="inp" id="sel-sym" style="width:110px"
-              onchange="S('symmetry',['none','azimuth','elevation','both'][this.selectedIndex]);B('dirDisplayChanged')">
+              onchange="S('symmetry',['none','azimuth','elevation','both'][this.selectedIndex]);B('dirDisplayChanged')"
+              title="Simetría a aplicar: espeja los datos medidos para completar el patrón asumiendo simetría del instrumento">
               <option>Sin simetría</option>
               <option>XZ (izq↔der)</option>
               <option>XY (sup↔inf)</option>
@@ -517,10 +581,11 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
           </div>
         </div>
         <div class="row" style="gap:6px">
-          <span class="pill on" id="pill-3d"      onclick="togglePill(this,'view_3d')">3D</span>
-          <span class="pill on" id="pill-sphere"  onclick="togglePill(this,'view_sphere')">Esfera</span>
-          <span class="pill on" id="pill-polar2d" onclick="togglePill(this,'view_polar2d')">Polar 2D</span>
-          <span class="pill on" id="pill-spectrum" onclick="togglePill(this,'view_spectrum')">Espectro</span>
+          <span class="pill on" id="pill-3d"      onclick="togglePill(this,'view_3d')"      title="Muestra u oculta la vista de superficie 3D del patrón de directividad">3D</span>
+          <span class="pill on" id="pill-sphere"  onclick="togglePill(this,'view_sphere')"  title="Muestra u oculta la vista de esfera coloreada con el nivel por dirección">Esfera</span>
+          <span class="pill on" id="pill-polar2d" onclick="togglePill(this,'view_polar2d')" title="Muestra u oculta el gráfico polar 2D en el plano de elevación seleccionado">Polar 2D</span>
+          <span class="pill on" id="pill-spectrum" onclick="togglePill(this,'view_spectrum')" title="Muestra u oculta el gráfico de espectro por ángulo de azimuth">Espectro</span>
+          <span class="pill on" id="pill-info" onclick="togglePill(this,'show_info')" title="Muestra u oculta el recuadro de información (banda, máx, dinámica) en las 4 vistas">Info</span>
         </div>
       </div>
       <div class="rgl">VISUALIZACIÓN</div>
@@ -532,7 +597,8 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
         <div class="row" style="gap:5px">
           <span class="lbl" style="width:36px">Audio</span>
           <select class="inp" id="sel-spec-data" style="width:130px"
-            onchange="S('spec_data',this.selectedIndex);B('dirDisplayChanged')">
+            onchange="S('spec_data',this.selectedIndex);B('dirDisplayChanged')"
+            title="Datos a graficar: señales originales en nivel absoluto, o igualadas en nivel para comparar solo la forma espectral">
             <option>Originales</option>
             <option>Igualados en nivel</option>
           </select>
@@ -540,7 +606,8 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
         <div class="row" style="gap:5px">
           <span class="lbl" style="width:36px">Vista</span>
           <select class="inp" id="sel-spec-view" style="width:130px"
-            onchange="S('spec_global',this.selectedIndex===0);B('dirDisplayChanged')">
+            onchange="S('spec_global',this.selectedIndex===0);B('dirDisplayChanged')"
+            title="Global: promedio de todos los ángulos. Por toma: espectro individual de cada azimuth">
             <option>Global</option>
             <option>Por toma</option>
           </select>
@@ -551,11 +618,18 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     <div class="vs"></div>
     <!-- GUARDAR -->
     <div class="rg" style="padding:0 12px">
-      <div class="rgb">
+      <div class="rgb" style="gap:10px">
         <div class="bico" id="bico-save-dir" data-dis="1"
-          onclick="if(this.dataset.dis==='0')B('saveDirNpz')">
+          onclick="if(this.dataset.dis==='0')B('saveDirNpz')"
+          title="Exporta el patrón de directividad calculado como archivo .npz (dir_levels, dir_freqs, thetas)">
           <div class="bico-box">⤴</div>
           <span class="bico-lbl">Exportar NPZ</span>
+        </div>
+        <div class="bico" id="bico-export-all" data-dis="1"
+          onclick="if(this.dataset.dis==='0')B('exportAllImages')"
+          title="Exporta de una sola vez las imágenes de todas las vistas habilitadas (3D/Esfera/Polar 2D/Espectro), para todas las bandas del rango analizado">
+          <div class="bico-box">🖼</div>
+          <span class="bico-lbl">Exportar imágenes</span>
         </div>
       </div>
       <div class="rgl">GUARDAR</div>
@@ -609,6 +683,23 @@ new QWebChannel(qt.webChannelTransport, function(ch) {
       opt.textContent = a + '°';
       selAz.appendChild(opt);
     });
+    // Poblar selects de referencia (Directividad) — sólo valores numéricos
+    var selRefAz = document.getElementById('sel-ref-az');
+    selRefAz.innerHTML = '';
+    angles.forEach(function(a) {
+      var opt = document.createElement('option');
+      opt.value = a;
+      opt.textContent = a + '°';
+      selRefAz.appendChild(opt);
+    });
+    var selRefTh = document.getElementById('sel-ref-th');
+    selRefTh.innerHTML = '';
+    thetas.filter(function(t){ return t !== 'ref'; }).forEach(function(t) {
+      var opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t + '°';
+      selRefTh.appendChild(opt);
+    });
     // Habilitar botones
     enableEl('btn-hpf', true);
     enableEl('btn-align-takes', true);
@@ -660,6 +751,7 @@ new QWebChannel(qt.webChannelTransport, function(ch) {
     });
     setBicoEnabled('bico-save-dir', true);
     setBicoEnabled('bico-save-polar', true);
+    setBicoEnabled('bico-export-all', true);
   });
 
   bridge.dirStatusChanged.connect(function(text) {
@@ -713,6 +805,16 @@ function switchTab(i) {
   document.getElementById('rp'  + i).classList.add('on');
   B2('tabClicked', i);
 }
+// Fuerza el cambio de tab desde Python sin depender del valor previo de
+// _curTab (usado por HtmlRibbon._switch_tab, p.ej. al cargar una sesión).
+function forceTab(i) {
+  document.querySelectorAll('.tab.on').forEach(function(el){ el.classList.remove('on'); });
+  document.querySelectorAll('.rp.on').forEach(function(el){ el.classList.remove('on'); });
+  _curTab = i;
+  document.getElementById('tab' + i).classList.add('on');
+  document.getElementById('rp'  + i).classList.add('on');
+  B2('tabClicked', i);
+}
 
 // ── Tema ──────────────────────────────────────────────────────────────────
 var _curTheme = 'dark';
@@ -732,6 +834,13 @@ function applyTheme(t) {
     document.getElementById('seg-dark').classList.add('on');
     document.getElementById('seg-light').classList.remove('on');
   }
+}
+
+// ── Plano del polar 2D ────────────────────────────────────────────────────
+function onPlaneChanged(value) {
+  S('polar_plane', value);
+  enableEl('sel-el', value === 'XY');
+  B('dirDisplayChanged');
 }
 
 // ── dB toggle ─────────────────────────────────────────────────────────────

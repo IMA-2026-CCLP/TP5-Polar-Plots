@@ -69,7 +69,11 @@ def save_cclp(path: str, ma, ui_state: dict | None = None) -> None:
     }
     kwargs['session_params'] = np.array([json.dumps(meta, ensure_ascii=False)])
 
-    np.savez_compressed(str(path), **kwargs)
+    # np.savez_compressed le agrega ".npz" al nombre si es un string que no
+    # termina en ".npz" (comportamiento propio de numpy) — se evita pasando
+    # un file handle ya abierto, que no sufre ese renombrado automático.
+    with open(path, 'wb') as f:
+        np.savez_compressed(f, **kwargs)
     size_kb = path.stat().st_size / 1024
     print(f"  Sesión guardada: {path}  ({size_kb:.0f} KB)")
 

@@ -24,799 +24,799 @@
   "segments": [
     {
       "Fa4": {
-        "start": 49843,
-        "end": 73258,
+        "start": 27121,
+        "end": 48289,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 76288,
-        "end": 101888,
+        "start": 53184,
+        "end": 77660,
         "purity": 1.0
       },
       "La4": {
-        "start": 104448,
-        "end": 126190,
-        "purity": 1.0
-      },
-      "Sib4": {
-        "start": 128780,
-        "end": 152106,
-        "purity": 1.0
-      },
-      "Do5": {
-        "start": 154088,
-        "end": 177664,
-        "purity": 1.0
-      },
-      "Re5": {
-        "start": 180224,
-        "end": 203776,
-        "purity": 1.0
-      },
-      "Mi5": {
-        "start": 206336,
-        "end": 230374,
-        "purity": 1.0
-      },
-      "Fa5": {
-        "start": 232791,
-        "end": 264919,
-        "purity": 1.0
-      }
-    },
-    {
-      "Fa4": {
-        "start": 50869,
-        "end": 72062,
-        "purity": 1.0
-      },
-      "Sol4": {
-        "start": 76904,
-        "end": 102049,
-        "purity": 1.0
-      },
-      "La4": {
-        "start": 106804,
-        "end": 129660,
-        "purity": 1.0
-      },
-      "Sib4": {
-        "start": 132200,
-        "end": 156106,
-        "purity": 1.0
-      },
-      "Do5": {
-        "start": 159413,
-        "end": 182730,
-        "purity": 1.0
-      },
-      "Re5": {
-        "start": 186907,
-        "end": 210609,
-        "purity": 1.0
-      },
-      "Mi5": {
-        "start": 213782,
-        "end": 236869,
-        "purity": 1.0
-      },
-      "Fa5": {
-        "start": 239252,
-        "end": 270975,
-        "purity": 1.0
-      }
-    },
-    {
-      "Fa4": {
-        "start": 52987,
-        "end": 73186,
-        "purity": 1.0
-      },
-      "Sol4": {
-        "start": 79190,
-        "end": 103683,
-        "purity": 1.0
-      },
-      "La4": {
-        "start": 107817,
-        "end": 131083,
-        "purity": 1.0
-      },
-      "Sib4": {
-        "start": 134694,
-        "end": 158342,
-        "purity": 1.0
-      },
-      "Do5": {
-        "start": 162601,
-        "end": 187821,
-        "purity": 1.0
-      },
-      "Re5": {
-        "start": 191528,
-        "end": 214874,
-        "purity": 1.0
-      },
-      "Mi5": {
-        "start": 217581,
-        "end": 244113,
-        "purity": 1.0
-      },
-      "Fa5": {
-        "start": 248023,
-        "end": 281088,
-        "purity": 1.0
-      }
-    },
-    {
-      "Fa4": {
-        "start": 50688,
-        "end": 74240,
-        "purity": 1.0
-      },
-      "Sol4": {
-        "start": 80896,
-        "end": 99328,
-        "purity": 1.0
-      },
-      "La4": {
-        "start": 103936,
-        "end": 128512,
-        "purity": 1.0
-      },
-      "Sib4": {
-        "start": 128512,
-        "end": 154624,
-        "purity": 1.0
-      },
-      "Do5": {
-        "start": 157696,
-        "end": 181248,
-        "purity": 1.0
-      },
-      "Re5": {
-        "start": 185344,
-        "end": 208896,
-        "purity": 1.0
-      },
-      "Mi5": {
-        "start": 211456,
-        "end": 236544,
-        "purity": 1.0
-      },
-      "Fa5": {
-        "start": 236544,
-        "end": 278528,
-        "purity": 1.0
-      }
-    },
-    {
-      "Fa4": {
-        "start": 56320,
-        "end": 76288,
-        "purity": 1.0
-      },
-      "Sol4": {
-        "start": 80384,
-        "end": 102400,
-        "purity": 1.0
-      },
-      "La4": {
-        "start": 105472,
-        "end": 130560,
-        "purity": 1.0
-      },
-      "Sib4": {
-        "start": 130560,
-        "end": 154624,
-        "purity": 1.0
-      },
-      "Do5": {
-        "start": 156672,
-        "end": 180224,
-        "purity": 1.0
-      },
-      "Re5": {
-        "start": 183296,
-        "end": 206848,
-        "purity": 1.0
-      },
-      "Mi5": {
-        "start": 209408,
-        "end": 233472,
-        "purity": 1.0
-      },
-      "Fa5": {
-        "start": 233472,
-        "end": 284160,
-        "purity": 1.0
-      }
-    },
-    {
-      "Fa4": {
-        "start": 49664,
-        "end": 72704,
-        "purity": 1.0
-      },
-      "Sol4": {
-        "start": 75776,
-        "end": 98816,
-        "purity": 1.0
-      },
-      "La4": {
-        "start": 101888,
-        "end": 126464,
-        "purity": 1.0
-      },
-      "Sib4": {
-        "start": 126464,
-        "end": 152064,
-        "purity": 1.0
-      },
-      "Do5": {
-        "start": 154624,
-        "end": 177664,
-        "purity": 1.0
-      },
-      "Re5": {
-        "start": 180224,
-        "end": 204800,
-        "purity": 1.0
-      },
-      "Mi5": {
-        "start": 207360,
-        "end": 231424,
-        "purity": 1.0
-      },
-      "Fa5": {
-        "start": 231424,
-        "end": 283136,
-        "purity": 1.0
-      }
-    },
-    {
-      "Fa4": {
-        "start": 54784,
-        "end": 77824,
-        "purity": 1.0
-      },
-      "Sol4": {
-        "start": 81920,
-        "end": 103424,
-        "purity": 1.0
-      },
-      "La4": {
-        "start": 108032,
-        "end": 132096,
-        "purity": 1.0
-      },
-      "Sib4": {
-        "start": 132096,
-        "end": 157184,
-        "purity": 1.0
-      },
-      "Do5": {
-        "start": 159744,
-        "end": 184832,
-        "purity": 1.0
-      },
-      "Re5": {
-        "start": 187392,
-        "end": 209920,
-        "purity": 1.0
-      },
-      "Mi5": {
-        "start": 212992,
-        "end": 240128,
-        "purity": 1.0
-      },
-      "Fa5": {
-        "start": 240128,
-        "end": 274944,
-        "purity": 1.0
-      }
-    },
-    {
-      "Fa4": {
-        "start": 52736,
-        "end": 78336,
-        "purity": 1.0
-      },
-      "Sol4": {
         "start": 81408,
-        "end": 107520,
-        "purity": 1.0
-      },
-      "La4": {
-        "start": 110592,
-        "end": 135168,
+        "end": 105487,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 135168,
-        "end": 162816,
+        "start": 105487,
+        "end": 130050,
         "purity": 1.0
       },
       "Do5": {
-        "start": 164864,
-        "end": 189952,
+        "start": 132079,
+        "end": 154614,
         "purity": 1.0
       },
       "Re5": {
-        "start": 192512,
-        "end": 216576,
+        "start": 157172,
+        "end": 180721,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 232448,
-        "end": 247296,
+        "start": 183279,
+        "end": 206917,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 247296,
-        "end": 280064,
+        "start": 209607,
+        "end": 232627,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 52736,
-        "end": 78848,
+        "start": 29194,
+        "end": 52214,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 80896,
-        "end": 107008,
+        "start": 55301,
+        "end": 82952,
         "purity": 1.0
       },
       "La4": {
-        "start": 110080,
-        "end": 135168,
+        "start": 85509,
+        "end": 110602,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 135168,
-        "end": 161280,
+        "start": 110602,
+        "end": 136180,
         "purity": 1.0
       },
       "Do5": {
-        "start": 163328,
-        "end": 188928,
+        "start": 138253,
+        "end": 162817,
         "purity": 1.0
       },
       "Re5": {
-        "start": 191488,
-        "end": 214528,
+        "start": 165375,
+        "end": 190467,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 217088,
-        "end": 245248,
+        "start": 206343,
+        "end": 219662,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 247808,
-        "end": 280576,
+        "start": 229893,
+        "end": 273420,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 51200,
-        "end": 75776,
+        "start": 29679,
+        "end": 54287,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 77824,
-        "end": 101888,
+        "start": 56844,
+        "end": 82422,
         "purity": 1.0
       },
       "La4": {
-        "start": 105984,
-        "end": 130048,
+        "start": 85509,
+        "end": 111617,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 130048,
-        "end": 155648,
+        "start": 111617,
+        "end": 137724,
         "purity": 1.0
       },
       "Do5": {
-        "start": 159744,
-        "end": 181248,
+        "start": 139797,
+        "end": 166389,
         "purity": 1.0
       },
       "Re5": {
-        "start": 183808,
-        "end": 209920,
+        "start": 168947,
+        "end": 193554,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 212992,
-        "end": 237056,
+        "start": 201228,
+        "end": 226321,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 237056,
-        "end": 283136,
+        "start": 226321,
+        "end": 259087,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 51712,
-        "end": 73728,
+        "start": 28665,
+        "end": 52214,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 76800,
-        "end": 83968,
+        "start": 58873,
+        "end": 76778,
         "purity": 1.0
       },
       "La4": {
-        "start": 105472,
-        "end": 129536,
+        "start": 81937,
+        "end": 106501,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 129536,
-        "end": 158720,
+        "start": 106501,
+        "end": 132608,
         "purity": 1.0
       },
       "Do5": {
-        "start": 162816,
-        "end": 186368,
+        "start": 136180,
+        "end": 159245,
         "purity": 1.0
       },
       "Re5": {
-        "start": 188416,
-        "end": 211456,
+        "start": 163346,
+        "end": 186895,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 215552,
-        "end": 240128,
+        "start": 189453,
+        "end": 214546,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 240128,
-        "end": 286650,
+        "start": 214546,
+        "end": 256529,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 55808,
-        "end": 77824,
+        "start": 34309,
+        "end": 54287,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 79872,
-        "end": 104960,
+        "start": 58388,
+        "end": 80879,
         "purity": 1.0
       },
       "La4": {
-        "start": 108544,
-        "end": 135680,
+        "start": 83437,
+        "end": 108530,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 135680,
-        "end": 158208,
+        "start": 108530,
+        "end": 132608,
         "purity": 1.0
       },
       "Do5": {
-        "start": 161280,
-        "end": 185344,
+        "start": 134637,
+        "end": 158186,
         "purity": 1.0
       },
       "Re5": {
-        "start": 187392,
-        "end": 211968,
+        "start": 161273,
+        "end": 184823,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 214528,
-        "end": 237568,
+        "start": 187380,
+        "end": 211459,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 237568,
-        "end": 286650,
+        "start": 211459,
+        "end": 263188,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 51712,
-        "end": 77824,
+        "start": 27650,
+        "end": 50670,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 80384,
-        "end": 104448,
+        "start": 53757,
+        "end": 76778,
         "purity": 1.0
       },
       "La4": {
-        "start": 107520,
-        "end": 133632,
+        "start": 79865,
+        "end": 104428,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 133632,
-        "end": 158720,
+        "start": 104428,
+        "end": 130050,
         "purity": 1.0
       },
       "Do5": {
-        "start": 161280,
-        "end": 185344,
+        "start": 132608,
+        "end": 155628,
         "purity": 1.0
       },
       "Re5": {
-        "start": 187904,
-        "end": 212480,
+        "start": 158715,
+        "end": 182794,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 215040,
-        "end": 241664,
+        "start": 185352,
+        "end": 209386,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 241664,
-        "end": 286650,
+        "start": 209386,
+        "end": 261116,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 60928,
-        "end": 70144,
+        "start": 31752,
+        "end": 54772,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 74752,
-        "end": 98304,
+        "start": 58873,
+        "end": 80394,
         "purity": 1.0
       },
       "La4": {
-        "start": 101888,
-        "end": 126976,
+        "start": 84495,
+        "end": 109059,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 126976,
-        "end": 150528,
+        "start": 109059,
+        "end": 134152,
         "purity": 1.0
       },
       "Do5": {
-        "start": 153088,
-        "end": 178176,
+        "start": 136710,
+        "end": 161273,
         "purity": 1.0
       },
       "Re5": {
-        "start": 180224,
-        "end": 203264,
+        "start": 163831,
+        "end": 186895,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 211968,
-        "end": 239104,
+        "start": 189938,
+        "end": 217104,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 245760,
-        "end": 279552,
+        "start": 217104,
+        "end": 251899,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 50688,
-        "end": 76800,
+        "start": 29679,
+        "end": 55301,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 79872,
-        "end": 108032,
+        "start": 58388,
+        "end": 83966,
         "purity": 1.0
       },
       "La4": {
-        "start": 110592,
-        "end": 136704,
+        "start": 87538,
+        "end": 112146,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 136704,
-        "end": 162816,
+        "start": 112146,
+        "end": 139267,
         "purity": 1.0
       },
       "Do5": {
-        "start": 165888,
-        "end": 190976,
+        "start": 141825,
+        "end": 166918,
         "purity": 1.0
       },
       "Re5": {
-        "start": 193536,
-        "end": 217600,
+        "start": 169476,
+        "end": 193025,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 220672,
-        "end": 247808,
+        "start": 209386,
+        "end": 224248,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 247808,
-        "end": 286650,
+        "start": 224248,
+        "end": 257014,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 51712,
-        "end": 79872,
+        "start": 29679,
+        "end": 55301,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 82432,
-        "end": 108544,
+        "start": 57859,
+        "end": 83437,
         "purity": 1.0
       },
       "La4": {
-        "start": 111616,
-        "end": 137216,
+        "start": 87053,
+        "end": 112146,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 137216,
-        "end": 161792,
+        "start": 112146,
+        "end": 137724,
         "purity": 1.0
       },
       "Do5": {
-        "start": 164864,
-        "end": 188416,
+        "start": 140282,
+        "end": 165375,
         "purity": 1.0
       },
       "Re5": {
-        "start": 198656,
-        "end": 205824,
+        "start": 167932,
+        "end": 191482,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 229888,
-        "end": 261632,
+        "start": 194040,
+        "end": 222705,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 261632,
-        "end": 278528,
+        "start": 222705,
+        "end": 257014,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 52224,
-        "end": 76800,
+        "start": 29194,
+        "end": 53757,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 79360,
-        "end": 104960,
+        "start": 55786,
+        "end": 79865,
         "purity": 1.0
       },
       "La4": {
-        "start": 108032,
-        "end": 134144,
+        "start": 83437,
+        "end": 107515,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 134144,
-        "end": 160256,
+        "start": 107515,
+        "end": 133623,
         "purity": 1.0
       },
       "Do5": {
-        "start": 162304,
-        "end": 188928,
+        "start": 137724,
+        "end": 159245,
         "purity": 1.0
       },
       "Re5": {
-        "start": 191488,
-        "end": 216064,
+        "start": 161802,
+        "end": 187910,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 224256,
-        "end": 248832,
+        "start": 190997,
+        "end": 215031,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 248832,
-        "end": 281600,
+        "start": 215031,
+        "end": 259572,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 50688,
-        "end": 73216,
+        "start": 29679,
+        "end": 51729,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 76800,
-        "end": 103936,
+        "start": 54772,
+        "end": 61431,
         "purity": 1.0
       },
       "La4": {
-        "start": 106496,
-        "end": 131584,
+        "start": 83437,
+        "end": 107515,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 131584,
-        "end": 157696,
+        "start": 107515,
+        "end": 136710,
         "purity": 1.0
       },
       "Do5": {
-        "start": 159744,
-        "end": 184320,
+        "start": 140811,
+        "end": 164360,
         "purity": 1.0
       },
       "Re5": {
-        "start": 186368,
-        "end": 211968,
+        "start": 166389,
+        "end": 189453,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 227840,
-        "end": 240640,
+        "start": 193554,
+        "end": 218118,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 254464,
-        "end": 271360,
+        "start": 218118,
+        "end": 271347,
         "purity": 1.0
       }
     },
     {
       "Fa4": {
-        "start": 50176,
-        "end": 74240,
+        "start": 32766,
+        "end": 54772,
         "purity": 1.0
       },
       "Sol4": {
-        "start": 76800,
-        "end": 101888,
+        "start": 56844,
+        "end": 81937,
         "purity": 1.0
       },
       "La4": {
-        "start": 104448,
-        "end": 128512,
+        "start": 85509,
+        "end": 112146,
         "purity": 1.0
       },
       "Sib4": {
-        "start": 128512,
-        "end": 153600,
+        "start": 112146,
+        "end": 135166,
         "purity": 1.0
       },
       "Do5": {
-        "start": 155136,
-        "end": 178176,
+        "start": 138253,
+        "end": 162288,
         "purity": 1.0
       },
       "Re5": {
-        "start": 180736,
-        "end": 203776,
+        "start": 164360,
+        "end": 188924,
         "purity": 1.0
       },
       "Mi5": {
-        "start": 206336,
-        "end": 239104,
+        "start": 190997,
+        "end": 214546,
         "purity": 1.0
       },
       "Fa5": {
-        "start": 244736,
-        "end": 266240,
+        "start": 214546,
+        "end": 264688,
+        "purity": 1.0
+      }
+    },
+    {
+      "Fa4": {
+        "start": 28665,
+        "end": 54772,
+        "purity": 1.0
+      },
+      "Sol4": {
+        "start": 56844,
+        "end": 80879,
+        "purity": 1.0
+      },
+      "La4": {
+        "start": 83966,
+        "end": 110602,
+        "purity": 1.0
+      },
+      "Sib4": {
+        "start": 110602,
+        "end": 135695,
+        "purity": 1.0
+      },
+      "Do5": {
+        "start": 138253,
+        "end": 162288,
+        "purity": 1.0
+      },
+      "Re5": {
+        "start": 164845,
+        "end": 188924,
+        "purity": 1.0
+      },
+      "Mi5": {
+        "start": 192011,
+        "end": 218118,
+        "purity": 1.0
+      },
+      "Fa5": {
+        "start": 218118,
+        "end": 266760,
+        "purity": 1.0
+      }
+    },
+    {
+      "Fa4": {
+        "start": 39425,
+        "end": 48113,
+        "purity": 1.0
+      },
+      "Sol4": {
+        "start": 52743,
+        "end": 76293,
+        "purity": 1.0
+      },
+      "La4": {
+        "start": 79865,
+        "end": 104428,
+        "purity": 1.0
+      },
+      "Sib4": {
+        "start": 104428,
+        "end": 128507,
+        "purity": 1.0
+      },
+      "Do5": {
+        "start": 131065,
+        "end": 156158,
+        "purity": 1.0
+      },
+      "Re5": {
+        "start": 158186,
+        "end": 181251,
+        "purity": 1.0
+      },
+      "Mi5": {
+        "start": 189938,
+        "end": 216575,
+        "purity": 1.0
+      },
+      "Fa5": {
+        "start": 223763,
+        "end": 254986,
+        "purity": 1.0
+      }
+    },
+    {
+      "Fa4": {
+        "start": 28665,
+        "end": 54772,
+        "purity": 1.0
+      },
+      "Sol4": {
+        "start": 57859,
+        "end": 85995,
+        "purity": 1.0
+      },
+      "La4": {
+        "start": 88596,
+        "end": 114704,
+        "purity": 1.0
+      },
+      "Sib4": {
+        "start": 114704,
+        "end": 140811,
+        "purity": 1.0
+      },
+      "Do5": {
+        "start": 143369,
+        "end": 168947,
+        "purity": 1.0
+      },
+      "Re5": {
+        "start": 171504,
+        "end": 195583,
+        "purity": 1.0
+      },
+      "Mi5": {
+        "start": 198670,
+        "end": 225792,
+        "purity": 1.0
+      },
+      "Fa5": {
+        "start": 225792,
+        "end": 267775,
+        "purity": 1.0
+      }
+    },
+    {
+      "Fa4": {
+        "start": 29679,
+        "end": 57859,
+        "purity": 1.0
+      },
+      "Sol4": {
+        "start": 60417,
+        "end": 86524,
+        "purity": 1.0
+      },
+      "La4": {
+        "start": 89611,
+        "end": 115189,
+        "purity": 1.0
+      },
+      "Sib4": {
+        "start": 115189,
+        "end": 139797,
+        "purity": 1.0
+      },
+      "Do5": {
+        "start": 142839,
+        "end": 166389,
+        "purity": 1.0
+      },
+      "Re5": {
+        "start": 176620,
+        "end": 185837,
+        "purity": 1.0
+      },
+      "Mi5": {
+        "start": 208372,
+        "end": 239110,
+        "purity": 1.0
+      },
+      "Fa5": {
+        "start": 239110,
+        "end": 256529,
+        "purity": 1.0
+      }
+    },
+    {
+      "Fa4": {
+        "start": 30208,
+        "end": 54772,
+        "purity": 1.0
+      },
+      "Sol4": {
+        "start": 57330,
+        "end": 82422,
+        "purity": 1.0
+      },
+      "La4": {
+        "start": 85995,
+        "end": 112146,
+        "purity": 1.0
+      },
+      "Sib4": {
+        "start": 112146,
+        "end": 138253,
+        "purity": 1.0
+      },
+      "Do5": {
+        "start": 141296,
+        "end": 166918,
+        "purity": 1.0
+      },
+      "Re5": {
+        "start": 169476,
+        "end": 194040,
+        "purity": 1.0
+      },
+      "Mi5": {
+        "start": 201713,
+        "end": 226806,
+        "purity": 1.0
+      },
+      "Fa5": {
+        "start": 226806,
+        "end": 259572,
+        "purity": 1.0
+      }
+    },
+    {
+      "Fa4": {
+        "start": 28665,
+        "end": 51200,
+        "purity": 1.0
+      },
+      "Sol4": {
+        "start": 54772,
+        "end": 81937,
+        "purity": 1.0
+      },
+      "La4": {
+        "start": 84495,
+        "end": 109588,
+        "purity": 1.0
+      },
+      "Sib4": {
+        "start": 109588,
+        "end": 135695,
+        "purity": 1.0
+      },
+      "Do5": {
+        "start": 137724,
+        "end": 162288,
+        "purity": 1.0
+      },
+      "Re5": {
+        "start": 164360,
+        "end": 189938,
+        "purity": 1.0
+      },
+      "Mi5": {
+        "start": 205814,
+        "end": 218603,
+        "purity": 1.0
+      },
+      "Fa5": {
+        "start": 229364,
+        "end": 265746,
+        "purity": 1.0
+      }
+    },
+    {
+      "Fa4": {
+        "start": 27121,
+        "end": 50670,
+        "purity": 1.0
+      },
+      "Sol4": {
+        "start": 53228,
+        "end": 78850,
+        "purity": 1.0
+      },
+      "La4": {
+        "start": 81408,
+        "end": 105487,
+        "purity": 1.0
+      },
+      "Sib4": {
+        "start": 105487,
+        "end": 130050,
+        "purity": 1.0
+      },
+      "Do5": {
+        "start": 131594,
+        "end": 154614,
+        "purity": 1.0
+      },
+      "Re5": {
+        "start": 157172,
+        "end": 180721,
+        "purity": 1.0
+      },
+      "Mi5": {
+        "start": 183279,
+        "end": 216045,
+        "purity": 1.0
+      },
+      "Fa5": {
+        "start": 222219,
+        "end": 242682,
         "purity": 1.0
       }
     }

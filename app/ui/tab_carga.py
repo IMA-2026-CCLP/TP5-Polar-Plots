@@ -276,13 +276,20 @@ class TabCarga(QWidget):
     def _on_guardar_npz(self, ui_state: dict | None = None):
         if self._ma is None:
             return
-        path, _ = QFileDialog.getSaveFileName(
+        path, selected_filter = QFileDialog.getSaveFileName(
             self, "Guardar sesión", "",
             "Sesión CCLP (*.cclp);;NPZ tensor (*.npz)"
         )
         if not path:
             return
-        if path.endswith('.cclp'):
+
+        # El diálogo nativo no siempre agrega la extensión del filtro elegido
+        # (depende del sistema operativo) → si el usuario no la tipeó, se
+        # infiere del filtro seleccionado, con .cclp como default.
+        if not path.lower().endswith(('.cclp', '.npz')):
+            path += '.npz' if 'npz' in selected_filter.lower() else '.cclp'
+
+        if path.lower().endswith('.cclp'):
             from core.session import save_cclp
             save_cclp(path, self._ma, ui_state or {})
         else:

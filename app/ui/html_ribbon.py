@@ -90,6 +90,7 @@ class HtmlRibbon(QWidget):
 
     sig_compute_dir         = pyqtSignal(str, float, float, int, int)
     sig_save_dir_npz        = pyqtSignal()
+    sig_export_all_images   = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -146,6 +147,7 @@ class HtmlRibbon(QWidget):
         b.sig_load_mask.connect(self.sig_load_mask)
         b.sig_compute_dir.connect(self.sig_compute_dir)
         b.sig_save_dir_npz.connect(self.sig_save_dir_npz)
+        b.sig_export_all_images.connect(self.sig_export_all_images)
         b.sig_dir_display_changed.connect(self.sig_dir_display_changed)
         b.sig_theme_toggled.connect(self.sig_theme_toggled)
 
@@ -162,7 +164,7 @@ class HtmlRibbon(QWidget):
 
     def _switch_tab(self, idx: int):
         """Cambia el tab visualmente (HTML) y emite tab_changed para el stack."""
-        self._js(f"_curTab=-1;switchTab({idx})")
+        self._js(f"forceTab({idx})")
         self._bridge.state['tab'] = idx
 
     def _update_theme_icon(self, palette: dict):
@@ -200,6 +202,8 @@ class HtmlRibbon(QWidget):
             hz_max      = float(s.get('hz_max', 10000.0)),
             colorscale  = str(s.get('colorscale', 'Plasma')),
             el_index    = s.get('el_idx'),
+            plane       = str(s.get('polar_plane', 'XY')),
+            show_info   = bool(s.get('show_info', True)),
             symmetry    = str(s.get('symmetry', 'none')),
             nota        = str(s.get('nota', 'Todo el audio')),
             spec_data   = int(s.get('spec_data', 0)),

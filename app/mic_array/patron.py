@@ -393,7 +393,10 @@ class MicArray:
         if self.calibration is not None:
             kwargs['calibration'] = self.calibration
 
-        np.savez(path, **kwargs)
+        # np.savez le agrega ".npz" al nombre si no termina en ".npz"
+        # (comportamiento propio de numpy) — se evita con un file handle abierto.
+        with open(path, 'wb') as f:
+            np.savez(f, **kwargs)
         print(f"  Saved: {path}  {tensor_to_save.shape}  ({tensor_to_save.nbytes/1024**2:.1f} MB)")
 
     # ──────────────────────────────────────────────────────────────────────────

@@ -41,6 +41,7 @@ class Bridge(QObject):
     sig_load_mask          = pyqtSignal()
     sig_compute_dir        = pyqtSignal(str, float, float, int, int)
     sig_save_dir_npz       = pyqtSignal()
+    sig_export_all_images  = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
     sig_theme_toggled      = pyqtSignal()
 
@@ -192,6 +193,10 @@ class Bridge(QObject):
         self.sig_save_dir_npz.emit()
 
     @pyqtSlot()
+    def exportAllImages(self):
+        self.sig_export_all_images.emit()
+
+    @pyqtSlot()
     def dirDisplayChanged(self):
         self.sig_dir_display_changed.emit()
 
@@ -202,8 +207,10 @@ class Bridge(QObject):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _parse_theta(self, text: str):
-        if not text or text in ('ref', 'Todos'):
+        if not text or text == 'ref':
             return 'ref'
+        if text == 'Todos':
+            return None
         v = _safe_int(text.rstrip('°'))
         return v if v is not None else 'ref'
 

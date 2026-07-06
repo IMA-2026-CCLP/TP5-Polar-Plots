@@ -52,12 +52,12 @@ def set_theme(palette: dict) -> None:
     _OVERLAY_BORDER = palette['overlay_border']
 
 
-def _axes_traces(axis_len: float = 1.15) -> list:
+def _axes_traces(axis_len: float = 1.4) -> list:
     traces = []
     for vec, label, color in [
         ([axis_len, 0, 0], "X (0°)",    "#ff6b6b"),
         ([0, axis_len, 0], "Y (90°)",   "#51cf66"),
-        ([0, 0, axis_len], "Z (cénit)", "#74c0fc"),
+        ([0, 0, axis_len], "Z (cénit)", "#0d6dff"),
     ]:
         traces.append({
             "type": "scatter3d",
@@ -71,24 +71,20 @@ def _axes_traces(axis_len: float = 1.15) -> list:
     return traces
 
 
-def _scene_layout(title: str, uirevision: str = "camera") -> dict:
+def _scene_layout(uirevision: str = "camera", grid_color: Optional[str] = None,
+                  grid_width: float = 1) -> dict:
+    color = grid_color or _GRID_COL
+    axis = {"showgrid": True, "gridcolor": color, "gridwidth": grid_width,
+            "zeroline": False, "showticklabels": False, "showspikes": False}
     return {
-        "title": {
-            "text": title,
-            "font": {"color": _TEXT_COL, "size": 17, "family": _FONT_CSS},
-            "x": 0.5, "xanchor": "center",
-        },
         "paper_bgcolor": _DARK_BG,
         "plot_bgcolor":  _DARK_BG,
-        "margin": {"l": 0, "r": 0, "t": 50, "b": 0},
+        "margin": {"l": 0, "r": 0, "t": 10, "b": 0},
         "scene": {
             "bgcolor": _DARK_BG,
-            "xaxis": {"showgrid": True, "gridcolor": _GRID_COL, "zeroline": False,
-                      "showticklabels": False, "showspikes": False},
-            "yaxis": {"showgrid": True, "gridcolor": _GRID_COL, "zeroline": False,
-                      "showticklabels": False, "showspikes": False},
-            "zaxis": {"showgrid": True, "gridcolor": _GRID_COL, "zeroline": False,
-                      "showticklabels": False, "showspikes": False},
+            "xaxis": dict(axis),
+            "yaxis": dict(axis),
+            "zaxis": dict(axis),
             "camera": {"eye": {"x": 1.6, "y": 1.2, "z": 0.9}, "up": {"x": 0, "y": 0, "z": 1}},
             "aspectmode": "cube",
         },
@@ -286,8 +282,28 @@ def _cap_mesh_trace(ring_X, ring_Y, ring_Z, apex_x, apex_y, apex_z,
 
 
 def _wrap_html(traces_json: str, layout_json: str, info_html: str,
-               scroll_zoom: bool = False) -> str:
+               scroll_zoom: bool = False, show_info: bool = True,
+               update_only: bool = False) -> str:
+    """
+    update_only=True devuelve sólo un fragmento de JS (para correr con
+    page().runJavaScript()) que actualiza el gráfico YA CARGADO vía
+    Plotly.react() en vez de recargar toda la página. Esto preserva cámara,
+    zoom y paneo entre cambios de banda/colorscale/escala/etc. — con
+    setHtml() se pierden porque cada carga reinicia el contexto de JS.
+    Si la página todavía no terminó de cargar por primera vez (window.updatePlot
+    no existe aún), el fragmento no hace nada (no-op seguro).
+    """
+    if update_only:
+        info_js = json.dumps(info_html)
+        show_js = 'true' if show_info else 'false'
+        return (
+            f"if (window.updatePlot) {{ "
+            f"window.updatePlot({traces_json}, {layout_json}, {info_js}, {show_js}); "
+            f"}}"
+        )
+
     sz = 'true' if scroll_zoom else 'false'
+    info_display = 'flex' if show_info else 'none'
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -301,7 +317,8 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
     background:{_OVERLAY_BG}; backdrop-filter:blur(6px);
     border:1px solid {_OVERLAY_BORDER}; border-radius:8px;
     padding:8px 14px; color:{_TEXT_COL}; font-family:{_FONT_CSS};
-    font-size:12px; pointer-events:none; line-height:1.7;
+    font-size:12px; pointer-events:none; line-height:1.6;
+    display:{info_display}; flex-direction:column; gap:2px;
   }}
 </style>
 </head>
@@ -317,6 +334,26 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
     modeBarButtonsToRemove:['sendDataToCloud'], displaylogo:false,
     scrollZoom:{sz} }};
   Plotly.newPlot('plot', traces, layout, cfg);
+
+  // Actualiza el gráfico ya cargado sin recrear la página — Plotly.react()
+  // conserva cámara/zoom/paneo (vía layout.uirevision) entre actualizaciones.
+  window.updatePlot = function(newTraces, newLayout, newInfo, showInfo) {{
+    Plotly.react('plot', newTraces, newLayout);
+    var el = document.getElementById('info-overlay');
+    if (el) {{
+      el.innerHTML = newInfo;
+      el.style.display = showInfo ? 'flex' : 'none';
+    }}
+  }};
+
+  // En las escenas 3D (WebGL), Plotly usa el botón derecho para panear la
+  // cámara y bloquea el contextmenu nativo del navegador — por eso Qt nunca
+  // recibe el evento de click derecho sobre el canvas. Se captura acá y se
+  // reenvía a Python por consola (mismo mecanismo que el hover).
+  document.addEventListener('contextmenu', function(e) {{
+    e.preventDefault();
+    console.log('CONTEXTMENU:' + e.clientX + ',' + e.clientY);
+  }}, false);
 }})();
 </script>
 </body>
@@ -355,15 +392,19 @@ def _close_azimuth(arr):
 # ── 1. Globo 3D (deformado) ───────────────────────────────────────────────────
 
 def build_balloon_html(
-    levels:     np.ndarray,
-    azimuths:   np.ndarray,
-    elevations: np.ndarray,
-    band_hz:    float,
-    band_index: int,
-    colorscale: str = "Plasma",
-    normalize:  bool = True,
-    min_db:     Optional[float] = None,
-    max_db:     Optional[float] = None,
+    levels:      np.ndarray,
+    azimuths:    np.ndarray,
+    elevations:  np.ndarray,
+    band_hz:     float,
+    band_index:  int,
+    colorscale:  str = "Plasma",
+    normalize:   bool = True,
+    min_db:      Optional[float] = None,
+    max_db:      Optional[float] = None,
+    show_info:   bool = True,
+    axis_color:  Optional[str] = None,
+    axis_width:  float = 1,
+    update_only: bool = False,
 ) -> str:
     lev_2d = levels[:, :, band_index]
 
@@ -400,29 +441,34 @@ def build_balloon_html(
         ))
 
     traces += _axes_traces()
-    layout  = _scene_layout(f"Superficie 3D — {freq_label(band_hz)} Hz")
+    layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width)
 
-    zenith_str = f" &nbsp;|&nbsp; <b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
+    zenith_str = f"<br><b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
     info = (
-        f"<b>Banda:</b> {freq_label(band_hz)} Hz &nbsp;|&nbsp;"
-        f"<b>Máx:</b> {vmax:.1f} dB &nbsp;|&nbsp;"
+        f"<b>Banda:</b> {freq_label(band_hz)} Hz<br>"
+        f"<b>Máx:</b> {vmax:.1f} dB<br>"
         f"<b>Mín:</b> {vmin:.1f} dB{zenith_str}<br>"
         f"<b>Rango dinámico:</b> {vmax - vmin:.1f} dB"
     )
-    return _wrap_html(json.dumps(traces), json.dumps(layout), info)
+    return _wrap_html(json.dumps(traces), json.dumps(layout), info,
+                      show_info=show_info, update_only=update_only)
 
 
 # ── 2. Esfera (radio constante, color = nivel) ────────────────────────────────
 
 def build_sphere_html(
-    levels:     np.ndarray,
-    azimuths:   np.ndarray,
-    elevations: np.ndarray,
-    band_hz:    float,
-    band_index: int,
-    colorscale: str = "Plasma",
-    min_db:     Optional[float] = None,
-    max_db:     Optional[float] = None,
+    levels:      np.ndarray,
+    azimuths:    np.ndarray,
+    elevations:  np.ndarray,
+    band_hz:     float,
+    band_index:  int,
+    colorscale:  str = "Plasma",
+    min_db:      Optional[float] = None,
+    max_db:      Optional[float] = None,
+    show_info:   bool = True,
+    axis_color:  Optional[str] = None,
+    axis_width:  float = 1,
+    update_only: bool = False,
 ) -> str:
     """
     Hemisferio superior — radio constante = 1, nivel codificado en color.
@@ -506,48 +552,55 @@ def build_sphere_html(
     }
 
     traces = [mesh_trace] + _axes_traces()
-    layout  = _scene_layout(f"Esfera de Directividad — {freq_label(band_hz)} Hz")
+    layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width)
     # Corregir proporción: Z va 0→1 mientras X,Y van -1→1; sin esto Z se estira
     layout["scene"]["aspectmode"]  = "manual"
     layout["scene"]["aspectratio"] = {"x": 1, "y": 1, "z": 0.5}
 
-    zenith_str = f" &nbsp;|&nbsp; <b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
+    zenith_str = f"<br><b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
     info = (
-        f"<b>Banda:</b> {freq_label(band_hz)} Hz &nbsp;|&nbsp;"
-        f"<b>Máx:</b> {vmax:.1f} dB &nbsp;|&nbsp;"
+        f"<b>Banda:</b> {freq_label(band_hz)} Hz<br>"
+        f"<b>Máx:</b> {vmax:.1f} dB<br>"
         f"<b>Mín:</b> {vmin:.1f} dB{zenith_str}<br>"
         f"<b>Dinámica:</b> {vmax - vmin:.1f} dB"
     )
-    return _wrap_html(json.dumps(traces), json.dumps(layout), info)
+    return _wrap_html(json.dumps(traces), json.dumps(layout), info,
+                      show_info=show_info, update_only=update_only)
 
 
 # ── 3. Polar 2D ───────────────────────────────────────────────────────────────
 
-def build_polar2d_html(
-    levels:     np.ndarray,
-    azimuths:   np.ndarray,
-    elevations: np.ndarray,
-    band_hz:    float,
-    band_index: int,
-    el_index:   Optional[int] = None,
-    colorscale: str = "Plasma",
-    min_db:     Optional[float] = None,
-    max_db:     Optional[float] = None,
-) -> str:
-    """
-    Gráfico polar 2D.
+_COMPARE_COLORS = [
+    "#6385ff", "#ff6b6b", "#51cf66", "#ffd43b",
+    "#c084fc", "#22d3ee", "#fb923c", "#f472b6",
+]
 
-    Para obtener 360° combina la mitad frontal (azimuths 0–180, theta=el_index)
-    con la mitad trasera (azimuths 0–180 desplazados +180°, buscando theta+180°).
-    Si no existe la theta opuesta, muestra sólo los 180° disponibles.
 
-    r-axis en dB relativo al máximo (0 dB en frente), rango -30..0 dB.
+def _polar_ring_raw(lev_2d, azimuths, elevations, plane, el_index):
     """
-    lev_2d = levels[:, :, band_index]
+    Construye (az_full, r_full, title_extra, hover_label) para UNA banda,
+    antes de interpolar/normalizar. Lógica extraída de build_polar2d_html
+    para poder reutilizarla por cada banda en el modo de comparación.
+    """
+    if plane in ("XZ", "YZ"):
+        az_deg   = 0.0 if plane == "XZ" else 90.0
+        az_index = int(np.argmin(np.abs(azimuths - az_deg)))
+        az_real  = float(azimuths[az_index])
+
+        sort_ix = np.argsort(np.mod(elevations.astype(float), 360.0))
+        az_full = np.mod(elevations.astype(float), 360.0)[sort_ix]
+        r_full  = lev_2d[az_index, :][sort_ix]
+
+        # Evitar duplicados exactos de ángulo (rompen la interpolación cúbica)
+        az_full, uniq_ix = np.unique(az_full, return_index=True)
+        r_full = r_full[uniq_ix]
+
+        title_extra = f"Plano {plane} (Az={az_real:.0f}°/{(az_real + 180) % 360:.0f}°)"
+        hover_label = "θ"
+        return az_full, r_full, title_extra, hover_label
 
     if el_index is None:
         el_index = int(np.argmin(np.abs(elevations)))
-
     el_deg = float(elevations[el_index])
 
     # ── Construir traza 360° con promedio energético en costuras (idem patron.py) ─
@@ -577,57 +630,119 @@ def build_polar2d_html(
         r_full  = r_front
         az_full = az_front
 
-    # ── Interpolación 1D (idem plot_polar_2d en patron.py) ───────────────────
-    try:
-        from scipy.interpolate import interp1d
-        interp_deg = 1.0
-        phi_new    = np.arange(az_full[0], az_full[-1] + interp_deg * 0.01, interp_deg)
-        phi_new    = phi_new[phi_new <= az_full[-1]]
-        r_full     = interp1d(az_full, r_full, kind='cubic')(phi_new)
-        az_full    = phi_new
-    except Exception:
-        pass   # scipy no disponible → sin interpolación
+    hover_label = "Az"
+    return az_full, r_full, title_extra, hover_label
 
-    # ── Normalizar: 0 dB en az=0° (idem GUI/ui/polar_plot_2d.py) ────────────
-    ref_idx = int(np.argmin(np.abs(az_full)))
-    ref_val = float(r_full[ref_idx])
-    if not np.isfinite(ref_val):
-        valid_mask = np.isfinite(r_full)
-        dists = np.abs(az_full)
-        dists[~valid_mask] = np.inf
-        best = int(np.argmin(dists))
-        ref_val = float(r_full[best]) if np.isfinite(r_full[best]) else 0.0
 
-    valid = np.isfinite(r_full)
-    gmin  = float(np.nanmin(r_full - ref_val)) if valid.any() else -60.0
-    gmax  = float(np.nanmax(r_full - ref_val)) if valid.any() else 0.0
-    r_rel = np.where(valid, r_full - ref_val, -60.0)
+def build_polar2d_html(
+    levels:        np.ndarray,
+    azimuths:      np.ndarray,
+    elevations:    np.ndarray,
+    band_hz:       float,
+    band_index:    int,
+    el_index:      Optional[int] = None,
+    plane:         str = "XY",
+    colorscale:    str = "Plasma",
+    min_db:        Optional[float] = None,
+    max_db:        Optional[float] = None,
+    show_info:      bool = True,
+    compare_bands:  Optional[list] = None,
+    compare_styles: Optional[dict] = None,
+    tick_font_size: float = 11,
+    update_only:    bool = False,
+) -> str:
+    """
+    Gráfico polar 2D.
 
-    # Rango dinámico: user-defined o auto-scale desde los datos
-    step = 5.0
-    r_floor = min_db if min_db is not None else float(np.floor(gmin / step) * step)
-    r_ceil  = max_db if max_db is not None else 0.0
-    dyn_range = r_ceil - r_floor   # positivo
+    plane='XY' (horizontal, comportamiento original): fija una elevación (theta)
+    y barre el azimuth. Para obtener 360° combina la mitad frontal (azimuths
+    0–180, theta=el_index) con la mitad trasera (azimuths 0–180 desplazados
+    +180°, buscando theta+180°). Si no existe la theta opuesta, muestra sólo
+    los 180° disponibles.
 
-    # Cerrar polígono
-    az_closed = np.append(az_full, az_full[0])
-    r_closed  = np.append(r_rel,   r_rel[0])
-    r_abs_cl  = np.append(r_full,  r_full[0])
+    plane='XZ'/'YZ' (cortes verticales): fija un azimuth (0° o 90°) y barre
+    el theta completo. Dado que el arreglo vertical ya recorre 0°→180° pasando
+    por el cénit para CUALQUIER azimuth fijo, una sola columna del tensor
+    contiene el círculo máximo completo (frente–cénit–atrás) sin necesidad de
+    combinar datos de otro azimuth. La simetría de elevación (si el usuario la
+    activa en "Simetría") completa el hemisferio inferior no medido.
 
-    # Mapear dB relativo → radio normalizado 0-1
+    compare_bands : lista opcional de (band_index, band_hz) — si se pasa,
+    se dibuja un anillo por cada banda superpuesto en el mismo gráfico
+    (comparación multibanda), en vez de la banda única (band_index, band_hz).
+    Cada anillo se normaliza a 0 dB en su propia dirección de referencia
+    (para comparar la FORMA del patrón entre bandas, no el nivel absoluto),
+    y la escala radial (autoescala) se ajusta al mínimo/máximo combinado de
+    TODAS las bandas mostradas, para que ninguna quede recortada.
+
+    compare_styles : dict opcional {band_index: {'color','width','dash'}} —
+    overrides manuales de estilo por banda (ver "Propiedades de bandas…" en
+    el menú contextual). Bandas sin entrada usan el color/ancho por defecto.
+
+    r-axis en dB relativo al máximo (0 dB en frente), rango -30..0 dB.
+    """
+    bands_to_plot = compare_bands if compare_bands else [(band_index, band_hz)]
+    multi = len(bands_to_plot) > 1
+
+    rings = []
+    for bi, bhz in bands_to_plot:
+        lev_2d = levels[:, :, bi]
+        az_full, r_full, title_extra, hover_label = _polar_ring_raw(
+            lev_2d, azimuths, elevations, plane, el_index
+        )
+
+        # ── Interpolación 1D (idem plot_polar_2d en patron.py) ───────────────
+        try:
+            from scipy.interpolate import interp1d
+            interp_deg = 1.0
+            phi_new    = np.arange(az_full[0], az_full[-1] + interp_deg * 0.01, interp_deg)
+            phi_new    = phi_new[phi_new <= az_full[-1]]
+            r_full     = interp1d(az_full, r_full, kind='cubic')(phi_new)
+            az_full    = phi_new
+        except Exception:
+            pass   # scipy no disponible → sin interpolación
+
+        # ── Normalizar: 0 dB en az=0° (idem GUI/ui/polar_plot_2d.py) ─────────
+        ref_idx = int(np.argmin(np.abs(az_full)))
+        ref_val = float(r_full[ref_idx])
+        if not np.isfinite(ref_val):
+            valid_mask = np.isfinite(r_full)
+            dists = np.abs(az_full)
+            dists[~valid_mask] = np.inf
+            best = int(np.argmin(dists))
+            ref_val = float(r_full[best]) if np.isfinite(r_full[best]) else 0.0
+
+        valid = np.isfinite(r_full)
+        gmin  = float(np.nanmin(r_full - ref_val)) if valid.any() else -60.0
+        gmax  = float(np.nanmax(r_full - ref_val)) if valid.any() else 0.0
+        r_rel = np.where(valid, r_full - ref_val, -60.0)
+
+        az_closed = np.append(az_full, az_full[0])
+        r_closed  = np.append(r_rel,   r_rel[0])
+        r_abs_cl  = np.append(r_full,  r_full[0])
+
+        rings.append(dict(
+            band_index=bi, band_hz=bhz, az_closed=az_closed, r_closed=r_closed,
+            r_abs_cl=r_abs_cl, title_extra=title_extra, hover_label=hover_label,
+            gmin=gmin, gmax=gmax,
+        ))
+
+    # ── Rango dinámico combinado: min/max de TODAS las bandas mostradas ───────
+    step    = 5.0
+    all_min = min(r['gmin'] for r in rings)
+    all_max = max(r['gmax'] for r in rings)
+    r_floor = min_db if min_db is not None else float(np.floor(all_min / step) * step)
+    r_ceil  = max_db if max_db is not None else float(np.ceil(all_max / step) * step) if multi else 0.0
+    if r_ceil <= r_floor:
+        r_ceil = r_floor + step
+    dyn_range = r_ceil - r_floor
+
     def db_to_r(db):
         return np.clip((np.asarray(db, float) - r_floor) / dyn_range, 0, 1)
 
-    r_plot = db_to_r(r_closed)
-
-    hover_text = [
-        f"Az: {az:.1f}°<br>El: {el_deg:.1f}°<br>{v:.1f} dB SPL  /  {v - ref_val:.1f} dBr (ref 0°)"
-        for az, v in zip(az_closed, r_abs_cl)
-    ]
-
     # ── Anillos de referencia (cada 5 dB dentro del rango) ───────────────────
-    ring_vals = np.arange(np.ceil(r_floor / step) * step, r_ceil + 0.01, step)
-    ring_vals = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
+    ring_vals    = np.arange(np.ceil(r_floor / step) * step, r_ceil + 0.01, step)
+    ring_vals    = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
     ref_db_rings = [float(v) for v in ring_vals]
     ring_traces  = []
     theta_ring   = np.linspace(0, 360, 361)
@@ -646,31 +761,40 @@ def build_polar2d_html(
             "r": [r_ring], "theta": [92],
             "mode": "text",
             "text": [f"{db:g}"],
-            "textfont": {"color": _RING_TEXT, "size": 9},
+            "textfont": {"color": _RING_TEXT, "size": max(7, tick_font_size - 2)},
             "hoverinfo": "skip", "showlegend": False,
         })
 
-    main_trace = {
-        "type": "scatterpolar",
-        "r": r_plot.tolist(), "theta": az_closed.tolist(),
-        "mode": "lines",
-        "fill": "toself",
-        "fillcolor": "rgba(99,133,255,0.20)",
-        "line": {"color": "#6385ff", "width": 2.5},
-        "text": hover_text,
-        "hovertemplate": "%{text}<extra></extra>",
-        "name": title_extra, "showlegend": False,
-    }
+    # ── Traza principal (una por banda) ───────────────────────────────────────
+    styles = compare_styles or {}
+    data_traces = []
+    for i, ring in enumerate(rings):
+        style      = styles.get(ring['band_index'], {})
+        line_color = style.get('color', _COMPARE_COLORS[i % len(_COMPARE_COLORS)])
+        line_width = style.get('width', 2.5)
+        line_dash  = style.get('dash', 'solid')
+        r_plot = db_to_r(ring['r_closed'])
+        hover_text = [
+            f"{ring['hover_label']}: {ang:.1f}°<br>{freq_label(ring['band_hz'])} Hz<br>{v:.1f} dB SPL"
+            for ang, v in zip(ring['az_closed'], ring['r_abs_cl'])
+        ]
+        data_traces.append({
+            "type": "scatterpolar",
+            "r": r_plot.tolist(), "theta": ring['az_closed'].tolist(),
+            "mode": "lines",
+            "fill": "toself" if not multi else "none",
+            "fillcolor": "rgba(99,133,255,0.20)" if not multi else None,
+            "line": {"color": line_color, "width": line_width, "dash": line_dash},
+            "text": hover_text,
+            "hovertemplate": "%{text}<extra></extra>",
+            "name": f"{freq_label(ring['band_hz'])} Hz" if multi else ring['title_extra'],
+            "showlegend": multi,
+        })
 
     layout = {
-        "title": {
-            "text": f"Polar 2D — {freq_label(band_hz)} Hz  ({title_extra})",
-            "font": {"color": _TEXT_COL, "size": 15, "family": _FONT_CSS},
-            "x": 0.5, "xanchor": "center",
-        },
         "paper_bgcolor": _DARK_BG,
         "plot_bgcolor":  _DARK_BG,
-        "margin": {"l": 40, "r": 40, "t": 60, "b": 40},
+        "margin": {"l": 40, "r": 40, "t": 20, "b": 40},
         "polar": {
             "bgcolor": _DARK_BG,
             "radialaxis": {
@@ -679,23 +803,42 @@ def build_polar2d_html(
                 "linecolor": _POLAR_GRID,
             },
             "angularaxis": {
-                "tickfont": {"color": _TEXT_COL, "size": 11},
+                "tickfont": {"color": _TEXT_COL, "size": tick_font_size},
                 "linecolor": _POLAR_AXIS,
                 "gridcolor": _POLAR_GRID,
-                "direction": "counterclockwise", "rotation": 90,
+                # XY: rotation=90 → 0° arriba (convención brújula).
+                # XZ/YZ: rotation=0 → 0° a la derecha, 180° a la izquierda,
+                # con 90° (cénit) arriba, dado que theta crece counterclockwise.
+                "direction": "counterclockwise",
+                "rotation": 90 if plane == "XY" else 0,
             },
         },
+        "legend": {
+            "font":    {"color": _TEXT_COL, "size": 10},
+            "bgcolor": _LEGEND_BG,
+            "x": 1.0, "y": 1.0,
+        },
+        "showlegend": multi,
         "uirevision": "polar2d",
     }
 
-    info = (
-        f"<b>Banda:</b> {freq_label(band_hz)} Hz &nbsp;|&nbsp;"
-        f"<b>{title_extra}</b> &nbsp;|&nbsp;"
-        f"<b>Máx:</b> {gmax:.1f} dB &nbsp;|&nbsp;"
-        f"<b>Dinámica:</b> {gmax-gmin:.1f} dB"
-    )
-    return _wrap_html(json.dumps(ring_traces + [main_trace]), json.dumps(layout), info,
-                      scroll_zoom=True)
+    if multi:
+        bands_str = ", ".join(freq_label(r['band_hz']) for r in rings)
+        info = (
+            f"<b>Comparando {len(rings)} bandas:</b> {bands_str} Hz<br>"
+            f"<b>{rings[0]['title_extra']}</b><br>"
+            f"<b>Dinámica combinada:</b> {r_ceil - r_floor:.1f} dB"
+        )
+    else:
+        r0 = rings[0]
+        info = (
+            f"<b>Banda:</b> {freq_label(r0['band_hz'])} Hz<br>"
+            f"<b>{r0['title_extra']}</b><br>"
+            f"<b>Máx:</b> {r0['gmax']:.1f} dB<br>"
+            f"<b>Dinámica:</b> {r0['gmax'] - r0['gmin']:.1f} dB"
+        )
+    return _wrap_html(json.dumps(ring_traces + data_traces), json.dumps(layout), info,
+                      scroll_zoom=True, show_info=show_info, update_only=update_only)
 
 
 # ── 4. Espectro del micrófono de referencia (barras 1/3 octava) ───────────────
@@ -705,6 +848,8 @@ def build_spectrum_html(
     bands:       np.ndarray,
     azimuths:    np.ndarray,
     global_mode: bool = True,
+    show_info:   bool = True,
+    update_only: bool = False,
 ) -> str:
     """
     Espectro en barras 1/3 de octava del micrófono de referencia.
@@ -812,11 +957,11 @@ def build_spectrum_html(
     }
 
     info = (
-        f"<b>Mic ref — {desc}</b> &nbsp;|&nbsp;"
+        f"<b>Mic ref — {desc}</b><br>"
         f"<b>Bandas:</b> {range_str}"
     )
     return _wrap_html(json.dumps(traces), json.dumps(layout), info,
-                      scroll_zoom=True)
+                      scroll_zoom=True, show_info=show_info, update_only=update_only)
 
 
 def _az_colors(n: int) -> list:

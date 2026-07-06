@@ -2,16 +2,19 @@
 core/data_store.py — Guardar y cargar resultados de directividad en NPZ.
 
 Formato acordado:
-  azimuths      (n_az,)                  ángulos azimuth en grados
-  thetas        (n_thetas,)              ángulos elevación en grados
-  dir_freqs     (n_bands,)               frecuencias centrales en Hz
-  dir_levels    (n_az, n_thetas, n_bands) patrón polar relativo en dB (0 dB = frente)
-  spl_ref       (n_bands,)               SPL absoluto en ref (az=0, theta=0)
-  metadata      JSON string              ver save_results()
+  azimuths        (n_az,)                  ángulos azimuth en grados
+  thetas          (n_thetas,)              ángulos elevación en grados
+  dir_freqs       (n_bands,)               frecuencias centrales en Hz
+  dir_levels      (n_az, n_thetas, n_bands) patrón polar relativo en dB (0 dB = frente)
+  spl_ref         (n_bands,)               SPL absoluto en ref (az=0, theta=0), "igualado"
+  spl_ref_per_az  (n_az, n_bands)          SPL absoluto del mic ref por toma, "original"
+                                           (para el panel Espectro). Ausente en NPZ viejos.
+  metadata        JSON string              ver save_results()
 
 Sección opcional por nota (prefijo 'note_'):
-  note_Fa4_dir_levels  (n_az, n_thetas, n_bands)
-  note_Fa4_spl_ref     (n_bands,)
+  note_Fa4_dir_levels        (n_az, n_thetas, n_bands)
+  note_Fa4_spl_ref           (n_bands,)
+  note_Fa4_spl_ref_per_az    (n_az, n_bands)
   ...
 """
 import json
@@ -35,6 +38,21 @@ def freq_label(hz: float) -> str:
         v = hz / 1000
         return f'{v:.4g}k'
     return f'{hz:.4g}'
+
+
+def _spl_ref_per_azimuth(ma) -> np.ndarray | None:
+    """
+    Reconstruye el SPL absoluto del mic de referencia por toma angular
+    (espectro "original", sin igualar), idéntico al cálculo de
+    TabDirectividad._show_results() para el panel Espectro.
+    """
+    if 'ref' in ma.thetas and ma.dir_ref_spl is not None and getattr(ma, 'dir_delta', None) is not None:
+        i_ref = ma.thetas.index('ref')
+        base  = (ma.dir_levels[0, i_ref, :] + ma.dir_ref_spl).astype(np.float32)
+        return (base[np.newaxis, :] - ma.dir_delta).astype(np.float32)
+    if ma.dir_ref_spl is not None:
+        return np.tile(ma.dir_ref_spl, (len(ma.angles), 1)).astype(np.float32)
+    return None
 
 
 def save_results(
@@ -90,6 +108,10 @@ def save_results(
         spl_ref    = ma.dir_ref_spl.astype(np.float32),
     )
 
+    spl_ref_az = _spl_ref_per_azimuth(ma)
+    if spl_ref_az is not None:
+        kwargs['spl_ref_per_az'] = spl_ref_az
+
     # Notas
     if ma.notes:
         notes_to_save = notes_list or list(ma.notes.keys())
@@ -101,6 +123,10 @@ def save_results(
             n_dir = ma_n.dir_levels[:, theta_indices, :]
             kwargs[f'note_{note_name}_dir_levels'] = n_dir.astype(np.float32)
             kwargs[f'note_{note_name}_spl_ref']    = ma_n.dir_ref_spl.astype(np.float32)
+
+            n_spl_ref_az = _spl_ref_per_azimuth(ma_n)
+            if n_spl_ref_az is not None:
+                kwargs[f'note_{note_name}_spl_ref_per_az'] = n_spl_ref_az
 
     kwargs['metadata'] = np.array([json.dumps(meta, ensure_ascii=False)])
 
@@ -254,6 +280,9 @@ def load_results(filepath: str) -> dict:
             result['metadata'] = json.loads(str(data['metadata'][0]))
         except Exception:
             pass
+
+    if 'spl_ref_per_az' in data:
+        result['spl_ref_per_az'] = data['spl_ref_per_az']
 
     for key in data.files:
         if key.startswith('note_'):

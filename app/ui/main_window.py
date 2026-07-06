@@ -2,9 +2,9 @@
 ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 """
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QStackedWidget,
-    QDockWidget, QTextEdit, QDialog, QDialogButtonBox,
-    QFileDialog, QToolButton, QApplication,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
+    QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton,
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QTextCursor
@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
         # ── Directividad
         rb.sig_compute_dir.connect(self._on_compute_dir)
         rb.sig_save_dir_npz.connect(self._on_save_dir_npz)
+        rb.sig_export_all_images.connect(self._on_export_all_images)
         rb.sig_dir_display_changed.connect(self._on_dir_display_changed)
 
         # ── Tema
@@ -284,6 +285,50 @@ class MainWindow(QMainWindow):
 
     def _on_save_dir_npz(self):
         self._on_save_polar_npz()
+
+    def _on_export_all_images(self):
+        if self.view_dir._full_bands is None:
+            self._append_log("[Dir] Sin datos para exportar.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Exportar todas las imágenes")
+        form = QFormLayout(dlg)
+
+        le_prefix = QLineEdit("directividad")
+        form.addRow("Nombre base:", le_prefix)
+
+        le_folder = QLineEdit()
+        le_folder.setReadOnly(True)
+        btn_browse = QPushButton("Examinar…")
+
+        def _browse():
+            d = QFileDialog.getExistingDirectory(dlg, "Carpeta de destino")
+            if d:
+                le_folder.setText(d)
+        btn_browse.clicked.connect(_browse)
+
+        row = QHBoxLayout()
+        row.addWidget(le_folder)
+        row.addWidget(btn_browse)
+        form.addRow("Carpeta:", row)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        prefix = le_prefix.text().strip() or "directividad"
+        folder = le_folder.text().strip()
+        if not folder:
+            self._append_log("[Dir] Exportación cancelada: no se eligió carpeta.")
+            return
+
+        self.view_dir.export_all_images(folder, prefix)
 
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()
