@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QCheckBox, QScrollArea,
-    QMainWindow, QDockWidget, QProgressDialog, QFileDialog, QPushButton,
+    QMainWindow, QDockWidget, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
     QMenu, QDialog, QDialogButtonBox, QFormLayout, QDoubleSpinBox, QComboBox,
     QColorDialog, QInputDialog,
 )
@@ -121,6 +121,7 @@ class _ViewSection(QWidget):
         self._tick_font_size: float = 11            # tamaño números ejes (polar2d)
         self._axis_color: str | None = None         # color de grilla 3D (3d/sphere), None = tema
         self._axis_width: float = 1                 # grosor de grilla 3D
+        self._style: dict = {}                       # overrides genéricos (bg_color, etc.)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -144,103 +145,232 @@ class _ViewSection(QWidget):
         pos = QPoint(x, y)
         menu = QMenu(self)
 
-        act_top = act_bottom = act_front = act_back = act_axis_props = None
+        act_top = act_bottom = act_front = act_back = None
         if self._mode in ("3d", "sphere"):
             view_menu  = menu.addMenu("Vista")
             act_top    = view_menu.addAction("Arriba")
             act_bottom = view_menu.addAction("Abajo")
             act_front  = view_menu.addAction("Frente")
             act_back   = view_menu.addAction("Atrás")
-            act_axis_props = menu.addAction("Propiedades de ejes…")
             menu.addSeparator()
 
-        act_compare = act_properties = act_tick_size = None
+        act_compare = act_band_props = None
         if self._mode == "polar2d":
             act_compare = menu.addAction("Comparar bandas…")
             if self._compare_indices:
-                act_properties = menu.addAction("Propiedades de bandas…")
-            act_tick_size = menu.addAction("Tamaño de números de ejes…")
+                act_band_props = menu.addAction("Propiedades de bandas…")
             menu.addSeparator()
 
-        act_scale = menu.addAction("Definir escala…")
-        act_auto  = menu.addAction("Autoescala")
+        act_properties = menu.addAction("Propiedades…")
+        act_auto = menu.addAction("Autoescala")
         act_auto.setEnabled(self._min_db is not None or self._max_db is not None)
         menu.addSeparator()
         act_save = menu.addAction("Guardar imagen…")
 
         action = menu.exec(self.view._web.mapToGlobal(pos))
-        if action == act_scale:
-            self._prompt_scale()
-        elif action == act_auto:
-            self._reset_scale()
-        elif action == act_save:
-            self.save_requested.emit(self._mode)
-        elif action == act_top:
-            self.view.set_camera_view('top')
-        elif action == act_bottom:
-            self.view.set_camera_view('bottom')
-        elif action == act_front:
-            self.view.set_camera_view('front')
-        elif action == act_back:
-            self.view.set_camera_view('back')
-        elif action == act_compare:
-            self._prompt_compare_bands()
-        elif action == act_properties:
-            self._prompt_band_properties()
-        elif action == act_tick_size:
-            self._prompt_tick_font_size()
-        elif action == act_axis_props:
-            self._prompt_axis_style()
+        try:
+            if action == act_properties:
+                self._prompt_properties()
+            elif action == act_auto:
+                self._reset_scale()
+            elif action == act_save:
+                self.save_requested.emit(self._mode)
+            elif action == act_top:
+                self.view.set_camera_view('top')
+            elif action == act_bottom:
+                self.view.set_camera_view('bottom')
+            elif action == act_front:
+                self.view.set_camera_view('front')
+            elif action == act_back:
+                self.view.set_camera_view('back')
+            elif action == act_compare:
+                self._prompt_compare_bands()
+            elif action == act_band_props:
+                self._prompt_band_properties()
+        except Exception:
+            import traceback
+            self.log.emit(f"[ERROR] Menú contextual ({self._mode}):\n{traceback.format_exc()}")
 
-    def _prompt_tick_font_size(self):
-        size, ok = QInputDialog.getDouble(
-            self, "Tamaño de números de ejes",
-            "Tamaño de fuente (pt):",
-            self._tick_font_size, 6.0, 30.0, 1,
+    @staticmethod
+    def _to_qcolor(color_str: str) -> QColor:
+        """
+        QColor(str) sólo entiende nombres SVG y hex (#RRGGBB/#AARRGGBB) — NO
+        el formato CSS rgba(r,g,b,a) que usan varios colores de tema
+        (ej. _RING_LINE = "rgba(255,255,255,0.12)"), y devuelve un color
+        inválido en ese caso, rompiendo el selector de color. Este helper
+        also soporta rgba()/rgb().
+        """
+        c = QColor(color_str)
+        if c.isValid():
+            return c
+        m = re.match(
+            r'rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)',
+            color_str,
         )
-        if ok:
-            self._tick_font_size = size
-            self.view.set_tick_font_size(size)
+        if m:
+            r_, g_, b_ = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            a_ = round(float(m.group(4)) * 255) if m.group(4) else 255
+            return QColor(r_, g_, b_, a_)
+        return QColor("white")
 
-    def _prompt_axis_style(self):
-        from plot import balloon as _balloon_mod
+    def _make_color_button(self, dlg: QDialog, initial_color: str) -> QPushButton:
+        """Botón cuadrado que abre un QColorDialog y guarda el color elegido
+        en su atributo .color_hex — reutilizado en todas las secciones del
+        diálogo de Propiedades."""
+        btn = QPushButton()
+        btn.setFixedSize(28, 20)
+        btn.color_hex = self._to_qcolor(initial_color).name()
+        btn.setStyleSheet(f"background:{btn.color_hex};border:1px solid #555;")
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Propiedades de ejes")
-        form = QFormLayout(dlg)
-
-        current_color = self._axis_color or _balloon_mod._GRID_COL
-        btn_color = QPushButton()
-        btn_color.setFixedSize(28, 20)
-        btn_color.color_hex = current_color
-        btn_color.setStyleSheet(f"background:{current_color};border:1px solid #555;")
-
-        def _pick(_btn=btn_color):
-            c = QColorDialog.getColor(QColor(_btn.color_hex), dlg)
+        def _pick(checked=False, _btn=btn):
+            c = QColorDialog.getColor(self._to_qcolor(_btn.color_hex), dlg)
             if c.isValid():
                 _btn.color_hex = c.name()
                 _btn.setStyleSheet(f"background:{_btn.color_hex};border:1px solid #555;")
-        btn_color.clicked.connect(_pick)
-        form.addRow("Color:", btn_color)
+        btn.clicked.connect(_pick)
+        return btn
 
-        spin_width = QDoubleSpinBox()
-        spin_width.setRange(0.5, 8.0)
-        spin_width.setSingleStep(0.5)
-        spin_width.setValue(self._axis_width)
-        form.addRow("Grosor:", spin_width)
+    def _prompt_properties(self):
+        """
+        Diálogo único de propiedades del gráfico, con las secciones que
+        aplican según el tipo de vista (self._mode): escala, fondo, ejes/
+        grilla (3D/Esfera), ejes/traza (Polar 2D) o barras/grilla (Espectro).
+        """
+        from plot import balloon as _balloon_mod
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Propiedades")
+        outer = QVBoxLayout(dlg)
+        fields: dict = {}
+
+        if self._mode != "spectrum":
+            box = QGroupBox("Escala")
+            form = QFormLayout(box)
+            le_min = QLineEdit("" if self._min_db is None else str(self._min_db))
+            le_min.setPlaceholderText("auto")
+            le_max = QLineEdit("" if self._max_db is None else str(self._max_db))
+            le_max.setPlaceholderText("auto")
+            form.addRow("Min (dB):", le_min)
+            form.addRow("Max (dB):", le_max)
+            fields['min_db'], fields['max_db'] = le_min, le_max
+            outer.addWidget(box)
+
+        box_bg = QGroupBox("Fondo")
+        form_bg = QFormLayout(box_bg)
+        default_bg = self._style.get('bg_color') or _balloon_mod._DARK_BG
+        btn_bg = self._make_color_button(dlg, default_bg)
+        form_bg.addRow("Color de fondo:", btn_bg)
+        fields['bg_color'] = btn_bg
+        outer.addWidget(box_bg)
+
+        if self._mode in ("3d", "sphere"):
+            box_ax = QGroupBox("Ejes / grilla")
+            form_ax = QFormLayout(box_ax)
+            btn_grid = self._make_color_button(dlg, self._axis_color or _balloon_mod._GRID_COL)
+            form_ax.addRow("Color de grilla:", btn_grid)
+            spin_grid_w = QDoubleSpinBox()
+            spin_grid_w.setRange(0.5, 8.0); spin_grid_w.setSingleStep(0.5)
+            spin_grid_w.setValue(self._axis_width)
+            form_ax.addRow("Grosor de grilla:", spin_grid_w)
+            spin_label = QDoubleSpinBox()
+            spin_label.setRange(6, 24); spin_label.setSingleStep(1)
+            spin_label.setValue(self._style.get('axis_label_size', 11))
+            form_ax.addRow("Tamaño etiquetas X/Y/Z:", spin_label)
+            spin_axis_w = QDoubleSpinBox()
+            spin_axis_w.setRange(0.5, 8.0); spin_axis_w.setSingleStep(0.5)
+            spin_axis_w.setValue(self._style.get('axis_line_width', 3))
+            form_ax.addRow("Grosor líneas X/Y/Z:", spin_axis_w)
+            fields['grid_color']     = btn_grid
+            fields['grid_width']     = spin_grid_w
+            fields['axis_label_size'] = spin_label
+            fields['axis_line_width'] = spin_axis_w
+            outer.addWidget(box_ax)
+
+        elif self._mode == "polar2d":
+            box_ax = QGroupBox("Ejes / traza")
+            form_ax = QFormLayout(box_ax)
+            spin_tick = QDoubleSpinBox()
+            spin_tick.setRange(6, 30); spin_tick.setSingleStep(1)
+            spin_tick.setValue(self._tick_font_size)
+            form_ax.addRow("Tamaño de números (grados):", spin_tick)
+            spin_ring_font = QDoubleSpinBox()
+            spin_ring_font.setRange(6, 30); spin_ring_font.setSingleStep(1)
+            spin_ring_font.setValue(self._style.get('ring_font_size', 9))
+            form_ax.addRow("Tamaño de números (dB):", spin_ring_font)
+            spin_ring_step = QDoubleSpinBox()
+            spin_ring_step.setRange(1, 20); spin_ring_step.setSingleStep(1)
+            spin_ring_step.setValue(self._style.get('ring_step', 5.0))
+            form_ax.addRow("Paso entre anillos (dB):", spin_ring_step)
+            btn_ring = self._make_color_button(dlg, self._style.get('ring_color') or _balloon_mod._RING_LINE)
+            form_ax.addRow("Color de anillos/eje:", btn_ring)
+            chk_grid = QCheckBox("Mostrar grilla radial")
+            chk_grid.setChecked(self._style.get('show_radial_grid', False))
+            form_ax.addRow(chk_grid)
+            spin_line_w = QDoubleSpinBox()
+            spin_line_w.setRange(0.5, 8.0); spin_line_w.setSingleStep(0.5)
+            spin_line_w.setValue(self._style.get('line_width', 2.5))
+            form_ax.addRow("Grosor de traza (banda única):", spin_line_w)
+            fields['tick_font_size']    = spin_tick
+            fields['ring_font_size']    = spin_ring_font
+            fields['ring_step']         = spin_ring_step
+            fields['ring_color']        = btn_ring
+            fields['show_radial_grid']  = chk_grid
+            fields['line_width']        = spin_line_w
+            outer.addWidget(box_ax)
+
+        elif self._mode == "spectrum":
+            box_sp = QGroupBox("Barras / grilla")
+            form_sp = QFormLayout(box_sp)
+            btn_bar = self._make_color_button(dlg, self._style.get('bar_color') or "#5865f2")
+            form_sp.addRow("Color de barras (modo Global):", btn_bar)
+            btn_grid_sp = self._make_color_button(dlg, self._style.get('grid_color') or _balloon_mod._GRID_COL)
+            form_sp.addRow("Color de grilla:", btn_grid_sp)
+            fields['bar_color']   = btn_bar
+            fields['grid_color2'] = btn_grid_sp
+            outer.addWidget(box_sp)
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
-        form.addRow(btns)
+        outer.addWidget(btns)
 
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        self._axis_color = btn_color.color_hex
-        self._axis_width = spin_width.value()
-        self.view.set_axis_style(self._axis_color, self._axis_width)
+        if self._mode != "spectrum":
+            try:
+                self._min_db = float(fields['min_db'].text()) if fields['min_db'].text().strip() else None
+                self._max_db = float(fields['max_db'].text()) if fields['max_db'].text().strip() else None
+            except ValueError:
+                pass
+
+        new_style = dict(self._style)
+        new_style['bg_color'] = fields['bg_color'].color_hex
+
+        if self._mode in ("3d", "sphere"):
+            self._axis_color = fields['grid_color'].color_hex
+            self._axis_width = fields['grid_width'].value()
+            new_style['axis_label_size'] = fields['axis_label_size'].value()
+            new_style['axis_line_width'] = fields['axis_line_width'].value()
+        elif self._mode == "polar2d":
+            self._tick_font_size = fields['tick_font_size'].value()
+            new_style['ring_font_size']    = fields['ring_font_size'].value()
+            new_style['ring_step']         = fields['ring_step'].value()
+            new_style['ring_color']        = fields['ring_color'].color_hex
+            new_style['show_radial_grid']  = fields['show_radial_grid'].isChecked()
+            new_style['line_width']        = fields['line_width'].value()
+        elif self._mode == "spectrum":
+            new_style['bar_color']  = fields['bar_color'].color_hex
+            new_style['grid_color'] = fields['grid_color2'].color_hex
+
+        self._style = new_style
+        self.view.set_db_range(self._min_db, self._max_db)
+        if self._mode in ("3d", "sphere"):
+            self.view.set_axis_style(self._axis_color, self._axis_width)
+        elif self._mode == "polar2d":
+            self.view.set_tick_font_size(self._tick_font_size)
+        self.view.set_style(self._style)
 
     def _prompt_compare_bands(self):
         bands = self.view._bands
@@ -304,8 +434,8 @@ class _ViewSection(QWidget):
             btn_color.color_hex = style.get('color', default_color)
             btn_color.setStyleSheet(f"background:{btn_color.color_hex};border:1px solid #555;")
 
-            def _pick(_btn=btn_color):
-                c = QColorDialog.getColor(QColor(_btn.color_hex), dlg)
+            def _pick(checked=False, _btn=btn_color):
+                c = QColorDialog.getColor(self._to_qcolor(_btn.color_hex), dlg)
                 if c.isValid():
                     _btn.color_hex = c.name()
                     _btn.setStyleSheet(f"background:{_btn.color_hex};border:1px solid #555;")
@@ -343,33 +473,6 @@ class _ViewSection(QWidget):
             }
         self.view.set_compare_styles(self._compare_styles)
 
-    def _prompt_scale(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Definir escala")
-        form = QFormLayout(dlg)
-
-        le_min = QLineEdit("" if self._min_db is None else str(self._min_db))
-        le_min.setPlaceholderText("auto")
-        le_max = QLineEdit("" if self._max_db is None else str(self._max_db))
-        le_max.setPlaceholderText("auto")
-        form.addRow("Min (dB):", le_min)
-        form.addRow("Max (dB):", le_max)
-
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        form.addRow(btns)
-
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        try:
-            self._min_db = float(le_min.text()) if le_min.text().strip() else None
-            self._max_db = float(le_max.text()) if le_max.text().strip() else None
-        except ValueError:
-            return
-        self.view.set_db_range(self._min_db, self._max_db)
-
     def _reset_scale(self):
         self._min_db = None
         self._max_db = None
@@ -393,8 +496,8 @@ class _ViewSection(QWidget):
     def set_show_info(self, show: bool):
         self.view.set_show_info(show)
 
-    def export_image(self, path: str, on_done=None):
-        self.view.export_image(path, on_done=on_done)
+    def export_image(self, path: str, dpi: int = 300, on_done=None):
+        self.view.export_image(path, dpi=dpi, on_done=on_done)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -832,9 +935,15 @@ class TabDirectividad(QWidget):
         if not path:
             return
 
-        self._sections[mode].export_image(path)
+        dpi, ok = QInputDialog.getInt(
+            self, "Resolución de exportación", "DPI:", 300, 72, 1200, 1
+        )
+        if not ok:
+            return
 
-    def export_all_images(self, folder: str, prefix: str):
+        self._sections[mode].export_image(path, dpi=dpi)
+
+    def export_all_images(self, folder: str, prefix: str, dpi: int = 300):
         """
         Exporta de una sola vez las imágenes de todas las vistas habilitadas
         (pills del ribbon), para todas las bandas del rango actualmente
@@ -871,6 +980,7 @@ class TabDirectividad(QWidget):
 
         self._export_queue  = tasks
         self._export_folder = folder
+        self._export_dpi    = dpi
         self._export_total  = len(tasks)
         self._export_done   = 0
 
@@ -916,9 +1026,10 @@ class TabDirectividad(QWidget):
             # zoom entre bandas — ver balloon_view.py), así que ya no hay un
             # loadFinished al que engancharse. Un margen fijo alcanza porque
             # Plotly.react() es casi instantáneo comparado a una recarga completa.
-            QTimer.singleShot(250, lambda: sec.export_image(path, on_done=_after_export))
+            QTimer.singleShot(250, lambda: sec.export_image(
+                path, dpi=self._export_dpi, on_done=_after_export))
         else:
-            sec.export_image(path, on_done=_after_export)
+            sec.export_image(path, dpi=self._export_dpi, on_done=_after_export)
 
     def apply_theme(self, palette: dict):
         """Propaga el cambio de tema a todas las secciones de visualización."""

@@ -4,7 +4,7 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QSpinBox,
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QTextCursor
@@ -313,6 +313,12 @@ class MainWindow(QMainWindow):
         row.addWidget(btn_browse)
         form.addRow("Carpeta:", row)
 
+        spin_dpi = QSpinBox()
+        spin_dpi.setRange(72, 1200)
+        spin_dpi.setSingleStep(50)
+        spin_dpi.setValue(300)
+        form.addRow("DPI:", spin_dpi)
+
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(dlg.accept)
@@ -328,7 +334,7 @@ class MainWindow(QMainWindow):
             self._append_log("[Dir] Exportación cancelada: no se eligió carpeta.")
             return
 
-        self.view_dir.export_all_images(folder, prefix)
+        self.view_dir.export_all_images(folder, prefix, dpi=spin_dpi.value())
 
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()

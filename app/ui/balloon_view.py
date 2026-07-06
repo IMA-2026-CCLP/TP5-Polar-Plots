@@ -80,6 +80,7 @@ class BalloonView(QWidget):
         self._tick_font_size: float = 11          # tamaño de números de los ejes (polar2d)
         self._axis_color:    str | None = None    # color de la grilla 3D (3d/sphere), None = tema
         self._axis_width:    float = 1            # grosor de la grilla 3D
+        self._style:         dict = {}            # overrides genéricos (bg_color, etc. — ver "Propiedades…")
         self._colorscale:   str   = "Plasma"
         self._normalize:    bool  = True
         self._min_db:       float | None = None
@@ -228,6 +229,13 @@ class BalloonView(QWidget):
         if self._levels is not None:
             self._render()
 
+    def set_style(self, style: dict):
+        """Overrides genéricos de estilo (bg_color, line_width, etc. — ver
+        diálogo "Propiedades…" en TabDirectividad). Reemplaza el dict entero."""
+        self._style = style or {}
+        if self._levels is not None:
+            self._render()
+
     def set_plane(self, plane: str):
         self._plane = plane
         if self._levels is not None:
@@ -263,21 +271,65 @@ class BalloonView(QWidget):
         self._web.hide()
         self._placeholder.show()
 
-    def export_image(self, path: str, on_done=None):
+    def export_image(self, path: str, dpi: int = 300, on_done=None):
         """
-        Exporta el gráfico ocultando primero la barra flotante de iconos de
-        Plotly (cámara, zoom, selección, comentario) vía CSS, capturando el
-        widget con QWebEngineView.grab() (síncrono, nativo de Qt) y
-        restaurando la barra después.
+        Exporta el gráfico a PNG. Intenta primero una captura de alta
+        resolución vía Plotly.toImage() (permite pedir cualquier ancho/alto
+        en píxeles, escalado según el dpi elegido) — el único mecanismo que
+        soporta resolución arbitraria, independiente del tamaño en pantalla
+        del panel. Si esa promesa de JS no responde correctamente (falla
+        silenciosa observada anteriormente en este entorno), cae de forma
+        transparente a QWebEngineView.grab() — una captura de pantalla
+        confiable del widget a su resolución nativa (sin control de DPI,
+        pero siempre funciona).
 
-        Se usa grab() en vez de Plotly.toImage(): éste depende de que la
-        promesa de JS sea correctamente esperada entre el proceso de Qt y
-        el motor de renderizado, lo cual resultó poco confiable (fallaba
-        silenciosamente). grab() no tiene esa dependencia.
+        dpi     : resolución deseada; 96 se toma como el DPI "de pantalla"
+                  de referencia (escala 1×). Con dpi=300 (default) el ancho/
+                  alto pedido a Plotly es ~3.1× el tamaño en pantalla del panel.
+        on_done : si se pasa, se llama con (ok: bool) al terminar — permite
+                  encadenar exportaciones en lote sin pisarse (ver
+                  export_all_images en TabDirectividad).
+        """
+        scale = max(1.0, dpi / 96.0)
+        w = max(1, int(self._web.width() * scale))
+        h = max(1, int(self._web.height() * scale))
 
-        on_done, si se pasa, se llama con (ok: bool) al terminar — permite
-        encadenar exportaciones en lote sin pisarse (ver export_all_images
-        en TabDirectividad).
+        toimage_js = (
+            "Plotly.toImage(document.getElementById('plot'), "
+            f"{{format:'png', width:{w}, height:{h}}})"
+            ".then(function(url){ return url; })"
+            ".catch(function(err){ return 'ERR:' + (err && err.message ? err.message : String(err)); })"
+        )
+
+        def _save_data_url(data_url) -> bool:
+            if not (isinstance(data_url, str) and data_url.startswith('data:image')):
+                return False
+            import base64
+            b64data = data_url.split(',', 1)[1]
+            try:
+                with open(path, 'wb') as f:
+                    f.write(base64.b64decode(b64data))
+                return True
+            except Exception:
+                return False
+
+        def _on_toimage_result(data_url):
+            if _save_data_url(data_url):
+                self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, {w}×{h}px)")
+                if on_done:
+                    on_done(True)
+            else:
+                self._export_via_grab(path, on_done)
+
+        self._web.page().runJavaScript(toimage_js, _on_toimage_result)
+
+    def _export_via_grab(self, path: str, on_done=None):
+        """
+        Fallback de export_image(): captura de pantalla del widget vía
+        QWebEngineView.grab() (síncrono, nativo de Qt), ocultando antes la
+        barra flotante de iconos de Plotly (cámara, zoom, selección,
+        comentario) vía CSS y restaurándola después. Resolución = la nativa
+        del panel en pantalla (no respeta el DPI pedido).
         """
         hide_js = "var m=document.querySelector('.modebar'); if(m) m.style.visibility='hidden';"
         show_js = "var m=document.querySelector('.modebar'); if(m) m.style.visibility='';"
@@ -287,7 +339,7 @@ class BalloonView(QWidget):
             self._web.page().runJavaScript(show_js)
             ok = pixmap.save(path)
             if ok:
-                self.log.emit(f"[Dir] Imagen guardada → {path}")
+                self.log.emit(f"[Dir] Imagen guardada → {path} (resolución de pantalla)")
             else:
                 self.log.emit(f"[ERROR] No se pudo guardar la imagen en {path}")
             if on_done:
@@ -301,8 +353,18 @@ class BalloonView(QWidget):
         self._web.page().runJavaScript(hide_js, _after_hide)
 
     def apply_theme(self, palette: dict):
-        """Aplica la nueva paleta y re-renderiza el plot activo."""
+        """
+        Aplica la nueva paleta y re-renderiza el plot activo.
+
+        Fuerza una recarga completa de la página (no la actualización
+        in-place vía Plotly.react()): los colores del overlay de info y
+        demás CSS quedan "horneados" en el <style> del HTML servido en la
+        primera carga, y Plotly.react() sólo actualiza traces/layout, nunca
+        ese bloque de estilos — sin este reset, el tema visual del overlay
+        quedaba con los colores viejos para siempre tras el primer render.
+        """
         self._apply_theme_styles(palette)
+        self._html_loaded = False
         if self._levels is not None:
             self._render()
 
@@ -353,6 +415,7 @@ class BalloonView(QWidget):
                 min_db=self._min_db, max_db=self._max_db,
                 show_info=self._show_info,
                 axis_color=self._axis_color, axis_width=self._axis_width,
+                style=self._style,
                 update_only=use_update,
             )
         elif self._view_mode == "sphere":
@@ -363,6 +426,7 @@ class BalloonView(QWidget):
                 min_db=self._min_db, max_db=self._max_db,
                 show_info=self._show_info,
                 axis_color=self._axis_color, axis_width=self._axis_width,
+                style=self._style,
                 update_only=use_update,
             )
         elif self._view_mode == "polar2d":
@@ -383,6 +447,7 @@ class BalloonView(QWidget):
                 compare_bands=compare_bands,
                 compare_styles=self._compare_styles,
                 tick_font_size=self._tick_font_size,
+                style=self._style,
                 update_only=use_update,
             )
         elif self._view_mode == "spectrum":
@@ -393,6 +458,7 @@ class BalloonView(QWidget):
                     azimuths    = self._azimuths,
                     global_mode = self._spec_global,
                     show_info   = self._show_info,
+                    style       = self._style,
                     update_only = use_update,
                 )
             else:

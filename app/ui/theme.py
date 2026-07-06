@@ -48,8 +48,8 @@ LIGHT = dict(
     polar_axis_line="rgba(0,0,0,0.2)",
     polar_axis_grid="rgba(0,0,0,0.1)",
     legend_bg="rgba(0,0,0,0.04)",
-    overlay_bg="rgba(0,0,0,.08)",
-    overlay_border="rgba(0,0,0,.12)",
+    overlay_bg="rgba(255,255,255,.9)",
+    overlay_border="rgba(30,32,53,.15)",
     chk_icon=_CHK,
 )
 

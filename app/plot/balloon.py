@@ -52,7 +52,8 @@ def set_theme(palette: dict) -> None:
     _OVERLAY_BORDER = palette['overlay_border']
 
 
-def _axes_traces(axis_len: float = 1.4) -> list:
+def _axes_traces(axis_len: float = 1.4, label_size: float = 11,
+                 line_width: float = 3) -> list:
     traces = []
     for vec, label, color in [
         ([axis_len, 0, 0], "X (0°)",    "#ff6b6b"),
@@ -63,25 +64,26 @@ def _axes_traces(axis_len: float = 1.4) -> list:
             "type": "scatter3d",
             "x": [0, vec[0]], "y": [0, vec[1]], "z": [0, vec[2]],
             "mode": "lines+text",
-            "line": {"color": color, "width": 3},
+            "line": {"color": color, "width": line_width},
             "text": ["", label],
-            "textfont": {"color": color, "size": 11},
+            "textfont": {"color": color, "size": label_size},
             "hoverinfo": "skip", "showlegend": False,
         })
     return traces
 
 
 def _scene_layout(uirevision: str = "camera", grid_color: Optional[str] = None,
-                  grid_width: float = 1) -> dict:
+                  grid_width: float = 1, bg_color: Optional[str] = None) -> dict:
     color = grid_color or _GRID_COL
+    bg    = bg_color or _DARK_BG
     axis = {"showgrid": True, "gridcolor": color, "gridwidth": grid_width,
             "zeroline": False, "showticklabels": False, "showspikes": False}
     return {
-        "paper_bgcolor": _DARK_BG,
-        "plot_bgcolor":  _DARK_BG,
+        "paper_bgcolor": bg,
+        "plot_bgcolor":  bg,
         "margin": {"l": 0, "r": 0, "t": 10, "b": 0},
         "scene": {
-            "bgcolor": _DARK_BG,
+            "bgcolor": bg,
             "xaxis": dict(axis),
             "yaxis": dict(axis),
             "zaxis": dict(axis),
@@ -283,7 +285,7 @@ def _cap_mesh_trace(ring_X, ring_Y, ring_Z, apex_x, apex_y, apex_z,
 
 def _wrap_html(traces_json: str, layout_json: str, info_html: str,
                scroll_zoom: bool = False, show_info: bool = True,
-               update_only: bool = False) -> str:
+               update_only: bool = False, enable_canvas_zoom: bool = False) -> str:
     """
     update_only=True devuelve sólo un fragmento de JS (para correr con
     page().runJavaScript()) que actualiza el gráfico YA CARGADO vía
@@ -304,18 +306,46 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
 
     sz = 'true' if scroll_zoom else 'false'
     info_display = 'flex' if show_info else 'none'
+    # Plotly.js scrollZoom sólo funciona en subplots mapbox/geo/gl3d, NO en
+    # polar/cartesianos — para el lienzo 2D se implementa un zoom propio
+    # (Ctrl+rueda) vía CSS transform, con overflow:auto para poder
+    # desplazarse cuando el contenido ampliado no entra en la ventana.
+    body_overflow = 'auto' if enable_canvas_zoom else 'hidden'
+    canvas_zoom_js = ""
+    if enable_canvas_zoom:
+        canvas_zoom_js = """
+  // Zoom del lienzo con Ctrl+rueda (independiente del zoom nativo de Plotly,
+  // que no soporta subplots polares). Mantiene overflow:auto para poder
+  // desplazarse por el contenido ampliado con scroll normal.
+  var _zoomScale = 1;
+  document.addEventListener('wheel', function(e) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var factor = e.deltaY < 0 ? 1.1 : 0.9;
+    _zoomScale = Math.min(5, Math.max(0.5, _zoomScale * factor));
+    var plotEl = document.getElementById('plot');
+    plotEl.style.transform = 'scale(' + _zoomScale + ')';
+    plotEl.style.transformOrigin = 'top left';
+  }, {passive: false, capture: true});
+  document.addEventListener('dblclick', function(e) {
+    _zoomScale = 1;
+    document.getElementById('plot').style.transform = '';
+  });
+"""
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  html, body {{ width:100%; height:100%; background:{_DARK_BG}; overflow:hidden; }}
+  html, body {{ width:100%; height:100%; background:{_DARK_BG}; overflow:{body_overflow}; }}
   #plot {{ width:100%; height:100%; }}
   #info-overlay {{
     position:absolute; bottom:14px; left:14px;
     background:{_OVERLAY_BG}; backdrop-filter:blur(6px);
     border:1px solid {_OVERLAY_BORDER}; border-radius:8px;
+    box-shadow:0 2px 10px rgba(0,0,0,.18);
     padding:8px 14px; color:{_TEXT_COL}; font-family:{_FONT_CSS};
     font-size:12px; pointer-events:none; line-height:1.6;
     display:{info_display}; flex-direction:column; gap:2px;
@@ -334,7 +364,7 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
     modeBarButtonsToRemove:['sendDataToCloud'], displaylogo:false,
     scrollZoom:{sz} }};
   Plotly.newPlot('plot', traces, layout, cfg);
-
+  {canvas_zoom_js}
   // Actualiza el gráfico ya cargado sin recrear la página — Plotly.react()
   // conserva cámara/zoom/paneo (vía layout.uirevision) entre actualizaciones.
   window.updatePlot = function(newTraces, newLayout, newInfo, showInfo) {{
@@ -404,8 +434,16 @@ def build_balloon_html(
     show_info:   bool = True,
     axis_color:  Optional[str] = None,
     axis_width:  float = 1,
+    style:       Optional[dict] = None,
     update_only: bool = False,
 ) -> str:
+    """
+    style (dict opcional, ver "Propiedades…" en el menú contextual):
+      bg_color        : color de fondo de la escena (default: tema)
+      axis_label_size : tamaño de las etiquetas X/Y/Z (default: 11)
+      axis_line_width : grosor de las líneas de los ejes X/Y/Z (default: 3)
+    """
+    style = style or {}
     lev_2d = levels[:, :, band_index]
 
     R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
@@ -440,8 +478,10 @@ def build_balloon_html(
             R_clip[-1], z_color, cmin, cmax, colorscale,
         ))
 
-    traces += _axes_traces()
-    layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width)
+    traces += _axes_traces(label_size=style.get('axis_label_size', 11),
+                           line_width=style.get('axis_line_width', 3))
+    layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width,
+                            bg_color=style.get('bg_color'))
 
     zenith_str = f"<br><b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
     info = (
@@ -468,12 +508,17 @@ def build_sphere_html(
     show_info:   bool = True,
     axis_color:  Optional[str] = None,
     axis_width:  float = 1,
+    style:       Optional[dict] = None,
     update_only: bool = False,
 ) -> str:
     """
     Hemisferio superior — radio constante = 1, nivel codificado en color.
     Usa mesh3d triangulado para evitar la singularidad de superficie en el cénit.
+
+    style (dict opcional, ver "Propiedades…" en el menú contextual):
+      bg_color, axis_label_size, axis_line_width — ver build_balloon_html.
     """
+    style = style or {}
     lev_2d = levels[:, :, band_index]
 
     R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
@@ -551,8 +596,10 @@ def build_sphere_html(
         "hoverinfo": "skip",
     }
 
-    traces = [mesh_trace] + _axes_traces()
-    layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width)
+    traces = [mesh_trace] + _axes_traces(label_size=style.get('axis_label_size', 11),
+                                         line_width=style.get('axis_line_width', 3))
+    layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width,
+                            bg_color=style.get('bg_color'))
     # Corregir proporción: Z va 0→1 mientras X,Y van -1→1; sin esto Z se estira
     layout["scene"]["aspectmode"]  = "manual"
     layout["scene"]["aspectratio"] = {"x": 1, "y": 1, "z": 0.5}
@@ -649,10 +696,25 @@ def build_polar2d_html(
     compare_bands:  Optional[list] = None,
     compare_styles: Optional[dict] = None,
     tick_font_size: float = 11,
+    style:          Optional[dict] = None,
     update_only:    bool = False,
 ) -> str:
     """
     Gráfico polar 2D.
+
+    style (dict opcional, ver "Propiedades…" en el menú contextual):
+      bg_color          : color de fondo (default: tema)
+      show_radial_grid  : bool, muestra la grilla radial nativa de Plotly
+                          además de los anillos de dB propios (default: False)
+      ring_color        : color de los anillos de referencia y del eje
+                          angular (default: tema)
+      line_width        : grosor de la traza principal en modo banda única
+                          (default: 2.5; en modo comparación cada banda usa
+                          su propio estilo, ver compare_styles)
+      ring_font_size    : tamaño de los números de dB de los anillos
+                          concéntricos (default: 9) — independiente de
+                          tick_font_size, que sólo afecta a los grados
+      ring_step         : paso en dB entre anillos de referencia (default: 5)
 
     plane='XY' (horizontal, comportamiento original): fija una elevación (theta)
     y barre el azimuth. Para obtener 360° combina la mitad frontal (azimuths
@@ -681,6 +743,7 @@ def build_polar2d_html(
 
     r-axis en dB relativo al máximo (0 dB en frente), rango -30..0 dB.
     """
+    style = style or {}
     bands_to_plot = compare_bands if compare_bands else [(band_index, band_hz)]
     multi = len(bands_to_plot) > 1
 
@@ -728,7 +791,7 @@ def build_polar2d_html(
         ))
 
     # ── Rango dinámico combinado: min/max de TODAS las bandas mostradas ───────
-    step    = 5.0
+    step    = style.get('ring_step', 5.0)
     all_min = min(r['gmin'] for r in rings)
     all_max = max(r['gmax'] for r in rings)
     r_floor = min_db if min_db is not None else float(np.floor(all_min / step) * step)
@@ -740,7 +803,10 @@ def build_polar2d_html(
     def db_to_r(db):
         return np.clip((np.asarray(db, float) - r_floor) / dyn_range, 0, 1)
 
-    # ── Anillos de referencia (cada 5 dB dentro del rango) ───────────────────
+    # ── Anillos de referencia (cada "step" dB dentro del rango) ──────────────
+    rotation       = 90 if plane == "XY" else 0
+    ring_color     = style.get('ring_color') or _RING_LINE
+    ring_font_size = style.get('ring_font_size', 9)
     ring_vals    = np.arange(np.ceil(r_floor / step) * step, r_ceil + 0.01, step)
     ring_vals    = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
     ref_db_rings = [float(v) for v in ring_vals]
@@ -752,7 +818,7 @@ def build_polar2d_html(
             "type": "scatterpolar",
             "r": [r_ring] * 361, "theta": theta_ring.tolist(),
             "mode": "lines",
-            "line": {"color": _RING_LINE, "width": 1, "dash": "dot"},
+            "line": {"color": ring_color, "width": 1, "dash": "dot"},
             "hovertemplate": f"{db:g} dBr<extra></extra>",
             "showlegend": False,
         })
@@ -761,18 +827,19 @@ def build_polar2d_html(
             "r": [r_ring], "theta": [92],
             "mode": "text",
             "text": [f"{db:g}"],
-            "textfont": {"color": _RING_TEXT, "size": max(7, tick_font_size - 2)},
+            "textfont": {"color": _RING_TEXT, "size": ring_font_size},
             "hoverinfo": "skip", "showlegend": False,
         })
 
     # ── Traza principal (una por banda) ───────────────────────────────────────
     styles = compare_styles or {}
+    default_width = style.get('line_width', 2.5)
     data_traces = []
     for i, ring in enumerate(rings):
-        style      = styles.get(ring['band_index'], {})
-        line_color = style.get('color', _COMPARE_COLORS[i % len(_COMPARE_COLORS)])
-        line_width = style.get('width', 2.5)
-        line_dash  = style.get('dash', 'solid')
+        band_style = styles.get(ring['band_index'], {})
+        line_color = band_style.get('color', _COMPARE_COLORS[i % len(_COMPARE_COLORS)])
+        line_width = band_style.get('width', default_width)
+        line_dash  = band_style.get('dash', 'solid')
         r_plot = db_to_r(ring['r_closed'])
         hover_text = [
             f"{ring['hover_label']}: {ang:.1f}°<br>{freq_label(ring['band_hz'])} Hz<br>{v:.1f} dB SPL"
@@ -791,26 +858,33 @@ def build_polar2d_html(
             "showlegend": multi,
         })
 
+    bg_color = style.get('bg_color') or _DARK_BG
     layout = {
-        "paper_bgcolor": _DARK_BG,
-        "plot_bgcolor":  _DARK_BG,
-        "margin": {"l": 40, "r": 40, "t": 20, "b": 40},
+        "paper_bgcolor": bg_color,
+        "plot_bgcolor":  bg_color,
+        "margin": {"l": 70, "r": 70, "t": 45, "b": 70},
         "polar": {
-            "bgcolor": _DARK_BG,
+            # Encoge el círculo dentro del área disponible para dejar aire
+            # garantizado a los números del eje angular (0°, 30°, 60°...),
+            # que si no quedan pegados al borde del panel y se recortan.
+            "domain": {"x": [0.06, 0.94], "y": [0.06, 0.94]},
+            "bgcolor": bg_color,
             "radialaxis": {
                 "visible": True, "range": [0, 1],
-                "showticklabels": False, "showgrid": False,
+                "showticklabels": False,
+                "showgrid": style.get('show_radial_grid', False),
+                "gridcolor": ring_color,
                 "linecolor": _POLAR_GRID,
             },
             "angularaxis": {
                 "tickfont": {"color": _TEXT_COL, "size": tick_font_size},
-                "linecolor": _POLAR_AXIS,
+                "linecolor": ring_color,
                 "gridcolor": _POLAR_GRID,
                 # XY: rotation=90 → 0° arriba (convención brújula).
                 # XZ/YZ: rotation=0 → 0° a la derecha, 180° a la izquierda,
                 # con 90° (cénit) arriba, dado que theta crece counterclockwise.
                 "direction": "counterclockwise",
-                "rotation": 90 if plane == "XY" else 0,
+                "rotation": rotation,
             },
         },
         "legend": {
@@ -838,7 +912,8 @@ def build_polar2d_html(
             f"<b>Dinámica:</b> {r0['gmax'] - r0['gmin']:.1f} dB"
         )
     return _wrap_html(json.dumps(ring_traces + data_traces), json.dumps(layout), info,
-                      scroll_zoom=True, show_info=show_info, update_only=update_only)
+                      scroll_zoom=True, show_info=show_info, update_only=update_only,
+                      enable_canvas_zoom=True)
 
 
 # ── 4. Espectro del micrófono de referencia (barras 1/3 octava) ───────────────
@@ -849,6 +924,7 @@ def build_spectrum_html(
     azimuths:    np.ndarray,
     global_mode: bool = True,
     show_info:   bool = True,
+    style:       Optional[dict] = None,
     update_only: bool = False,
 ) -> str:
     """
@@ -860,7 +936,14 @@ def build_spectrum_html(
     bands       : (n_bands,)       frecuencias centrales en Hz
     azimuths    : (n_az,)          azimuths en grados
     global_mode : True → media ± σ;  False → barra por azimuth superpuesta
+
+    style (dict opcional, ver "Propiedades…" en el menú contextual):
+      bg_color   : color de fondo (default: tema)
+      bar_color  : color de las barras en modo Global (default: tema;
+                  no aplica en modo "Por toma", que usa un color por azimuth)
+      grid_color : color de la grilla de ejes (default: tema)
     """
+    style = style or {}
     # Garantizar orden ascendente de bandas
     sort_idx    = np.argsort(bands)
     bands       = bands[sort_idx]
@@ -887,7 +970,7 @@ def build_spectrum_html(
             },
             "name":   "Media",
             "marker": {
-                "color": "rgba(88,101,242,0.85)",
+                "color": style.get('bar_color') or "rgba(88,101,242,0.85)",
                 "line":  {"color": "rgba(140,153,255,0.5)", "width": 1},
             },
             "customdata":      [[float(s)] for s in std_vals],
@@ -925,15 +1008,17 @@ def build_spectrum_html(
 
     range_str = f"{freq_label(float(bands[0]))}–{freq_label(float(bands[-1]))} Hz"
 
+    bg_color   = style.get('bg_color') or _DARK_BG
+    grid_color = style.get('grid_color') or _GRID_COL
     layout = {
-        "paper_bgcolor": _DARK_BG,
-        "plot_bgcolor":  _SPEC_BG,
+        "paper_bgcolor": bg_color,
+        "plot_bgcolor":  _SPEC_BG if not style.get('bg_color') else bg_color,
         "margin":  {"l": 65, "r": 20, "t": 45, "b": 70},
         "barmode": "overlay",
         "xaxis": {
             "title":         {"text": "Banda (Hz)", "font": {"color": _TEXT_COL}},
             "tickfont":      {"color": _TEXT_COL, "size": 9},
-            "gridcolor":     _GRID_COL,
+            "gridcolor":     grid_color,
             "linecolor":     "rgba(255,255,255,0.2)",
             "tickangle":     -45,
             "type":          "category",
@@ -943,7 +1028,7 @@ def build_spectrum_html(
         "yaxis": {
             "title":    {"text": "dB SPL", "font": {"color": _TEXT_COL}},
             "tickfont": {"color": _TEXT_COL},
-            "gridcolor": _GRID_COL,
+            "gridcolor": grid_color,
             "zeroline":  False,
             "range":     [y_min, y_max],
         },
