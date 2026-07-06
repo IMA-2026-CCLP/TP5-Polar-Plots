@@ -1,3 +1,4 @@
+altgraph==0.17.5
 asttokens==3.0.1
 attrs==26.1.0
 audioread==3.1.0
@@ -36,6 +37,8 @@ numpy==2.2.6
 packaging==26.2
 pandas==2.3.3
 parso==0.8.7
+pefile==2024.8.26
+pillow==12.2.0
 platformdirs==4.10.0
 plotly==6.8.0
 pooch==1.9.0
@@ -44,9 +47,20 @@ psutil==7.2.2
 pure_eval==0.2.3
 pycparser==3.0
 Pygments==2.20.0
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.1
+PyQt6-WebEngine==6.11.0
+PyQt6-WebEngine-Qt6==6.11.1
+PyQt6_sip==13.11.1
+pyqtgraph==0.14.0
 python-dateutil==2.9.0.post0
 pytz==2026.2
+pywin32-ctypes==0.2.3
 pyzmq==27.1.0
+QtAwesome==1.4.2
+QtPy==2.4.3
 referencing==0.37.0
 requests==2.34.2
 rpds-py==0.30.0
