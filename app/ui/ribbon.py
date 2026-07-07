@@ -617,8 +617,9 @@ class RibbonBar(QWidget):
         r3b = QHBoxLayout(); r3b.setSpacing(12)
         r3b.addStretch()
         self._view_checks: dict[str, QCheckBox] = {}
+        _default_on = {"3d": False, "sphere": True, "polar2d": True, "spectrum": False}
         for label, mode in [("3D","3d"),("Esfera","sphere"),("Polar 2D","polar2d"),("Espectro","spectrum")]:
-            chk = _chk(label); chk.setChecked(True)
+            chk = _chk(label); chk.setChecked(_default_on[mode])
             chk.toggled.connect(self.sig_dir_display_changed)
             self._view_checks[mode] = chk
             r3b.addWidget(chk)

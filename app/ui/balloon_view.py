@@ -32,6 +32,12 @@ VIEW_MODES = ("3d", "sphere", "polar2d", "spectrum")
 class _SilentPage(QWebEnginePage):
     hover_data          = pyqtSignal(str)
     context_menu_at     = pyqtSignal(int, int)   # x, y en píxeles locales de la página
+    export_ready        = pyqtSignal(str, str)   # (id, data_url) — imagen exportada completa
+    export_failed       = pyqtSignal(str, str)   # (id, mensaje de error)
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._export_chunks: dict[str, list] = {}
 
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
         if message.startswith("HOVER:"):
@@ -42,6 +48,30 @@ class _SilentPage(QWebEnginePage):
                 self.context_menu_at.emit(int(float(x_str)), int(float(y_str)))
             except (ValueError, IndexError):
                 pass
+        elif message.startswith("EXPORTIMG_ERR:"):
+            # formato: EXPORTIMG_ERR:<id>:<mensaje>
+            try:
+                _, exp_id, err = message.split(':', 2)
+            except ValueError:
+                exp_id, err = "", message
+            self._export_chunks.pop(exp_id, None)
+            self.export_failed.emit(exp_id, err)
+        elif message.startswith("EXPORTIMG:"):
+            # formato: EXPORTIMG:<id>:<i>:<n>:<chunk> — la imagen (data URL en
+            # base64) puede pesar varios MB, así que se manda en pedazos por
+            # consola (mismo canal ya usado para HOVER/CONTEXTMENU, mucho más
+            # confiable en este entorno que esperar la Promise de
+            # Plotly.toImage() desde el callback de runJavaScript).
+            try:
+                _, exp_id, i_str, n_str, chunk = message.split(':', 4)
+                i, n = int(i_str), int(n_str)
+            except ValueError:
+                return
+            parts = self._export_chunks.setdefault(exp_id, [None] * n)
+            parts[i] = chunk
+            if all(p is not None for p in parts):
+                del self._export_chunks[exp_id]
+                self.export_ready.emit(exp_id, ''.join(parts))
 
 
 class BalloonView(QWidget):
@@ -94,6 +124,16 @@ class BalloonView(QWidget):
         # completo; después, los renders usan Plotly.react() in-place para
         # no perder cámara/zoom/paneo (ver plot/balloon.py _wrap_html).
         self._html_loaded: bool = False
+        # NOTA: hubo un intento de reescalar tick_font_size/ring_font_size/
+        # legend_font_size/axis_label_size en proporción al tamaño del panel
+        # (para que el texto no se vea gigante si se achica la ventana), pero
+        # ese reescalado dependía del tamaño exacto del widget en cada
+        # instante — lo que hacía que la imagen exportada (capturada en un
+        # momento/tamaño distinto al de la última vez que se vio en pantalla)
+        # se viera con proporciones distintas a lo que el usuario veía. Se
+        # sacó: ahora los tamaños de fuente son siempre exactamente los
+        # configurados en Propiedades, sin ajuste automático — así pantalla
+        # y exportación coinciden siempre.
         self._build_ui()
 
     def _build_ui(self):
@@ -271,65 +311,109 @@ class BalloonView(QWidget):
         self._web.hide()
         self._placeholder.show()
 
-    def export_image(self, path: str, dpi: int = 300, on_done=None):
-        """
-        Exporta el gráfico a PNG. Intenta primero una captura de alta
-        resolución vía Plotly.toImage() (permite pedir cualquier ancho/alto
-        en píxeles, escalado según el dpi elegido) — el único mecanismo que
-        soporta resolución arbitraria, independiente del tamaño en pantalla
-        del panel. Si esa promesa de JS no responde correctamente (falla
-        silenciosa observada anteriormente en este entorno), cae de forma
-        transparente a QWebEngineView.grab() — una captura de pantalla
-        confiable del widget a su resolución nativa (sin control de DPI,
-        pero siempre funciona).
+    _EXPORT_FORMATS = ('png', 'svg', 'jpeg', 'webp')   # soportados por Plotly.toImage() en navegador
 
-        dpi     : resolución deseada; 96 se toma como el DPI "de pantalla"
-                  de referencia (escala 1×). Con dpi=300 (default) el ancho/
-                  alto pedido a Plotly es ~3.1× el tamaño en pantalla del panel.
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
+        """
+        Exporta el gráfico real vía Plotly.toImage() (calidad de render de
+        Plotly, no una captura de pantalla), usando exactamente el mismo
+        layout/estilo que ya se ve en pantalla — no hay ningún reescalado
+        dinámico de por medio (se sacó, era la causa de que la imagen no
+        coincidiera con la pantalla), así que ambos deberían ser idénticos.
+
+        El resultado (un data URL, puede pesar varios MB en base64 a alta
+        resolución) se manda de vuelta a Python en pedazos por consola (canal
+        EXPORTIMG:, ver _SilentPage) en vez de leerlo del valor de retorno de
+        runJavaScript(): esperar ahí la Promise de toImage() resultaba poco
+        confiable en este entorno. Si aun así falla o no contesta a tiempo,
+        cae a QWebEngineView.grab() (captura de pantalla) como último recurso.
+
+        dpi     : resolución deseada; 96 se toma como el DPI "de pantalla" de
+                  referencia (escala 1×). El factor de escala se redondea a
+                  un entero (1×, 2×, 3×...) — a un factor fraccionario Plotly
+                  rasteriza con menos nitidez (líneas finas/texto). No aplica
+                  a fmt='svg' (vectorial, no tiene "resolución").
+        fmt     : 'png' (default), 'svg' (vectorial), 'jpeg' o 'webp'.
         on_done : si se pasa, se llama con (ok: bool) al terminar — permite
                   encadenar exportaciones en lote sin pisarse (ver
                   export_all_images en TabDirectividad).
         """
-        scale = max(1.0, dpi / 96.0)
-        w = max(1, int(self._web.width() * scale))
-        h = max(1, int(self._web.height() * scale))
+        fmt = fmt if fmt in self._EXPORT_FORMATS else 'png'
+        scale = max(1, round(dpi / 96.0))
 
-        toimage_js = (
-            "Plotly.toImage(document.getElementById('plot'), "
-            f"{{format:'png', width:{w}, height:{h}}})"
-            ".then(function(url){ return url; })"
-            ".catch(function(err){ return 'ERR:' + (err && err.message ? err.message : String(err)); })"
-        )
+        import uuid
+        exp_id = uuid.uuid4().hex
+        page = self._page
 
-        def _save_data_url(data_url) -> bool:
-            if not (isinstance(data_url, str) and data_url.startswith('data:image')):
-                return False
+        timeout_timer = QTimer(self)
+        timeout_timer.setSingleShot(True)
+
+        def _cleanup():
+            try:
+                page.export_ready.disconnect(_on_ready)
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                page.export_failed.disconnect(_on_failed)
+            except (TypeError, RuntimeError):
+                pass
+            timeout_timer.stop()
+
+        def _on_ready(rid, data_url):
+            if rid != exp_id:
+                return
+            _cleanup()
             import base64
-            b64data = data_url.split(',', 1)[1]
             try:
                 with open(path, 'wb') as f:
-                    f.write(base64.b64decode(b64data))
-                return True
-            except Exception:
-                return False
-
-        def _on_toimage_result(data_url):
-            if _save_data_url(data_url):
-                self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, {w}×{h}px)")
+                    f.write(base64.b64decode(data_url.split(',', 1)[1]))
+                self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, escala {scale}×, {fmt})")
                 if on_done:
                     on_done(True)
-            else:
+            except Exception as exc:
+                self.log.emit(f"[ERROR] No se pudo guardar la imagen: {exc}")
                 self._export_via_grab(path, on_done)
 
-        self._web.page().runJavaScript(toimage_js, _on_toimage_result)
+        def _on_failed(rid, err):
+            if rid != exp_id:
+                return
+            _cleanup()
+            self.log.emit(f"[Dir] Plotly.toImage falló ({err}) — se usa captura de pantalla como respaldo.")
+            self._export_via_grab(path, on_done)
 
-    def _export_via_grab(self, path: str, on_done=None):
+        def _on_timeout():
+            _cleanup()
+            self._export_via_grab(path, on_done)
+
+        page.export_ready.connect(_on_ready)
+        page.export_failed.connect(_on_failed)
+        timeout_timer.timeout.connect(_on_timeout)
+        timeout_timer.start(10000)
+
+        js = (
+            "(function(){"
+            f"Plotly.toImage(document.getElementById('plot'), {{format:'{fmt}', scale:{scale}}})"
+            ".then(function(url){"
+            "  var CHUNK=400000;"
+            "  var n=Math.max(1, Math.ceil(url.length/CHUNK));"
+            "  for (var i=0;i<n;i++){"
+            f"    console.log('EXPORTIMG:{exp_id}:'+i+':'+n+':'+url.slice(i*CHUNK,(i+1)*CHUNK));"
+            "  }"
+            "})"
+            ".catch(function(err){"
+            f"  console.log('EXPORTIMG_ERR:{exp_id}:'+(err&&err.message?err.message:String(err)));"
+            "});"
+            "})();"
+        )
+        page.runJavaScript(js)
+
+    def _export_via_grab(self, path: str, on_done=None, fmt: str = 'png'):
         """
-        Fallback de export_image(): captura de pantalla del widget vía
-        QWebEngineView.grab() (síncrono, nativo de Qt), ocultando antes la
-        barra flotante de iconos de Plotly (cámara, zoom, selección,
-        comentario) vía CSS y restaurándola después. Resolución = la nativa
-        del panel en pantalla (no respeta el DPI pedido).
+        Captura del widget vía QWebEngineView.grab() (síncrono, nativo de
+        Qt) — pixel-copy exacto de lo que se ve en pantalla en este momento,
+        ocultando antes la barra flotante de iconos de Plotly (cámara, zoom,
+        selección, comentario) vía CSS y restaurándola después. Resolución
+        = la nativa del panel en pantalla.
         """
         hide_js = "var m=document.querySelector('.modebar'); if(m) m.style.visibility='hidden';"
         show_js = "var m=document.querySelector('.modebar'); if(m) m.style.visibility='';"
@@ -337,9 +421,9 @@ class BalloonView(QWidget):
         def _do_grab():
             pixmap = self._web.grab()
             self._web.page().runJavaScript(show_js)
-            ok = pixmap.save(path)
+            ok = pixmap.save(path, fmt.upper())
             if ok:
-                self.log.emit(f"[Dir] Imagen guardada → {path} (resolución de pantalla)")
+                self.log.emit(f"[Dir] Imagen guardada → {path} (igual a lo visto en pantalla)")
             else:
                 self.log.emit(f"[ERROR] No se pudo guardar la imagen en {path}")
             if on_done:
@@ -402,6 +486,9 @@ class BalloonView(QWidget):
     def _render_inner(self):
         lvl, bnd, bi = self._filtered()
         band_hz = float(bnd[bi])
+
+        style = self._style
+        tick_font_size = self._tick_font_size
         # Una vez cargada la página por primera vez, los renders siguientes
         # actualizan in-place (Plotly.react) para conservar cámara/zoom/paneo,
         # en vez de recargar todo con setHtml() (ver plot/balloon.py _wrap_html).
@@ -415,7 +502,7 @@ class BalloonView(QWidget):
                 min_db=self._min_db, max_db=self._max_db,
                 show_info=self._show_info,
                 axis_color=self._axis_color, axis_width=self._axis_width,
-                style=self._style,
+                style=style,
                 update_only=use_update,
             )
         elif self._view_mode == "sphere":
@@ -426,7 +513,7 @@ class BalloonView(QWidget):
                 min_db=self._min_db, max_db=self._max_db,
                 show_info=self._show_info,
                 axis_color=self._axis_color, axis_width=self._axis_width,
-                style=self._style,
+                style=style,
                 update_only=use_update,
             )
         elif self._view_mode == "polar2d":
@@ -446,8 +533,8 @@ class BalloonView(QWidget):
                 show_info=self._show_info,
                 compare_bands=compare_bands,
                 compare_styles=self._compare_styles,
-                tick_font_size=self._tick_font_size,
-                style=self._style,
+                tick_font_size=tick_font_size,
+                style=style,
                 update_only=use_update,
             )
         elif self._view_mode == "spectrum":
@@ -458,7 +545,7 @@ class BalloonView(QWidget):
                     azimuths    = self._azimuths,
                     global_mode = self._spec_global,
                     show_info   = self._show_info,
-                    style       = self._style,
+                    style       = style,
                     update_only = use_update,
                 )
             else:

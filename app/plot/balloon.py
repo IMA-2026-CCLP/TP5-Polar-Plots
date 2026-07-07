@@ -94,20 +94,21 @@ def _scene_layout(uirevision: str = "camera", grid_color: Optional[str] = None,
     }
 
 
-def _colorbar(cs_name: str) -> dict:
+def _colorbar(cs_name: str, text_color: Optional[str] = None) -> dict:
+    txt = text_color or _TEXT_COL
     return {
         "colorscale": COLORSCALES.get(cs_name, "Plasma"),
         "colorbar": {
             "title": {"text": "dB", "side": "right"},
             "thickness": 16, "len": 0.6, "x": 0.92,
-            "tickfont": {"color": _TEXT_COL, "size": 11},
-            "titlefont": {"color": _TEXT_COL},
+            "tickfont": {"color": txt, "size": 11},
+            "titlefont": {"color": txt},
         },
     }
 
 
 def _surface_trace(X, Y, Z, surfacecolor, cmin, cmax, cs_name: str,
-                   hover=None) -> dict:
+                   hover=None, text_color: Optional[str] = None) -> dict:
     t = {
         "type": "surface",
         "x": X.tolist(), "y": Y.tolist(), "z": Z.tolist(),
@@ -122,11 +123,21 @@ def _surface_trace(X, Y, Z, surfacecolor, cmin, cmax, cs_name: str,
     }
     if hover is not None:
         t["text"] = hover
-    t.update(_colorbar(cs_name))
+    t.update(_colorbar(cs_name, text_color=text_color))
     return t
 
 
 # ── Helpers hemisféricos (idénticos a patron.py) ──────────────────────────────
+
+def _with_alpha(color: str, alpha: float) -> str:
+    """Convierte un hex #RRGGBB a rgba(...) con la opacidad dada. Si ya viene
+    en rgba()/nombre, lo devuelve sin tocar (no hace falta para los casos
+    de uso actuales)."""
+    if color.startswith('#') and len(color) == 7:
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+    return color
+
 
 def _enavg(a: float, b: float) -> float:
     """Promedio de energía en dB."""
@@ -149,16 +160,76 @@ def _build_full_ring(rf: np.ndarray, rb: np.ndarray) -> np.ndarray:
     return row
 
 
+def _smooth_circular(y: np.ndarray, window: int, method: str = 'gaussian') -> np.ndarray:
+    """
+    Suaviza el anillo cerrado del polar 2D (circular: el final se continúa
+    con el principio, ya que representa una vuelta completa de 360°).
+
+    method:
+      'gaussian'        (recomendado) — pondera más los puntos cercanos y
+                        menos los lejanos, sin corte abrupto; evita el
+                        "ripple" que introduce un promedio móvil rectangular.
+      'savgol'          Savitzky-Golay — ajusta un polinomio local; suaviza
+                        preservando mejor picos/nulos angostos del patrón
+                        que gaussian o moving_average.
+      'moving_average'  promedio móvil rectangular simple (más agresivo,
+                        puede introducir ondulaciones artificiales).
+      'none'            sin suavizar.
+
+    window : tamaño de la ventana en puntos (a mayor ventana, más suavizado).
+             <2 no hace nada.
+    """
+    n = len(y)
+    if window < 2 or window >= n or method == 'none':
+        return y
+
+    if method == 'gaussian':
+        from scipy.ndimage import gaussian_filter1d
+        sigma = window / 3.0   # ventana ≈ 3σ cubre casi toda la campana
+        return gaussian_filter1d(y, sigma=sigma, mode='wrap')
+
+    if method == 'savgol':
+        from scipy.signal import savgol_filter
+        win = window if window % 2 == 1 else window + 1   # savgol exige ventana impar
+        win = min(win, n - 1 if (n - 1) % 2 == 1 else n - 2)
+        win = max(win, 3)
+        polyorder = min(2, win - 1)
+        pad = win // 2
+        y_ext = np.concatenate([y[-pad:], y, y[:pad]])
+        y_smooth = savgol_filter(y_ext, win, polyorder)
+        return y_smooth[pad:pad + n]
+
+    # 'moving_average'
+    pad = window // 2
+    y_ext = np.concatenate([y[-pad:], y, y[:pad]])
+    kernel = np.ones(window) / window
+    y_smooth = np.convolve(y_ext, kernel, mode='same')
+    return y_smooth[pad:pad + n]
+
+
 def _build_hemisphere_grid(
-    lev_2d:     np.ndarray,
-    azimuths:   np.ndarray,
-    thetas:     np.ndarray,
-    interp_deg: Optional[float] = 2.0,
+    lev_2d:           np.ndarray,
+    azimuths:         np.ndarray,
+    thetas:           np.ndarray,
+    interp_deg:       Optional[float] = 2.0,
+    smoothing:        float = 0.0,
+    smoothing_method: str = 'gaussian',
+    smoothing_window: int = 0,
 ) -> tuple:
     """
     Grilla hemisférica (n_elev × n_phi) en dB, idem plot_polar_3d en patron.py.
     Combina pares front/back theta, promedia en energía en las costuras,
     e interpola con RectBivariateSpline si scipy está disponible.
+
+    interp_deg : paso de la grilla interpolada en grados (menor = más fino,
+                 más lento). None desactiva la interpolación.
+    smoothing  : factor "s" del spline (RectBivariateSpline) — 0 = pasa
+                 exactamente por los datos medidos (sin suavizar); valores
+                 mayores permiten que la superficie se aparte de los puntos
+                 medidos para suavizar ruido de medición.
+    smoothing_method, smoothing_window : mismo suavizado circular que el
+                 Polar 2D (ver _smooth_circular), aplicado por cada anillo
+                 de azimuth ANTES de ajustar el spline. window=0 = sin efecto.
 
     Returns: (R_dB, phi_rad, elev_rad, vmin, vmax)
     """
@@ -198,6 +269,11 @@ def _build_hemisphere_grid(
         valid90   = col90[np.isfinite(col90)]
         zenith_dB = float(10 * np.log10(np.mean(10 ** (valid90 / 10)))) if len(valid90) else 0.0
 
+    if smoothing_window >= 2:
+        for i_row in range(R_dB.shape[0]):
+            R_dB[i_row, :] = _smooth_circular(R_dB[i_row, :], smoothing_window,
+                                              method=smoothing_method)
+
     vmin = float(R_dB.min())
     vmax = float(R_dB.max())
 
@@ -227,7 +303,7 @@ def _build_hemisphere_grid(
             elev_new = np.arange(0, interp_top + interp_deg * 0.5, interp_deg, dtype=float)
             elev_new = elev_new[elev_new <= interp_top]
             kx = min(3, len(elev_fit) - 1)
-            spl  = RectBivariateSpline(elev_fit, phi_orig, R_fit, kx=kx, ky=3)
+            spl  = RectBivariateSpline(elev_fit, phi_orig, R_fit, kx=kx, ky=3, s=smoothing)
             R_dB     = spl(elev_new, phi_new)
             phi_rad  = np.radians(phi_new)
             elev_rad = np.radians(elev_new)
@@ -442,12 +518,21 @@ def build_balloon_html(
       bg_color        : color de fondo de la escena (default: tema)
       axis_label_size : tamaño de las etiquetas X/Y/Z (default: 11)
       axis_line_width : grosor de las líneas de los ejes X/Y/Z (default: 3)
+      interp_deg      : paso de interpolación en grados (default: 2; menor
+                        = malla más fina y lenta)
+      smoothing       : factor de suavizado del spline (default: 0 = exacto
+                        sobre los datos medidos; mayor = superficie más
+                        suave, atenúa ruido de medición)
     """
     style = style or {}
     lev_2d = levels[:, :, band_index]
 
     R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
-        lev_2d, azimuths, elevations, interp_deg=2.0
+        lev_2d, azimuths, elevations,
+        interp_deg=style.get('interp_deg', 2.0),
+        smoothing=style.get('smoothing', 0.0),
+        smoothing_method=style.get('smoothing_method', 'gaussian'),
+        smoothing_window=int(style.get('smoothing_window', 0)),
     )
 
     cmin = min_db if min_db is not None else vmin
@@ -466,7 +551,8 @@ def build_balloon_html(
     Z = R_r * np.sin(E)
 
     # Solo hemisferio superior (sin espejo)
-    traces = [_surface_trace(X, Y, Z, R_clip, cmin, cmax, colorscale)]
+    traces = [_surface_trace(X, Y, Z, R_clip, cmin, cmax, colorscale,
+                             text_color=style.get('text_color'))]
 
     # Cap del cénit con mesh3d
     if zenith_dB is not None:
@@ -516,13 +602,18 @@ def build_sphere_html(
     Usa mesh3d triangulado para evitar la singularidad de superficie en el cénit.
 
     style (dict opcional, ver "Propiedades…" en el menú contextual):
-      bg_color, axis_label_size, axis_line_width — ver build_balloon_html.
+      bg_color, axis_label_size, axis_line_width, interp_deg, smoothing —
+      ver build_balloon_html.
     """
     style = style or {}
     lev_2d = levels[:, :, band_index]
 
     R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
-        lev_2d, azimuths, elevations, interp_deg=2.0
+        lev_2d, azimuths, elevations,
+        interp_deg=style.get('interp_deg', 2.0),
+        smoothing=style.get('smoothing', 0.0),
+        smoothing_method=style.get('smoothing_method', 'gaussian'),
+        smoothing_window=int(style.get('smoothing_window', 0)),
     )
 
     cmin = min_db if min_db is not None else vmin
@@ -588,8 +679,8 @@ def build_sphere_html(
         "colorbar": {
             "title":     {"text": "dB", "side": "right"},
             "thickness": 16, "len": 0.6, "x": 0.92,
-            "tickfont":  {"color": _TEXT_COL, "size": 11},
-            "titlefont": {"color": _TEXT_COL},
+            "tickfont":  {"color": style.get('text_color') or _TEXT_COL, "size": 11},
+            "titlefont": {"color": style.get('text_color') or _TEXT_COL},
         },
         "lighting":      {"ambient": 0.75, "diffuse": 0.7, "specular": 0.15, "roughness": 0.4},
         "lightposition": {"x": 100, "y": 100, "z": 150},
@@ -618,9 +709,22 @@ def build_sphere_html(
 # ── 3. Polar 2D ───────────────────────────────────────────────────────────────
 
 _COMPARE_COLORS = [
-    "#6385ff", "#ff6b6b", "#51cf66", "#ffd43b",
+    # Primeras 3 bandas: paleta fija pedida por el usuario. De ahí en más,
+    # colores de relleno sin un criterio particular (no hace falta que
+    # combinen entre sí, sólo que se distingan).
+    "#0e2e59", "#ffa908", "#20dab1",
+    "#ff6b6b", "#51cf66", "#ffd43b",
     "#c084fc", "#22d3ee", "#fb923c", "#f472b6",
 ]
+
+# Posición del texto de los anillos de dB relativa al punto sobre el eje
+# angular (ring_label_angle): 'center' = centrado sobre la línea, 'left'/
+# 'right' = corrido a un lado para no tapar la línea radial ni la curva.
+_RING_LABEL_POS = {
+    "center": "middle center",
+    "left":   "middle left",
+    "right":  "middle right",
+}
 
 
 def _polar_ring_raw(lev_2d, azimuths, elevations, plane, el_index):
@@ -715,6 +819,27 @@ def build_polar2d_html(
                           concéntricos (default: 9) — independiente de
                           tick_font_size, que sólo afecta a los grados
       ring_step         : paso en dB entre anillos de referencia (default: 5)
+      smoothing_window  : ventana (en puntos) del suavizado circular aplicado
+                          ANTES de interpolar, para atenuar ruido de
+                          medición (default: 0 = sin suavizar)
+      smoothing_method  : 'gaussian' (default, recomendado), 'savgol'
+                          (Savitzky-Golay, preserva mejor picos/nulos
+                          angostos), 'moving_average' (promedio móvil simple,
+                          más agresivo/con ripple) o 'none'
+      interp_kind       : 'cubic' (default), 'quadratic', 'linear' o 'none'
+                          (sin interpolar, se ven los puntos medidos)
+      interp_deg        : paso de la interpolación en grados (default: 1.0;
+                          menor = curva más fina y lenta)
+      legend_font_size  : tamaño de la leyenda en modo comparación multibanda
+                          (default: 12)
+      ring_label_angle  : ángulo (°) donde se dibujan los números de los
+                          anillos de dB (default: 92, casi arriba)
+      ring_label_pos    : 'center' (default, sobre la línea), 'left' o
+                          'right' — corre el texto a un costado del punto
+                          para no tapar la línea radial ni la curva
+      text_color        : color de los números/leyenda (default: tema) —
+                          se fija junto con bg_color para asegurar contraste
+                          si el fondo se fuerza a un color fijo
 
     plane='XY' (horizontal, comportamiento original): fija una elevación (theta)
     y barre el azimuth. Para obtener 360° combina la mitad frontal (azimuths
@@ -754,16 +879,25 @@ def build_polar2d_html(
             lev_2d, azimuths, elevations, plane, el_index
         )
 
+        # ── Suavizado circular opcional (previo a interpolar) ─────────────────
+        smoothing_window = int(style.get('smoothing_window', 0))
+        smoothing_method = style.get('smoothing_method', 'gaussian')
+        if smoothing_window >= 2:
+            r_full = _smooth_circular(r_full, smoothing_window, method=smoothing_method)
+
         # ── Interpolación 1D (idem plot_polar_2d en patron.py) ───────────────
+        interp_kind = style.get('interp_kind', 'cubic')
+        interp_deg  = style.get('interp_deg', 1.0)
         try:
+            if interp_kind == 'none' or not interp_deg:
+                raise ValueError("interpolación desactivada")
             from scipy.interpolate import interp1d
-            interp_deg = 1.0
             phi_new    = np.arange(az_full[0], az_full[-1] + interp_deg * 0.01, interp_deg)
             phi_new    = phi_new[phi_new <= az_full[-1]]
-            r_full     = interp1d(az_full, r_full, kind='cubic')(phi_new)
+            r_full     = interp1d(az_full, r_full, kind=interp_kind)(phi_new)
             az_full    = phi_new
         except Exception:
-            pass   # scipy no disponible → sin interpolación
+            pass   # interp_kind='none', scipy no disponible, o error → sin interpolar
 
         # ── Normalizar: 0 dB en az=0° (idem GUI/ui/polar_plot_2d.py) ─────────
         ref_idx = int(np.argmin(np.abs(az_full)))
@@ -824,10 +958,11 @@ def build_polar2d_html(
         })
         ring_traces.append({
             "type": "scatterpolar",
-            "r": [r_ring], "theta": [92],
+            "r": [r_ring], "theta": [style.get('ring_label_angle', 92)],
             "mode": "text",
             "text": [f"{db:g}"],
-            "textfont": {"color": _RING_TEXT, "size": ring_font_size},
+            "textposition": _RING_LABEL_POS.get(style.get('ring_label_pos', 'center'), 'middle center'),
+            "textfont": {"color": style.get('text_color') or _RING_TEXT, "size": ring_font_size},
             "hoverinfo": "skip", "showlegend": False,
         })
 
@@ -849,8 +984,7 @@ def build_polar2d_html(
             "type": "scatterpolar",
             "r": r_plot.tolist(), "theta": ring['az_closed'].tolist(),
             "mode": "lines",
-            "fill": "toself" if not multi else "none",
-            "fillcolor": "rgba(99,133,255,0.20)" if not multi else None,
+            "fill": "none",
             "line": {"color": line_color, "width": line_width, "dash": line_dash},
             "text": hover_text,
             "hovertemplate": "%{text}<extra></extra>",
@@ -877,9 +1011,11 @@ def build_polar2d_html(
                 "linecolor": _POLAR_GRID,
             },
             "angularaxis": {
-                "tickfont": {"color": _TEXT_COL, "size": tick_font_size},
+                "tickfont": {"color": style.get('text_color') or _TEXT_COL, "size": tick_font_size},
                 "linecolor": ring_color,
-                "gridcolor": _POLAR_GRID,
+                "showgrid": True,
+                "gridcolor": _with_alpha(ring_color, 0.35),
+                "gridwidth": 1,
                 # XY: rotation=90 → 0° arriba (convención brújula).
                 # XZ/YZ: rotation=0 → 0° a la derecha, 180° a la izquierda,
                 # con 90° (cénit) arriba, dado que theta crece counterclockwise.
@@ -888,7 +1024,7 @@ def build_polar2d_html(
             },
         },
         "legend": {
-            "font":    {"color": _TEXT_COL, "size": 10},
+            "font":    {"color": style.get('text_color') or _TEXT_COL, "size": style.get('legend_font_size', 12)},
             "bgcolor": _LEGEND_BG,
             "x": 1.0, "y": 1.0,
         },
@@ -1010,14 +1146,15 @@ def build_spectrum_html(
 
     bg_color   = style.get('bg_color') or _DARK_BG
     grid_color = style.get('grid_color') or _GRID_COL
+    txt        = style.get('text_color') or _TEXT_COL
     layout = {
         "paper_bgcolor": bg_color,
         "plot_bgcolor":  _SPEC_BG if not style.get('bg_color') else bg_color,
         "margin":  {"l": 65, "r": 20, "t": 45, "b": 70},
         "barmode": "overlay",
         "xaxis": {
-            "title":         {"text": "Banda (Hz)", "font": {"color": _TEXT_COL}},
-            "tickfont":      {"color": _TEXT_COL, "size": 9},
+            "title":         {"text": "Banda (Hz)", "font": {"color": txt}},
+            "tickfont":      {"color": txt, "size": 9},
             "gridcolor":     grid_color,
             "linecolor":     "rgba(255,255,255,0.2)",
             "tickangle":     -45,
@@ -1026,14 +1163,14 @@ def build_spectrum_html(
             "categoryarray": x_labels,
         },
         "yaxis": {
-            "title":    {"text": "dB SPL", "font": {"color": _TEXT_COL}},
-            "tickfont": {"color": _TEXT_COL},
+            "title":    {"text": "dB SPL", "font": {"color": txt}},
+            "tickfont": {"color": txt},
             "gridcolor": grid_color,
             "zeroline":  False,
             "range":     [y_min, y_max],
         },
         "legend": {
-            "font":    {"color": _TEXT_COL, "size": 9},
+            "font":    {"color": txt, "size": 9},
             "bgcolor": _LEGEND_BG,
             "x": 1.01, "y": 1,
         },

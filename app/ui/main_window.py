@@ -4,7 +4,7 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QSpinBox,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton,
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QTextCursor
@@ -183,7 +183,18 @@ class MainWindow(QMainWindow):
             self._append_log(f"[ERROR] Al cargar NPZ polar: {e}")
 
     def _on_save_polar_npz(self):
-        if self._ma is None or self._ma.dir_levels is None:
+        # OJO: self._ma sólo se actualiza al cargar/preprocesar/calibrar
+        # audio (_on_ma_ready) — la directividad (global y por nota) se
+        # calcula adentro de TabDirectividad, que mantiene su propia
+        # referencia (compartida al principio, pero divergente en cuanto
+        # se computan notas). Hay que usar view_dir.get_ma(), si no el
+        # guardado queda bloqueado o sin notas cuando sólo se computó por
+        # nota (sin pasar nunca por "Todo el audio").
+        ma = self.view_dir.get_ma()
+        has_global = ma is not None and ma.dir_levels is not None
+        has_notes  = ma is not None and ma.notes and any(
+            n.dir_levels is not None for n in ma.notes.values())
+        if not has_global and not has_notes:
             return
         path, _ = QFileDialog.getSaveFileName(self, "Guardar NPZ polar", "", "NPZ (*.npz)")
         if not path:
@@ -192,7 +203,7 @@ class MainWindow(QMainWindow):
             rb = self.ribbon
             save_results(
                 filepath       = path,
-                ma             = self._ma,
+                ma             = ma,
                 bands          = rb.combo_bands.currentText(),
                 ref_azimuth    = int(float(rb.le_ref_az.text() or 0)),
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
@@ -313,11 +324,10 @@ class MainWindow(QMainWindow):
         row.addWidget(btn_browse)
         form.addRow("Carpeta:", row)
 
-        spin_dpi = QSpinBox()
-        spin_dpi.setRange(72, 1200)
-        spin_dpi.setSingleStep(50)
-        spin_dpi.setValue(300)
-        form.addRow("DPI:", spin_dpi)
+        le_dpi = QLineEdit("300")
+        le_dpi.setFixedWidth(70)
+        le_dpi.setToolTip("Resolución de exportación en DPI. Valor típico: 300.")
+        form.addRow("DPI:", le_dpi)
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -334,7 +344,12 @@ class MainWindow(QMainWindow):
             self._append_log("[Dir] Exportación cancelada: no se eligió carpeta.")
             return
 
-        self.view_dir.export_all_images(folder, prefix, dpi=spin_dpi.value())
+        try:
+            dpi = int(float(le_dpi.text().strip().replace(',', '.') or 300))
+        except ValueError:
+            dpi = 300
+        dpi = max(72, min(1200, dpi))
+        self.view_dir.export_all_images(folder, prefix, dpi=dpi)
 
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()
@@ -360,9 +375,15 @@ class MainWindow(QMainWindow):
         self.view_notas.set_ma(ma)
         self.view_dir.set_ma(ma)
 
-        # Restaurar ui_state si viene de un .cclp
+        # Restaurar ui_state si viene de un .cclp — se excluyen los toggles
+        # view_3d/view_sphere/view_polar2d/view_spectrum: son preferencia de
+        # panel, no dato de sesión, y sesiones viejas guardadas antes de
+        # cambiar los defaults (sólo 2D+Esfera visibles) traían "true" para
+        # los 4, pisando el default nuevo apenas se disparaba el primer
+        # dirDisplayChanged (cambiar de nota, apagar Info, etc.).
         ui = getattr(self.view_archivo, '_loaded_ui_state', {})
         if ui:
+            ui = {k: v for k, v in ui.items() if not k.startswith('view_')}
             self.ribbon._bridge.state.update(ui)
             self.view_archivo._loaded_ui_state = {}
 

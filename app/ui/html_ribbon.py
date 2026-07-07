@@ -209,9 +209,9 @@ class HtmlRibbon(QWidget):
             spec_data   = int(s.get('spec_data', 0)),
             spec_global = bool(s.get('spec_global', True)),
             view_checks = {
-                '3d':      bool(s.get('view_3d',      True)),
+                '3d':      bool(s.get('view_3d',      False)),
                 'sphere':  bool(s.get('view_sphere',  True)),
                 'polar2d': bool(s.get('view_polar2d', True)),
-                'spectrum':bool(s.get('view_spectrum', True)),
+                'spectrum':bool(s.get('view_spectrum', False)),
             },
         )

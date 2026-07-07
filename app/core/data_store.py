@@ -75,58 +75,59 @@ def save_results(
     ref_azimuth    : azimuth de referencia
     ref_theta_plot : theta de referencia del plot
     """
-    if ma.dir_levels is None:
-        raise RuntimeError("Ejecutar compute_directivity() antes de guardar.")
+    notes_to_save = notes_list or (list(ma.notes.keys()) if ma.notes else [])
+    notes_to_save = [n for n in notes_to_save
+                     if ma.notes and ma.notes[n].dir_levels is not None]
+
+    # Si nunca se computó la directividad "global" (modo "Todo el audio")
+    # pero sí se computaron notas individuales, usar la primera nota
+    # computada como fuente de los campos "globales" del NPZ (dir_levels,
+    # spl_ref, etc.) — así el archivo siempre es válido/cargable aunque el
+    # usuario haya trabajado únicamente por nota, en vez de quedar vacío.
+    ma_global = ma if ma.dir_levels is not None else (
+        ma.notes[notes_to_save[0]] if notes_to_save else None)
+    if ma_global is None:
+        raise RuntimeError(
+            "Ejecutar compute_directivity() antes de guardar (global o por nota).")
 
     p = Path(filepath)
     if p.suffix.lower() != '.npz':
         filepath = str(p) + '.npz'
 
-    thetas_numeric = [t for t in ma.thetas if t != 'ref']
+    thetas_numeric = [t for t in ma_global.thetas if t != 'ref']
+    theta_indices  = [ma_global.thetas.index(t) for t in thetas_numeric]
 
     meta = {
         "bands":          bands,
         "ref_azimuth":    ref_azimuth,
         "ref_theta_plot": ref_theta_plot,
         "saved_at":       datetime.now().isoformat(timespec='seconds'),
-        "notes":          [],
+        "notes":          notes_to_save,
     }
 
-    # Índice del theta de referencia del plot en los thetas numéricos
-    i_ref_th = ma.thetas.index(ref_theta_plot) if ref_theta_plot in ma.thetas else 0
-    # dir_levels ya tiene dimensión (n_az, n_thetas, n_bands), excluye 'ref'
-    # Necesitamos los índices de thetas numéricos dentro del tensor completo
-    theta_indices = [ma.thetas.index(t) for t in thetas_numeric]
-
-    dir_lev = ma.dir_levels[:, theta_indices, :]  # (n_az, n_thetas_num, n_bands)
+    dir_lev = ma_global.dir_levels[:, theta_indices, :]  # (n_az, n_thetas_num, n_bands)
 
     kwargs: dict[str, Any] = dict(
-        azimuths   = np.array(ma.angles, dtype=np.float32),
+        azimuths   = np.array(ma_global.angles, dtype=np.float32),
         thetas     = np.array(thetas_numeric, dtype=np.float32),
-        dir_freqs  = ma.dir_freqs.astype(np.float32),
+        dir_freqs  = ma_global.dir_freqs.astype(np.float32),
         dir_levels = dir_lev.astype(np.float32),
-        spl_ref    = ma.dir_ref_spl.astype(np.float32),
+        spl_ref    = ma_global.dir_ref_spl.astype(np.float32),
     )
 
-    spl_ref_az = _spl_ref_per_azimuth(ma)
+    spl_ref_az = _spl_ref_per_azimuth(ma_global)
     if spl_ref_az is not None:
         kwargs['spl_ref_per_az'] = spl_ref_az
 
-    # Notas
-    if ma.notes:
-        notes_to_save = notes_list or list(ma.notes.keys())
-        meta["notes"] = notes_to_save
-        for note_name in notes_to_save:
-            ma_n = ma.notes[note_name]
-            if ma_n.dir_levels is None:
-                continue
-            n_dir = ma_n.dir_levels[:, theta_indices, :]
-            kwargs[f'note_{note_name}_dir_levels'] = n_dir.astype(np.float32)
-            kwargs[f'note_{note_name}_spl_ref']    = ma_n.dir_ref_spl.astype(np.float32)
+    for note_name in notes_to_save:
+        ma_n  = ma.notes[note_name]
+        n_dir = ma_n.dir_levels[:, theta_indices, :]
+        kwargs[f'note_{note_name}_dir_levels'] = n_dir.astype(np.float32)
+        kwargs[f'note_{note_name}_spl_ref']    = ma_n.dir_ref_spl.astype(np.float32)
 
-            n_spl_ref_az = _spl_ref_per_azimuth(ma_n)
-            if n_spl_ref_az is not None:
-                kwargs[f'note_{note_name}_spl_ref_per_az'] = n_spl_ref_az
+        n_spl_ref_az = _spl_ref_per_azimuth(ma_n)
+        if n_spl_ref_az is not None:
+            kwargs[f'note_{note_name}_spl_ref_per_az'] = n_spl_ref_az
 
     kwargs['metadata'] = np.array([json.dumps(meta, ensure_ascii=False)])
 

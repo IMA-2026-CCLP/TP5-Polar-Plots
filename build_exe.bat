@@ -14,8 +14,15 @@ call .venv\Scripts\activate.bat
 echo [2/3] Instalando PyInstaller en el entorno...
 pip install pyinstaller pyinstaller-hooks-contrib --quiet
 
-echo [3/3] Construyendo ejecutable...
-pyinstaller polar_analyzer.spec --noconfirm --clean
+echo [3/3] Limpiando builds anteriores...
+REM Se borra "a mano" en vez de usar --clean de PyInstaller: esa flag borra
+REM y recrea build\ en el mismo paso, y OneDrive (que sincroniza esta carpeta
+REM en vivo) choca con esa operacion rapida, dejando la carpeta a medio crear.
+if exist build rmdir /s /q build
+if exist dist rmdir /s /q dist
+
+echo Construyendo ejecutable...
+pyinstaller polar_analyzer.spec --noconfirm
 
 echo.
 if exist "dist\PolarPatternAnalyzer\PolarPatternAnalyzer.exe" (
