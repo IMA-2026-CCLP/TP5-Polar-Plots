@@ -24,7 +24,7 @@ Build the Windows `.exe`:
 ```bash
 build_exe.bat
 ```
-This wraps `pyinstaller polar_analyzer.spec --noconfirm`. Do **not** add PyInstaller's `--clean` flag — the project lives inside a live-synced OneDrive folder, and `--clean` racing with OneDrive's sync causes intermittent `PermissionError`s on `base_library.zip`. `build_exe.bat` instead manually `rmdir /s /q build dist` before invoking PyInstaller. If a build fails with a file-in-use error on `build/`, just delete `build/` and `dist/` and rerun.
+This wraps `pyinstaller polar_analyzer.spec --noconfirm`. `build_exe.bat` manually `rmdir /s /q build dist` before invoking PyInstaller. If a build fails with a file-in-use error on `build/`, just delete `build/` and `dist/` and rerun.
 
 There is no test suite, linter, or type checker configured in this repo.
 

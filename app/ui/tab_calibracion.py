@@ -4,11 +4,12 @@ ui/tab_calibracion.py — Tab 2: Calibración y conversión a SPL.
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QPushButton, QLabel, QLineEdit, QFileDialog,
-    QDoubleSpinBox, QScrollArea, QFrame,
+    QScrollArea, QFrame,
 )
 from PyQt6.QtCore import pyqtSignal
 
 from core.worker import Worker
+from ui.widgets import NumEdit
 
 
 class TabCalibracion(QWidget):
@@ -56,7 +57,7 @@ class TabCalibracion(QWidget):
         lay.addWidget(QLabel("Carpeta de calibración:"))
         row = QHBoxLayout()
         self.edit_cal_dir = QLineEdit()
-        self.edit_cal_dir.setText("C:/Users/abell/OneDrive/Escritorio/TP5-Polar-Plots/data/media")
+        self.edit_cal_dir.setPlaceholderText("Carpeta con los WAV de calibración…")
         btn = QPushButton("Explorar…")
         btn.setFixedWidth(90)
         btn.clicked.connect(self._browse_cal_dir)
@@ -76,12 +77,11 @@ class TabCalibracion(QWidget):
 
         spl_row = QHBoxLayout()
         spl_row.addWidget(QLabel("Nivel del tono de calibración:"))
-        self.spin_spl_cal = QDoubleSpinBox()
+        self.spin_spl_cal = NumEdit()
         self.spin_spl_cal.setRange(80, 120)
         self.spin_spl_cal.setValue(94)
-        self.spin_spl_cal.setSuffix(" dB SPL")
-        self.spin_spl_cal.setFixedWidth(110)
         spl_row.addWidget(self.spin_spl_cal)
+        spl_row.addWidget(QLabel("dB SPL"))
         spl_row.addStretch()
         lay.addLayout(spl_row)
 

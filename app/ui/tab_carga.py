@@ -77,7 +77,7 @@ class TabCarga(QWidget):
         lay.addWidget(QLabel("Carpeta de audios:"))
         row = QHBoxLayout()
         self.edit_carpeta = QLineEdit()
-        self.edit_carpeta.setText("C:/Users/abell/OneDrive/Escritorio/TP5-Polar-Plots/data/media")
+        self.edit_carpeta.setPlaceholderText("Carpeta con los WAV de la toma…")
         btn = QPushButton("Explorar…")
         btn.setFixedWidth(90)
         btn.clicked.connect(self._browse_carpeta)
@@ -116,57 +116,6 @@ class TabCarga(QWidget):
 
         return panel
 
-    def _make_group_preprocesamiento(self) -> QGroupBox:
-        g = QGroupBox("PREPROCESAMIENTO (solo para audios crudos)")
-        lay = QVBoxLayout(g)
-        lay.setSpacing(10)
-
-        # HPF
-        hpf_row = QHBoxLayout()
-        self.chk_hpf = QCheckBox("High-pass filter (Hz):")
-        self.spin_hpf = QDoubleSpinBox()
-        self.spin_hpf.setRange(20, 1000)
-        self.spin_hpf.setValue(200)
-        self.spin_hpf.setSuffix(" Hz")
-        self.spin_hpf.setFixedWidth(100)
-        self.spin_hpf.setEnabled(False)
-        self.chk_hpf.toggled.connect(self.spin_hpf.setEnabled)
-        hpf_row.addWidget(self.chk_hpf)
-        hpf_row.addWidget(self.spin_hpf)
-        hpf_row.addStretch()
-        lay.addLayout(hpf_row)
-
-        # Align takes
-        at_row = QHBoxLayout()
-        self.chk_align_takes = QCheckBox("Alinear tomas — onset target:")
-        self.spin_onset = QDoubleSpinBox()
-        self.spin_onset.setRange(0.1, 5.0)
-        self.spin_onset.setValue(1.0)
-        self.spin_onset.setSuffix(" s")
-        self.spin_onset.setFixedWidth(80)
-        self.spin_onset.setEnabled(False)
-        lbl_thresh = QLabel("  umbral:")
-        self.spin_thresh_at = QDoubleSpinBox()
-        self.spin_thresh_at.setRange(-80, 0)
-        self.spin_thresh_at.setValue(-40)
-        self.spin_thresh_at.setSuffix(" dBFS")
-        self.spin_thresh_at.setFixedWidth(90)
-        self.spin_thresh_at.setEnabled(False)
-        self.chk_align_takes.toggled.connect(self.spin_onset.setEnabled)
-        self.chk_align_takes.toggled.connect(self.spin_thresh_at.setEnabled)
-        at_row.addWidget(self.chk_align_takes)
-        at_row.addWidget(self.spin_onset)
-        at_row.addWidget(lbl_thresh)
-        at_row.addWidget(self.spin_thresh_at)
-        at_row.addStretch()
-        lay.addLayout(at_row)
-
-        # Align to ref
-        self.chk_align_ref = QCheckBox("Alinear thetas a referencia (GCC-PHAT)")
-        lay.addWidget(self.chk_align_ref)
-
-        return g
-
     def _make_group_acciones(self) -> QGroupBox:
         g = QGroupBox("ACCIONES")
         lay = QVBoxLayout(g)
@@ -195,9 +144,7 @@ class TabCarga(QWidget):
         lay = QHBoxLayout(w)
         lay.setContentsMargins(4, 4, 0, 0)
         self.lbl_status = QLabel("Sin tensor cargado.")
-        self.lbl_status.setStyleSheet(
-            "color: #8a96be; font-size: 10pt;"
-        )
+        self.lbl_status.setObjectName("label_hint")
         self.lbl_status.setWordWrap(True)
         lay.addWidget(self.lbl_status)
         lay.addStretch()

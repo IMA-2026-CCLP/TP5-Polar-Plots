@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from core.data_store import freq_label
+from ui import theme as _theme
 
 
 class BandButton(QPushButton):
@@ -30,23 +31,23 @@ class BandButton(QPushButton):
         self._update_style()
 
     def _update_style(self):
+        p = _theme.current()
         if self._active:
-            self.setStyleSheet("""
-                QPushButton {
-                    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                        stop:0 #5865a0, stop:1 #4253a0);
-                    color: #ffffff; border: none; border-radius: 7px;
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: {p['accent']};
+                    color: {p['accent_ink']}; border: none; border-radius: 7px;
                     font-size: 8pt; font-weight: 700; padding: 0;
-                }
+                }}
             """)
         else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background: #1f2235; color: #7c8aaa;
-                    border: 1px solid #2a2d3e; border-radius: 7px;
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: {p['bg_dark']}; color: {p['text2']};
+                    border: 1px solid {p['border']}; border-radius: 7px;
                     font-size: 8pt; font-weight: 500; padding: 0;
-                }
-                QPushButton:hover { background: #2a2d3e; color: #c8ccd8; border-color: #3b3f58; }
+                }}
+                QPushButton:hover {{ background: {p['bg_panel']}; color: {p['text']}; border-color: {p['border2']}; }}
             """)
 
 
@@ -76,7 +77,8 @@ class BandSelectorWidget(QWidget):
         header.addWidget(lbl)
         header.addStretch()
         self.lbl_current = QLabel("—")
-        self.lbl_current.setStyleSheet("color:#c8ccd8; font-size:12pt; font-weight:700;")
+        self.lbl_current.setObjectName("label_mono")
+        self.lbl_current.setStyleSheet("font-size:12pt; font-weight:700;")
         header.addWidget(self.lbl_current)
         root.addLayout(header)
 
@@ -108,6 +110,10 @@ class BandSelectorWidget(QWidget):
         root.addLayout(nav)
 
     # ── API pública ───────────────────────────────────────────────────────
+
+    def apply_theme(self, palette: dict):
+        for btn in self._buttons:
+            btn._update_style()
 
     def set_bands(self, bands: np.ndarray):
         self.bands = bands.copy()

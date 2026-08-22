@@ -42,8 +42,8 @@ Se probaron 3 métodos en orden, terminó ganando el primero pero corregido:
 
 ## Empaquetado (.exe)
 
-- `build_exe.bat` corre `pyinstaller polar_analyzer.spec --noconfirm` después de borrar `build/`/`dist/` a mano (nunca usar `--clean`: choca con la sincronización en vivo de OneDrive y tira `PermissionError` en `base_library.zip`).
-- Si un build falla con ese error, simplemente reintentar (borrar `build/dist` y correr de nuevo) suele alcanzar.
+- `build_exe.bat` corre `pyinstaller polar_analyzer.spec --noconfirm` después de borrar `build/`/`dist/` a mano.
+- Si un build falla con error de archivo en uso, simplemente reintentar (borrar `build/dist` y correr de nuevo) suele alcanzar.
 - Último build: **exitoso**, `dist/PolarPatternAnalyzer/PolarPatternAnalyzer.exe` (~26 MB + carpeta `_internal/` ~869 MB total). Para compartir hay que comprimir toda la carpeta `PolarPatternAnalyzer/`, no solo el `.exe`.
 
 ## Limpieza del repo

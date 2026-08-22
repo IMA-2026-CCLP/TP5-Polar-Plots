@@ -10,6 +10,7 @@ block_cipher = None
 datas = [
     ('app/ui/shell.html', 'ui'),
     ('app/ui/icons', 'ui/icons'),
+    ('app/ui/fonts', 'ui/fonts'),
 ]
 binaries = []
 hiddenimports = [

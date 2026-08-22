@@ -7,28 +7,27 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;overflow:hidden;background:transparent}
 
-/* ── Variables de tema ── */
+/* ── Tipografía IBM Plex, empaquetada en app/ui/fonts/ ── */
+@font-face{font-family:'IBM Plex Sans';font-weight:400;src:url('fonts/IBMPlexSans-Regular.ttf') format('truetype');}
+@font-face{font-family:'IBM Plex Sans Condensed';font-weight:600;src:url('fonts/IBMPlexSansCondensed-SemiBold.ttf') format('truetype');}
+@font-face{font-family:'IBM Plex Sans Condensed';font-weight:700;src:url('fonts/IBMPlexSansCondensed-Bold.ttf') format('truetype');}
+@font-face{font-family:'IBM Plex Mono';font-weight:400;src:url('fonts/IBMPlexMono-Regular.ttf') format('truetype');}
+@font-face{font-family:'IBM Plex Mono';font-weight:500;src:url('fonts/IBMPlexMono-Medium.ttf') format('truetype');}
+@font-face{font-family:'IBM Plex Mono';font-weight:600;src:url('fonts/IBMPlexMono-SemiBold.ttf') format('truetype');}
+
+/* ── Variables de tema: valores de arranque (claro), Python las
+   sobreescribe en vivo apenas carga vía bridge.themeChanged — ver
+   applyPalette() más abajo. theme.py es la única fuente de verdad. ── */
 :root{
-  --bg:#15171c; --bar:#1b1e24; --rib:#1d2027; --card:#1c1f26;
-  --sunken:#0f1115; --line:#2a2e37; --line2:#363b46; --plot:#0f1116;
-  --text:#e8eaef; --text2:#969ba6; --muted:#686d77;
-  --accent:#6070d0; --accent-ink:#ffffff;
-  --accent-soft:rgba(96,112,208,.14); --accent-line:rgba(96,112,208,.4);
-  --ok:#46d39a;
+  --bg:#F5F6F7; --bar:#FFFFFF; --rib:#F0F1F4; --card:#FFFFFF;
+  --sunken:#EDEFF2; --line:#D8DCE0; --line2:#C3C9CE; --plot:#FFFFFF;
+  --text:#1B1F24; --text2:#5B6570; --muted:#8A93A0;
+  --accent:#146B64; --accent-ink:#FFFFFF;
+  --accent-soft:rgba(20,107,100,.10); --accent-line:rgba(20,107,100,.35);
+  --ok:#1A9E5C;
   --font:'IBM Plex Sans','Segoe UI',sans-serif;
-  --head:'Space Grotesk','IBM Plex Sans','Segoe UI',sans-serif;
+  --head:'IBM Plex Sans Condensed','IBM Plex Sans','Segoe UI',sans-serif;
   --mono:'IBM Plex Mono','Consolas',monospace;
-}
-:root.light{
-  --bg:#f4f5f7; --bar:#ffffff; --rib:#f0f1f4; --card:#ffffff;
-  --sunken:#eceef2; --line:#dde0e8; --line2:#d0d4de; --plot:#f8f9fb;
-  --text:#1a1d27; --text2:#5a6075; --muted:#9399aa;
-  --accent:#3b54d6; --accent-ink:#ffffff;
-  --accent-soft:rgba(59,84,214,.10); --accent-line:rgba(59,84,214,.35);
-  --ok:#1a9e5c;
-  --font:'Manrope','Segoe UI',sans-serif;
-  --head:'Manrope','Segoe UI',sans-serif;
-  --mono:'JetBrains Mono','Consolas',monospace;
 }
 
 body{
@@ -714,8 +713,8 @@ new QWebChannel(qt.webChannelTransport, function(ch) {
     B('emitAlignPreview');
   });
 
-  bridge.themeChanged.connect(function(name) {
-    applyTheme(name);
+  bridge.themeChanged.connect(function(json_str) {
+    applyPalette(JSON.parse(json_str));
   });
 
   bridge.notesLoaded.connect(function(json_str) {
@@ -817,23 +816,31 @@ function forceTab(i) {
 }
 
 // ── Tema ──────────────────────────────────────────────────────────────────
-var _curTheme = 'dark';
+// theme.py (Python) es la única fuente de verdad de color: acá solo
+// pedimos el toggle y aplicamos lo que Python nos devuelve por
+// bridge.themeChanged como paleta completa (JSON), no un string suelto.
+var _curTheme = 'light';
+var _VAR_MAP = {
+  bg_base:'--bg', bg_panel:'--bar', rb_panel:'--rib',
+  bg_dark:'--sunken', border:'--line', border2:'--line2', plot_bg:'--plot',
+  text:'--text', text2:'--text2', text_muted:'--muted',
+  accent:'--accent', accent_ink:'--accent-ink',
+  accent_soft:'--accent-soft', accent_line:'--accent-line', ok:'--ok',
+  font_body:'--font', font_display:'--head', font_mono:'--mono',
+};
 function setTheme(t) {
   if (t === _curTheme) return;
-  applyTheme(t);
   B('themeToggled');
 }
-function applyTheme(t) {
-  _curTheme = t;
-  if (t === 'light') {
-    document.documentElement.classList.add('light');
-    document.getElementById('seg-dark').classList.remove('on');
-    document.getElementById('seg-light').classList.add('on');
-  } else {
-    document.documentElement.classList.remove('light');
-    document.getElementById('seg-dark').classList.add('on');
-    document.getElementById('seg-light').classList.remove('on');
-  }
+function applyPalette(p) {
+  var root = document.documentElement.style;
+  Object.keys(_VAR_MAP).forEach(function(k) {
+    if (p[k] !== undefined) root.setProperty(_VAR_MAP[k], p[k]);
+  });
+  if (p.bg_panel !== undefined) root.setProperty('--card', p.bg_panel);
+  _curTheme = p.name;
+  document.getElementById('seg-dark').classList.toggle('on', p.name === 'dark');
+  document.getElementById('seg-light').classList.toggle('on', p.name === 'light');
 }
 
 // ── Plano del polar 2D ────────────────────────────────────────────────────

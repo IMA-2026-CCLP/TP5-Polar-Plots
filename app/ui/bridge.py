@@ -13,7 +13,7 @@ class Bridge(QObject):
     # ── Python → JS (JS se subscribe con bridge.<sig>.connect(fn)) ───────────
     statusUpdated    = pyqtSignal(str, bool)   # text, ok
     maLoaded         = pyqtSignal(str)          # JSON: {thetas, angles, is_spl}
-    themeChanged     = pyqtSignal(str)          # 'dark' | 'light'
+    themeChanged     = pyqtSignal(str)          # JSON: paleta completa de theme.py
     notesLoaded      = pyqtSignal(str)          # JSON list of note names
     presetsLoaded    = pyqtSignal(str)          # JSON list of preset names
     dirComputed      = pyqtSignal(str)          # JSON list of thetas

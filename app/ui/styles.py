@@ -1,5 +1,5 @@
 """ui/styles.py — QSS parametrizado por paleta de tema."""
-from ui.theme import DARK
+from ui.theme import LIGHT
 
 
 def get_qss(p: dict) -> str:
@@ -9,13 +9,19 @@ def get_qss(p: dict) -> str:
     danger_bg  = "#3d1f2a" if dark else "#fde8e8"
     danger_bor = "#5a2a38" if dark else "#f0a0a0"
     danger_hov = "#4d2535" if dark else "#fdd0d0"
+    font_body  = p.get('font_body', 'IBM Plex Sans')
+    font_mono  = p.get('font_mono', 'IBM Plex Mono')
 
     return f"""
 QWidget {{
     background-color: {p['bg_base']};
     color: {p['text']};
-    font-family: "Inter", "Segoe UI", "Ubuntu", sans-serif;
+    font-family: "{font_body}", "Segoe UI", sans-serif;
     font-size: 10pt;
+}}
+
+QLabel#label_mono, QLineEdit#field_mono {{
+    font-family: "{font_mono}", "Consolas", monospace;
 }}
 
 QMainWindow {{
@@ -218,7 +224,7 @@ QTextEdit {{
     border: 1px solid {p['border']};
     border-radius: 8px;
     padding: 8px;
-    font-family: "Consolas", "Fira Mono", "Courier New", monospace;
+    font-family: "{font_mono}", "Consolas", monospace;
     font-size: 9pt;
     color: {p['text2']};
     selection-background-color: {p['border']};
@@ -395,143 +401,7 @@ QDockWidget::title {{
     border-bottom: 1px solid {p['border']};
 }}
 
-/* ══════ RIBBON ══════ */
-QWidget#ribbon_tab_bar {{
-    background: {p['rb_tabs']};
-}}
-QLabel#ribbon_logo {{
-    color: {p['accent']};
-    font-size: 13pt;
-    background: transparent;
-    padding: 0 10px 0 6px;
-    border: none;
-}}
-QToolButton#ribbon_tab {{
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: {p['rb_hint']};
-    font-size: 9.5pt;
-    font-family: 'Segoe UI', Inter, sans-serif;
-    padding: 5px 16px 3px 16px;
-    min-width: 60px;
-}}
-QToolButton#ribbon_tab:checked {{
-    color: {p['text']};
-    border-bottom: 2px solid {p['accent']};
-    background: {p['rb_panel']};
-}}
-QToolButton#ribbon_tab:hover:!checked {{
-    color: {p['text2']};
-    background: {hover_tint};
-}}
-QFrame#ribbon_sep {{
-    background: {p['border']};
-    border: none;
-    max-height: 1px;
-}}
-QStackedWidget#ribbon_stack, QWidget#ribbon_panel {{
-    background: {p['rb_panel']};
-    border-bottom: none;
-}}
-QWidget#ribbon_vsep {{
-    background: {p['rb_sep']};
-}}
-QLabel#ribbon_group_lbl {{
-    color: {p['rb_grp_lbl']};
-    font-size: 8pt;
-    background: transparent;
-}}
-QWidget#ribbon_panel QLabel {{
-    color: {p['rb_hint']};
-    background: transparent;
-    font-size: 9pt;
-    font-family: 'Segoe UI', Inter, sans-serif;
-}}
-QWidget#ribbon_panel QToolButton {{
-    background: transparent;
-    border: none;
-    border-radius: 5px;
-    color: {p['rb_icon']};
-    font-size: 9pt;
-    font-family: 'Segoe UI', Inter, sans-serif;
-    padding: 4px 2px 0 2px;
-}}
-QWidget#ribbon_panel QToolButton:hover {{
-    background: {p['rb_btn_bg']};
-    color: {p['text']};
-}}
-QWidget#ribbon_panel QToolButton:pressed {{
-    background: {p['bg_dark']};
-}}
-QWidget#ribbon_panel QToolButton:disabled {{
-    color: {p['rb_disabled']};
-}}
-QWidget#ribbon_panel QLineEdit {{
-    background: {p['rb_btn_bg']};
-    border: 1px solid {p['rb_btn_bor']};
-    border-radius: 3px;
-    color: {p['text']};
-    font-size: 9pt;
-    font-family: 'Segoe UI', Inter, sans-serif;
-    padding: 2px 4px;
-    min-height: 18px;
-}}
-QWidget#ribbon_panel QComboBox {{
-    background: {p['rb_btn_bg']};
-    border: 1px solid {p['rb_btn_bor']};
-    border-radius: 3px;
-    color: {p['text']};
-    font-size: 9pt;
-    font-family: 'Segoe UI', Inter, sans-serif;
-    padding: 2px 4px;
-    min-height: 18px;
-}}
-QWidget#ribbon_panel QComboBox::drop-down {{
-    border: none;
-    width: 14px;
-}}
-QWidget#ribbon_panel QComboBox QAbstractItemView {{
-    background: {p['bg_panel']};
-    border: 1px solid {p['border']};
-    color: {p['text']};
-    selection-background-color: {p['accent']};
-    selection-color: #ffffff;
-}}
-QWidget#ribbon_panel QCheckBox {{
-    color: {p['text']};
-    font-size: 9pt;
-    font-family: 'Segoe UI', Inter, sans-serif;
-    spacing: 5px;
-    background: transparent;
-}}
-QWidget#ribbon_panel QCheckBox::indicator {{
-    width: 13px; height: 13px;
-    border: 1px solid {p['rb_btn_bor']};
-    border-radius: 3px;
-    background: {p['rb_btn_bg']};
-}}
-QWidget#ribbon_panel QCheckBox::indicator:checked {{
-    background: {p['accent']};
-    border-color: #8090e0;
-    image: url("{chk}");
-}}
-QWidget#ribbon_panel QCheckBox::indicator:hover {{
-    border-color: {p['accent']};
-}}
-QToolButton#ribbon_theme_toggle {{
-    background: transparent;
-    border: none;
-    color: {p['rb_icon']};
-    font-size: 11pt;
-    padding: 0 10px;
-    border-radius: 4px;
-}}
-QToolButton#ribbon_theme_toggle:hover {{
-    background: {p['rb_btn_bg']};
-    color: {p['text']};
-}}
 """
 
 
-QSS = get_qss(DARK)
+QSS = get_qss(LIGHT)
