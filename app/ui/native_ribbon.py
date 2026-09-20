@@ -12,7 +12,7 @@ Los valores por defecto de los controles salen de `Bridge.state`: no se repiten 
 import json
 
 from PyQt6.QtCore import Qt, QLocale, pyqtSignal
-from PyQt6.QtGui import QAction, QDoubleValidator
+from PyQt6.QtGui import QAction, QActionGroup, QDoubleValidator
 from PyQt6.QtWidgets import (
     QFormLayout, QGroupBox, QInputDialog, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
     QComboBox, QLineEdit, QCheckBox, QFrame, QToolButton,
@@ -299,43 +299,29 @@ class NativeRibbon(QWidget):
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
 
     def _make_view_actions(self):
-        """Menú Ver: Envolvente / dB (checkables) y Suavizado… (modal). Estado en Bridge.state."""
+        """Menú Ver: Vista (Amplitud / Envolvente / dB, excluyentes) y Suavizado… (modal). Estado en Bridge.state."""
         b, plot = self._b, self._b.emitPlotParams
 
-        def checkable(name, text, key, tip):
+        group = QActionGroup(self)          # exclusivas: siempre hay un modo elegido
+
+        def mode(name, text, tip, env, db):
             a = QAction(text, self)
             a.setCheckable(True)
             a.setToolTip(tip)
-            a.setStatusTip(tip)
-
-            def load():
-                a.blockSignals(True)
-                a.setChecked(bool(b.state.get(key)))
-                a.blockSignals(False)
-
-            self._loaders.append(load)
-            load()
+            group.addAction(a)
+            a.triggered.connect(lambda _=False: (b.state.update(envelope=env, db=db), plot()))
             self._act[name] = a
-            return a
 
-        env = checkable('envelope', "Envolvente", 'envelope', "Envolvente de la señal (transformada de Hilbert)")
-        db  = checkable('db', "dB", 'db', "Envolvente en escala logarítmica (activa la envolvente)")
+        mode('amp', "Amplitud", "Señal en amplitud lineal", False, False)
+        mode('envelope', "Envolvente", "Envolvente de la señal (transformada de Hilbert), amplitud lineal", True, False)
+        mode('db', "dB", "Envolvente en escala logarítmica (dB)", True, True)
 
-        def on_env(on):
-            b.state['envelope'] = on
-            plot()
+        def load_mode():
+            st = b.state
+            self._act['db' if st.get('db') else 'envelope' if st.get('envelope') else 'amp'].setChecked(True)
 
-        def on_db(on):
-            b.state['db'] = on
-            if on and not env.isChecked():          # dB implica envolvente
-                env.blockSignals(True)
-                env.setChecked(True)
-                env.blockSignals(False)
-                b.state['envelope'] = True
-            plot()
-
-        env.toggled.connect(on_env)
-        db.toggled.connect(on_db)
+        self._loaders.append(load_mode)
+        load_mode()
 
         sm = QAction(self)
         sm.setToolTip("Suavizado de la envolvente (media móvil, en ms). Mayor valor = curva más suave")
@@ -378,7 +364,7 @@ class NativeRibbon(QWidget):
 
         m = self._menu_ver = mb.addMenu("&Ver")
         sub = m.addMenu("Vista")
-        for n in ('envelope', 'db'):
+        for n in ('amp', 'envelope', 'db'):
             sub.addAction(self._act[n])
         m.addAction(self._act['smooth'])
         m.addSeparator()

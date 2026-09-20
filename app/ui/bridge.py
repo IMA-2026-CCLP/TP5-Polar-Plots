@@ -53,7 +53,7 @@ class Bridge(QObject):
         self.state = {
             'tab':        0,
             'theta':      'ref',  'az':        'Todos',
-            'envelope':   True,   'db':         False,
+            'envelope':   True,   'db':         True,
             'smooth':     20.0,   'ymin':       None,   'ymax': None,
             'hpf_hz':     200.0,
             'onset':      1.0,    'thresh':    -40.0,   'window_ms': 50.0,

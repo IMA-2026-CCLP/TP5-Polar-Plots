@@ -22,6 +22,7 @@ LIGHT = dict(
     text="#1A1A1A", text2="#444444", text_muted="#7A7A7A",
     accent="#2F6DB5", border="#C8C8C8", border2="#A6A6A6",
     accent_ink="#FFFFFF",
+    btn_bg="#DCE7F4", btn_border="#9DB8D8", btn_text="#1B4A80", btn_hover="#C9DBEF",
     accent_soft="rgba(47,109,181,.14)", accent_line="rgba(47,109,181,.45)",
     ok="#1A9E5C",
     # Ribbon
@@ -51,6 +52,7 @@ DARK = dict(
     text="#E6E6E6", text2="#B0B0B0", text_muted="#808080",
     accent="#5B9BD5", border="#454545", border2="#5C5C5C",
     accent_ink="#0E0E0E",
+    btn_bg="#34506E", btn_border="#4E7098", btn_text="#DCEBFA", btn_hover="#3F6187",
     accent_soft="rgba(91,155,213,.18)", accent_line="rgba(91,155,213,.5)",
     ok="#46D39A",
     # Ribbon

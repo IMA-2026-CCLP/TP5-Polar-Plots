@@ -69,20 +69,19 @@ QGroupBox::title {{
 
 /* ══════ BOTONES ══════ */
 QPushButton, QToolButton {{
-    background: {p['bg_dark']};
-    color: {p['text']};
-    border: 1px solid {p['border2']};
+    background: {p['btn_bg']};
+    color: {p['btn_text']};
+    border: 1px solid {p['btn_border']};
     border-radius: 2px;
     padding: 3px 10px;
     font-size: 9pt;
 }}
 QPushButton:hover, QToolButton:hover {{
-    background: {p['bg_panel']};
+    background: {p['btn_hover']};
     border-color: {p['accent']};
-    color: {p['text']};
 }}
 QPushButton:pressed, QToolButton:pressed {{
-    background: {p['bg_dark']};
+    background: {p['btn_border']};
 }}
 QPushButton:disabled, QToolButton:disabled {{
     background: {p['bg_panel']};
