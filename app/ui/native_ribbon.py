@@ -343,11 +343,13 @@ class NativeRibbon(QWidget):
         sm.setToolTip("Suavizado de la envolvente (media móvil, en ms). Mayor valor = curva más suave")
 
         def load_smooth():
-            sm.setText(f"Suavizado… ({b.state.get('smooth', 20.0):g} ms)")
+            sm.setText("Suavizado…")
 
         def ask_smooth():
             text, ok = QInputDialog.getText(
-                self.window(), "Suavizado", "Suavizado de la envolvente (ms):",
+                self.window(), "Suavizado",
+                "Método: promedio móvil (ventana rectangular) sobre la envolvente de Hilbert.\n"
+                "Ancho de la ventana (ms); 0 = sin suavizado:",
                 text=f"{b.state.get('smooth', 20.0):g}")
             if not ok:
                 return
