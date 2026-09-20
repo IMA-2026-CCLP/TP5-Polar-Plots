@@ -14,7 +14,7 @@ import json
 from PyQt6.QtCore import Qt, QLocale, pyqtSignal
 from PyQt6.QtGui import QAction, QDoubleValidator
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
+    QInputDialog, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
     QComboBox, QLineEdit, QCheckBox, QFrame, QToolButton,
 )
 
@@ -215,26 +215,6 @@ class NativeRibbon(QWidget):
                 # Si el valor guardado ya no existe, state pasa a lo que muestra el combo.
                 self._b.state[key] = c.currentData() if key not in _INT_KEYS else int(c.currentData())
 
-    def _chk(self, text, key, tip, cb=None):
-        c = QCheckBox(text)
-        c.setToolTip(tip)
-
-        def load():
-            c.blockSignals(True)
-            c.setChecked(bool(self._b.state.get(key)))
-            c.blockSignals(False)
-
-        def toggled(on):
-            self._b.state[key] = on
-            if cb:
-                cb()
-
-        c.toggled.connect(toggled)
-        c._load = load
-        self._loaders.append(load)
-        load()
-        return c
-
     def _pill(self, text, key, tip, default):
         b = QPushButton(text)
         b.setObjectName("pill")
@@ -306,6 +286,7 @@ class NativeRibbon(QWidget):
 
         act('load_audio',  "Cargar audio…",   "Carga una carpeta de audios WAV y construye el tensor de medición", b.loadAudio)
         act('patterns',    "Patrones de archivos…", "Cómo se llaman los archivos de audio ({MIC} = micrófono, {H} = azimut)", b.editPatterns)
+        self._make_view_actions()
         act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
         act('load_tensor', "Cargar sesión…",  "Carga una sesión (.cclp) o tensor (.npz) guardado", b.loadTensor)
         act('save_tensor', "Guardar sesión…", "Guarda tensor + calibración + notas + directividad en .cclp", b.saveTensor, False)
@@ -319,6 +300,71 @@ class NativeRibbon(QWidget):
         act('export_all',  "Exportar imágenes", "Exporta las imágenes de todas las vistas habilitadas para todas las bandas", b.exportAllImages, False)
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
 
+    def _make_view_actions(self):
+        """Ver ▸ Vista: Envolvente / dB (checkables) y Suavizado… (modal). Estado en Bridge.state."""
+        b, plot = self._b, self._b.emitPlotParams
+
+        def checkable(name, text, key, tip):
+            a = QAction(text, self)
+            a.setCheckable(True)
+            a.setToolTip(tip)
+            a.setStatusTip(tip)
+
+            def load():
+                a.blockSignals(True)
+                a.setChecked(bool(b.state.get(key)))
+                a.blockSignals(False)
+
+            self._loaders.append(load)
+            load()
+            self._act[name] = a
+            return a
+
+        env = checkable('envelope', "Envolvente", 'envelope', "Envolvente de la señal (transformada de Hilbert)")
+        db  = checkable('db', "dB", 'db', "Envolvente en escala logarítmica (activa la envolvente)")
+
+        def on_env(on):
+            b.state['envelope'] = on
+            plot()
+
+        def on_db(on):
+            b.state['db'] = on
+            if on and not env.isChecked():          # dB implica envolvente
+                env.blockSignals(True)
+                env.setChecked(True)
+                env.blockSignals(False)
+                b.state['envelope'] = True
+            plot()
+
+        env.toggled.connect(on_env)
+        db.toggled.connect(on_db)
+
+        sm = QAction(self)
+        sm.setToolTip("Suavizado de la envolvente (media móvil, en ms). Mayor valor = curva más suave")
+
+        def load_smooth():
+            sm.setText(f"Suavizado… ({b.state.get('smooth', 20.0):g} ms)")
+
+        def ask_smooth():
+            text, ok = QInputDialog.getText(
+                self.window(), "Suavizado", "Suavizado de la envolvente (ms):",
+                text=f"{b.state.get('smooth', 20.0):g}")
+            if not ok:
+                return
+            try:
+                v = float(text.strip().replace(',', '.'))
+            except ValueError:
+                return
+            if v >= 0:
+                b.state['smooth'] = v
+                load_smooth()
+                plot()
+
+        sm.triggered.connect(lambda _=False: ask_smooth())
+        self._loaders.append(load_smooth)
+        load_smooth()
+        self._act['smooth'] = sm
+
     def _make_menubar(self) -> QMenuBar:
         mb = QMenuBar()
         m = mb.addMenu("&Archivo")
@@ -331,6 +377,12 @@ class NativeRibbon(QWidget):
         m.addAction("Salir", lambda: self.window().close())
 
         m = mb.addMenu("&Ver")
+        sub = m.addMenu("Vista")
+        for n in ('envelope', 'db'):
+            sub.addAction(self._act[n])
+        sub.addSeparator()
+        sub.addAction(self._act['smooth'])
+        m.addSeparator()
         self._act_dark = QAction("Tema oscuro", self)
         self._act_dark.setCheckable(True)
         self._act_dark.setChecked(_theme.is_dark())
@@ -387,19 +439,10 @@ class NativeRibbon(QWidget):
         self._c_theta = self._combo('theta', 78, "Elevación (micrófono) a visualizar", cb=plot, **th)
         self._c_az    = self._combo('az', 78, "Azimuth a visualizar, o 'Todos' para superponer las tomas", cb=plot, **th)
 
-        def on_db(on):
-            if on:
-                self._chk_env.setChecked(True)
-                b.state['envelope'] = True
-            plot()
-
-        self._chk_env = self._chk("Envolvente", 'envelope', "Envolvente de la señal (transformada de Hilbert)", plot)
-        chk_db = self._chk("dB", 'db', "Envolvente en escala logarítmica (activa la envolvente)", on_db)
         self._c_align_th = self._combo('align_theta', 64, "Micrófono de referencia para la alineación", cb=prev, **th)
         return self._page([
             ("Vista", [
-                "θ", self._c_theta, "Az", self._c_az, self._chk_env, chk_db,
-                "Suav", self._num('smooth', 42, "Suavizado de la envolvente en ms", plot), "ms", '|',
+                "θ", self._c_theta, "Az", self._c_az, '|',
                 "Min", self._num('ymin', 50, "Límite inferior del eje Y. Vacío = autoescala", plot, True, "-60"),
                 "Max", self._num('ymax', 50, "Límite superior del eje Y. Vacío = autoescala", plot, True, "0")]),
             ("Filtro / SPL", [
