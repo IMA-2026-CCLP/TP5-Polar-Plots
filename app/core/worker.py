@@ -38,7 +38,8 @@ class _StreamCapture(io.TextIOBase):
 
 class _Activity(QObject):
     """Cuántas tareas de fondo hay en curso y cómo se llama la última (para el indicador de la barra de estado)."""
-    changed = pyqtSignal(int, str)
+    changed  = pyqtSignal(int, str)
+    progress = pyqtSignal(int, int)      # hecho, total (lo informan las funciones de mic_array)
 
 
 activity = _Activity()
@@ -54,6 +55,11 @@ def _mark(label: str, start: bool):
             _running.remove(label)
         n, last = len(_running), (_running[-1] if _running else "")
     activity.changed.emit(n, last)
+
+
+def report(done: int, total: int):
+    """Progreso de la tarea en curso; se llama desde el hilo del Worker."""
+    activity.progress.emit(int(done), int(total))
 
 
 class Worker(QThread):
@@ -74,6 +80,11 @@ class Worker(QThread):
 
     def run(self):
         label = self.label or "Procesando…"
+        try:
+            import mic_array.patron as _patron
+            _patron.progress_callback = report
+        except ImportError:
+            pass
         _mark(label, True)
         capture = _StreamCapture(self.log)
         old_stdout = sys.stdout

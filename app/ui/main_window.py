@@ -110,6 +110,8 @@ class MainWindow(QMainWindow):
         self._op_label.hide()
         self._op_bar.hide()
         activity.changed.connect(self._on_activity)
+        activity.progress.connect(self._on_progress)
+        self._op_base = ""
 
     # ── Conexiones ────────────────────────────────────────────────────────────
 
@@ -188,9 +190,17 @@ class MainWindow(QMainWindow):
 
     # ── Slots de navegación ───────────────────────────────────────────────────
 
+    def _on_progress(self, done: int, total: int):
+        if total > 0:
+            self._op_bar.setRange(0, total)
+            self._op_bar.setValue(done)
+            self._op_label.setText(f"{self._op_base}  {100 * done // total} %")
+
     def _on_activity(self, n: int, label: str):
         busy = n > 0
-        self._op_label.setText(label + (f"  (+{n - 1} más)" if n > 1 else ""))
+        self._op_base = label + (f"  (+{n - 1} más)" if n > 1 else "")
+        self._op_bar.setRange(0, 0)          # animación "ocupado" hasta que llegue el primer progreso
+        self._op_label.setText(self._op_base)
         self._op_label.setVisible(busy)
         self._op_bar.setVisible(busy)
 
