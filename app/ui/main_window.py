@@ -449,15 +449,7 @@ class MainWindow(QMainWindow):
         self._log_dock.dockLocationChanged.connect(self._on_log_dock_location)
         self._log_dock.topLevelChanged.connect(self._on_log_floating)
 
-        # botón toggle en la barra de estado
-        self._btn_log = QToolButton()
-        self._btn_log.setText("Log ▾")
-        self._btn_log.setCheckable(True)
-        self._btn_log.setChecked(True)
-        self._btn_log.setToolTip("Mostrar / ocultar log")
-        self._btn_log.clicked.connect(self._toggle_log)
-        self._log_dock.visibilityChanged.connect(self._on_log_visibility)
-        self.statusBar().addPermanentWidget(self._btn_log)
+        self._log_dock.hide()      # oculto por defecto; se abre desde Ver ▸ Log
 
     def _on_log_dock_location(self, area):
         _MAX = 16_777_215
@@ -475,13 +467,6 @@ class MainWindow(QMainWindow):
         if floating:
             self._log_dock.setMaximumHeight(_MAX)
             self._log_dock.setMaximumWidth(_MAX)
-
-    def _toggle_log(self):
-        self._log_dock.setVisible(not self._log_dock.isVisible())
-
-    def _on_log_visibility(self, visible: bool):
-        self._btn_log.setChecked(visible)
-        self._btn_log.setText("Log ▾" if visible else "Log ▸")
 
     def _append_log(self, text: str):
         self._log.moveCursor(QTextCursor.MoveOperation.End)
