@@ -48,8 +48,8 @@ QGroupBox {{
     background: transparent;
     border: 1px solid {p['border']};
     border-radius: 2px;
-    margin-top: 10px;
-    padding: 10px 6px 6px;
+    margin-top: 9px;
+    padding: 12px 6px 6px;
     font-size: 9pt;
     font-weight: 600;
     color: {p['text2']};
@@ -58,10 +58,9 @@ QGroupBox {{
 QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 10px;
-    top: 1px;
-    padding: 0 6px;
-    background: transparent;
+    left: 8px;
+    padding: 0 4px;
+    background: {p['bg_base']};
     color: {p['text2']};
     letter-spacing: 0.08em;
     text-transform: uppercase;
