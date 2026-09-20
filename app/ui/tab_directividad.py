@@ -301,7 +301,7 @@ class _ViewSection(QWidget):
         """
         from plot import balloon as _balloon_mod
 
-        # Una pestaña por sección (Escala, Fondo, Ejes…): así todo entra sin deslizar.
+        # Una pestaña por sección (Escala, Ejes…): así todo entra sin deslizar.
         dlg = tabs = QTabWidget()
         tabs.tabBar().setUsesScrollButtons(False)
 
@@ -331,15 +331,6 @@ class _ViewSection(QWidget):
             form.addRow("Max (dB):", le_max)
             fields['min_db'], fields['max_db'] = le_min, le_max
             outer.addWidget(box)
-
-        box_bg = QGroupBox("Fondo")
-        form_bg = QFormLayout(box_bg)
-        default_bg = self._style.get('bg_color') or _balloon_mod._DARK_BG
-        btn_bg = self._make_color_button(dlg, default_bg)
-        btn_bg.setToolTip("Color de fondo del gráfico. Click para elegir. El color del tema (oscuro/claro) ya viene puesto por defecto.")
-        form_bg.addRow("Color de fondo:", btn_bg)
-        fields['bg_color'] = btn_bg
-        outer.addWidget(box_bg)
 
         if self._mode in ("3d", "sphere"):
             box_ax = QGroupBox("Ejes / grilla")
@@ -568,7 +559,6 @@ class _ViewSection(QWidget):
                     pass
 
             new_style = dict(self._style)
-            new_style['bg_color'] = fields['bg_color'].color_hex
 
             if self._mode in ("3d", "sphere"):
                 self._axis_color = fields['grid_color'].color_hex
