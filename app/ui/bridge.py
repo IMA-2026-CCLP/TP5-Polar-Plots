@@ -24,6 +24,7 @@ class Bridge(QObject):
     sig_tab_changed        = pyqtSignal(int)
     sig_height             = pyqtSignal(int)
     sig_load_audio         = pyqtSignal()
+    sig_edit_patterns      = pyqtSignal()
     sig_save_tensor        = pyqtSignal()
     sig_load_tensor        = pyqtSignal()
     sig_load_polar_npz     = pyqtSignal()
@@ -50,7 +51,7 @@ class Bridge(QObject):
         super().__init__(parent)
         # Estado actual de los controles del ribbon
         self.state = {
-            'tab':        3,
+            'tab':        0,
             'theta':      'ref',  'az':        'Todos',
             'envelope':   True,   'db':         False,
             'smooth':     20.0,   'ymin':       None,   'ymax': None,
@@ -83,6 +84,10 @@ class Bridge(QObject):
     @pyqtSlot()
     def loadAudio(self):
         self.sig_load_audio.emit()
+
+    @pyqtSlot()
+    def editPatterns(self):
+        self.sig_edit_patterns.emit()
 
     @pyqtSlot()
     def saveTensor(self):

@@ -22,7 +22,6 @@ from ui.bridge import Bridge
 from ui import theme as _theme
 
 _TABS = [
-    ("Archivo",       "Cargar audios WAV o sesiones .cclp / .npz guardadas"),
     ("Procesamiento", "Visualizar señales, aplicar filtros y alinear tomas"),
     ("Notas",         "Detectar y segmentar notas musicales en el audio"),
     ("Directividad",  "Calcular y visualizar el patrón de directividad acústica"),
@@ -63,6 +62,7 @@ class NativeRibbon(QWidget):
     sig_theme_toggled = pyqtSignal()
 
     sig_load_audio      = pyqtSignal()
+    sig_edit_patterns   = pyqtSignal()
     sig_save_tensor     = pyqtSignal()
     sig_load_tensor     = pyqtSignal()
     sig_load_polar_npz  = pyqtSignal()
@@ -102,8 +102,7 @@ class NativeRibbon(QWidget):
         self._make_actions()
         lay.addWidget(self._make_menubar())
         lay.addLayout(self._make_tabbar())
-        self._pages = [self._page_archivo(), self._page_proc(),
-                       self._page_notas(), self._page_dir()]
+        self._pages = [self._page_proc(), self._page_notas(), self._page_dir()]
         for p in self._pages:
             lay.addWidget(p)
         line = QFrame()
@@ -126,7 +125,7 @@ class NativeRibbon(QWidget):
     def _wire(self):
         b = self._b
         for name in (
-            'tab_changed', 'sig_load_audio', 'sig_save_tensor', 'sig_load_tensor',
+            'tab_changed', 'sig_load_audio', 'sig_edit_patterns', 'sig_save_tensor', 'sig_load_tensor',
             'sig_load_polar_npz', 'sig_save_polar_npz', 'sig_apply_hpf', 'sig_align_takes',
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion', 'sig_to_spl',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
@@ -305,6 +304,7 @@ class NativeRibbon(QWidget):
             self._act[name] = a
 
         act('load_audio',  "Cargar audio…",   "Carga una carpeta de audios WAV y construye el tensor de medición", b.loadAudio)
+        act('patterns',    "Patrones de archivos…", "Cómo se llaman los archivos de audio ({MIC} = micrófono, {H} = azimut)", b.editPatterns)
         act('load_tensor', "Cargar sesión…",  "Carga una sesión (.cclp) o tensor (.npz) guardado", b.loadTensor)
         act('save_tensor', "Guardar sesión…", "Guarda tensor + calibración + notas + directividad en .cclp", b.saveTensor, False)
         act('load_polar',  "Cargar NPZ polar…", "Carga resultados de directividad exportados (.npz)", b.loadPolarNpz)
@@ -320,7 +320,7 @@ class NativeRibbon(QWidget):
     def _make_menubar(self) -> QMenuBar:
         mb = QMenuBar()
         m = mb.addMenu("&Archivo")
-        for n in ('load_audio', 'load_tensor', 'save_tensor'):
+        for n in ('load_audio', 'patterns', 'load_tensor', 'save_tensor'):
             m.addAction(self._act[n])
         m.addSeparator()
         for n in ('load_polar', 'save_polar'):
@@ -376,11 +376,6 @@ class NativeRibbon(QWidget):
         self._b.tabClicked(i)
 
     # ── Páginas ───────────────────────────────────────────────────────────
-    def _page_archivo(self):
-        return self._page([("Archivo", [
-            self._tool('load_audio'), self._tool('load_tensor'), self._tool('save_tensor'), '|',
-            self._tool('load_polar'), self._tool('save_polar')])])
-
     def _page_proc(self):
         b = self._b
         plot = b.emitPlotParams

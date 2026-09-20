@@ -14,7 +14,7 @@ from core.worker import Worker
 from ui.styles               import QSS, get_qss
 from ui.native_ribbon        import NativeRibbon
 from ui                      import theme as _theme
-from ui.tab_carga            import TabCarga
+from ui.file_loader          import FileLoader
 from ui.tab_preprocesamiento import TabPreprocesamiento
 from ui.tab_calibracion      import TabCalibracion
 from ui.tab_notas            import TabNotas, ScaleEditorDialog
@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         # Vistas de contenido
-        self.view_archivo    = TabCarga()
+        self.loader          = FileLoader(self._settings, self)
         self.view_prepro     = TabPreprocesamiento()
         self.view_notas      = TabNotas()
         self.view_dir        = TabDirectividad()
@@ -55,11 +55,10 @@ class MainWindow(QMainWindow):
 
         # Stack de contenido
         self._stack = QStackedWidget()
-        self._stack.addWidget(self.view_archivo)    # 0
-        self._stack.addWidget(self.view_prepro)     # 1
-        self._stack.addWidget(self.view_notas)      # 2
-        self._stack.addWidget(self.view_dir)        # 3
-        self._stack.setCurrentIndex(3)              # Directividad por defecto
+        self._stack.addWidget(self.view_prepro)     # 0  (home)
+        self._stack.addWidget(self.view_notas)      # 1
+        self._stack.addWidget(self.view_dir)        # 2
+        self._stack.setCurrentIndex(0)
 
         # Layout central
         central = QWidget()
@@ -73,7 +72,7 @@ class MainWindow(QMainWindow):
         self._setup_log_dock()
 
         self._update_statusbar_style(_theme.current())
-        self.statusBar().showMessage("Listo.")
+        self.statusBar().showMessage("Listo — Archivo ▸ Cargar audio… para empezar.")
 
     # ── Conexiones ────────────────────────────────────────────────────────────
 
@@ -83,8 +82,9 @@ class MainWindow(QMainWindow):
         # Navegación
         rb.tab_changed.connect(self._on_tab_changed)
         # ── Archivo
-        rb.sig_load_audio.connect(lambda: self._show_archivo_mode('audio'))
-        rb.sig_load_tensor.connect(lambda: self._show_archivo_mode('tensor'))
+        rb.sig_load_audio.connect(lambda: self.loader.load_audio(self))
+        rb.sig_load_tensor.connect(lambda: self.loader.load_session(self))
+        rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
         rb.sig_save_tensor.connect(self._on_save_session)
         rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
         rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
@@ -115,8 +115,8 @@ class MainWindow(QMainWindow):
         rb.sig_theme_toggled.connect(self._toggle_theme)
 
         # ── Señales de retorno de las vistas
-        self.view_archivo.ma_ready.connect(self._on_ma_ready)
-        self.view_archivo.log.connect(self._append_log)
+        self.loader.ma_ready.connect(self._on_ma_ready)
+        self.loader.log.connect(self._append_log)
 
         self.view_prepro.ma_updated.connect(self._on_ma_ready)
         self.view_prepro.log.connect(self._append_log)
@@ -154,16 +154,10 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
 
-    def _show_archivo_mode(self, mode: str):
-        self.ribbon._switch_tab(0)
-        self.view_archivo.set_source_mode(mode)
-
     # ── Slots de Archivo ──────────────────────────────────────────────────────
 
     def _on_save_session(self):
-        self.view_archivo._on_guardar_npz(
-            ui_state=self.ribbon._bridge.state.copy()
-        )
+        self.loader.save_session(self, ui_state=self.ribbon._bridge.state.copy())
 
     def _on_load_polar_npz(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -175,7 +169,7 @@ class MainWindow(QMainWindow):
             data = load_results(path)
             # Cambiar a Directividad ANTES de cargar para que las secciones
             # sean visibles cuando _refresh_display() las actualice
-            self.ribbon._switch_tab(3)
+            self.ribbon._switch_tab(2)
             self.view_dir.load_from_npz(data)
             self.ribbon.set_dir_computed(data['thetas'])
             self.ribbon.set_dir_status(
@@ -384,11 +378,11 @@ class MainWindow(QMainWindow):
         # cambiar los defaults (sólo 2D+Esfera visibles) traían "true" para
         # los 4, pisando el default nuevo apenas se disparaba el primer
         # dirDisplayChanged (cambiar de nota, apagar Info, etc.).
-        ui = getattr(self.view_archivo, '_loaded_ui_state', {})
+        ui = self.loader._loaded_ui_state
         if ui:
             ui = {k: v for k, v in ui.items() if not k.startswith('view_')}
             self.ribbon._bridge.state.update(ui)
-            self.view_archivo._loaded_ui_state = {}
+            self.loader._loaded_ui_state = {}
 
         self.ribbon.set_ma_loaded(ma)
         if ma.notes:
