@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtGui import QFont
 
 from plot.balloon import (
+    FONT_SIZE,
     build_balloon_html,
     build_sphere_html,
     build_polar2d_html,
@@ -107,7 +108,7 @@ class BalloonView(QWidget):
         self._show_info:    bool  = True
         self._compare_bands: list | None = None   # índices de banda a superponer (polar2d)
         self._compare_styles: dict = {}           # {band_index: {'color','width','dash'}}
-        self._tick_font_size: float = 11          # tamaño de números de los ejes (polar2d)
+        self._tick_font_size: float = FONT_SIZE   # tamaño de números de los ejes (polar2d)
         self._axis_color:    str | None = None    # color de la grilla 3D (3d/sphere), None = tema
         self._axis_width:    float = 1            # grosor de la grilla 3D
         self._style:         dict = {}            # overrides genéricos (bg_color, etc. — ver "Propiedades…")
@@ -315,7 +316,7 @@ class BalloonView(QWidget):
     # Tamaño lógico fijo (px CSS) del export: mismo aspecto y misma proporción
     # texto/gráfico sin importar el tamaño de ventana. `scale` (DPI) lo multiplica.
     # ponytail: un solo tamaño para las 4 vistas; hacerlo por vista si el Polar 2D pide cuadrado.
-    _EXPORT_W, _EXPORT_H = 1000, 800
+    _EXPORT_W, _EXPORT_H = 720, 540
 
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
         """

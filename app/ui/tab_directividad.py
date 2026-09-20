@@ -24,7 +24,7 @@ from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
 from ui.widgets import NumEdit as _NumEdit
-from plot.balloon import COLORSCALES, _COMPARE_COLORS
+from plot.balloon import COLORSCALES, _COMPARE_COLORS, FONT_SIZE
 
 # polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView);
 # superficie_3d y esfera siguen en Plotly/QWebEngineView (BalloonView) hasta
@@ -56,10 +56,10 @@ _DEFAULT_STYLE_BY_MODE = {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
         "ring_color":       "#000000",
-        "ring_font_size":   16,
+        "ring_font_size":   FONT_SIZE,
         "ring_step":        5.0,
-        "ring_label_angle": 60.0,
-        "legend_font_size": 20,
+        "ring_label_angle": 45.0,
+        "legend_font_size": FONT_SIZE,
         "line_width":       2.5,
         "show_radial_grid": False,
         "smoothing_method": "savgol",
@@ -71,7 +71,6 @@ _DEFAULT_STYLE_BY_MODE = {
 }
 _DEFAULT_MIN_DB_BY_MODE = {"polar2d": -20.0}
 _DEFAULT_MAX_DB_BY_MODE = {"polar2d": 10.0}
-_DEFAULT_TICK_FONT_SIZE_BY_MODE = {"polar2d": 16.0}
 
 
 # ── Worker para cómputo batch (todo el audio + todas las notas) ───────────────
@@ -161,7 +160,7 @@ class _ViewSection(QWidget):
         self._max_db: float | None = _DEFAULT_MAX_DB_BY_MODE.get(mode)
         self._compare_indices: list | None = None   # sólo relevante para polar2d
         self._compare_styles: dict = {}             # {band_index: {'color','width','dash'}}
-        self._tick_font_size: float = _DEFAULT_TICK_FONT_SIZE_BY_MODE.get(mode, 11)
+        self._tick_font_size: float = FONT_SIZE
         self._axis_color: str | None = None         # color de grilla 3D (3d/sphere), None = tema
         self._axis_width: float = 1                 # grosor de grilla 3D
         self._style: dict = dict(_DEFAULT_STYLE_BY_MODE.get(mode, {}))   # overrides (bg_color, etc.)
@@ -333,8 +332,8 @@ class _ViewSection(QWidget):
             form_ax.addRow("Grosor de grilla:", spin_grid_w)
             spin_label = _NumEdit()
             spin_label.setRange(6, 24); spin_label.setSingleStep(1)
-            spin_label.setValue(self._style.get('axis_label_size', 11))
-            spin_label.setToolTip("Tamaño de las letras X/Y/Z. Valor típico: 10 a 14. Por defecto: 11.")
+            spin_label.setValue(self._style.get('axis_label_size', FONT_SIZE))
+            spin_label.setToolTip("Tamaño de las letras X/Y/Z. Valor típico: 10 a 14. Por defecto: 12.")
             form_ax.addRow("Tamaño etiquetas X/Y/Z:", spin_label)
             spin_axis_w = _NumEdit()
             spin_axis_w.setRange(0.5, 8.0); spin_axis_w.setSingleStep(0.5)
@@ -407,11 +406,11 @@ class _ViewSection(QWidget):
             spin_tick = _NumEdit()
             spin_tick.setRange(6, 30); spin_tick.setSingleStep(1)
             spin_tick.setValue(self._tick_font_size)
-            spin_tick.setToolTip("Tamaño de los números de ángulo (0°, 45°, 90°...). Valor típico: 10 a 14. Por defecto: 11.")
+            spin_tick.setToolTip("Tamaño de los números de ángulo (0°, 45°, 90°...). Valor típico: 10 a 14. Por defecto: 12.")
             form_ax.addRow("Tamaño de números (grados):", spin_tick)
             spin_ring_font = _NumEdit()
             spin_ring_font.setRange(6, 30); spin_ring_font.setSingleStep(1)
-            spin_ring_font.setValue(self._style.get('ring_font_size', 9))
+            spin_ring_font.setValue(self._style.get('ring_font_size', FONT_SIZE))
             spin_ring_font.setToolTip("Tamaño de los números de dB de los anillos (-10, -5, 0...). Valor típico: 8 a 12. Por defecto: 9.")
             form_ax.addRow("Tamaño de números (dB):", spin_ring_font)
             spin_ring_step = _NumEdit()
@@ -453,7 +452,7 @@ class _ViewSection(QWidget):
             form_ax.addRow("Grosor de traza (banda única):", spin_line_w)
             spin_legend = _NumEdit()
             spin_legend.setRange(6, 30); spin_legend.setSingleStep(1)
-            spin_legend.setValue(self._style.get('legend_font_size', 12))
+            spin_legend.setValue(self._style.get('legend_font_size', FONT_SIZE))
             spin_legend.setToolTip("Tamaño de la leyenda cuando comparás varias bandas superpuestas. Valor típico: 11 a 14. Por defecto: 12.")
             form_ax.addRow("Tamaño de leyenda (multibanda):", spin_legend)
             fields['tick_font_size']    = spin_tick
@@ -794,7 +793,7 @@ class TabDirectividad(QWidget):
         self._spec_data   = 0       # 0=raw, 1=eq
         self._spec_global = True
         self._view_checks = {
-            "3d": False, "sphere": True, "polar2d": True, "spectrum": False
+            "3d": True, "sphere": True, "polar2d": True, "spectrum": True
         }
 
         self._build_ui()
@@ -863,13 +862,12 @@ class TabDirectividad(QWidget):
             self._docks[mode] = dock
 
         dock_host_area = Qt.DockWidgetArea.TopDockWidgetArea
-        self._dock_host.addDockWidget(dock_host_area, self._docks["3d"])
-        self._dock_host.splitDockWidget(
-            self._docks["3d"], self._docks["sphere"], Qt.Orientation.Horizontal)
-        self._dock_host.splitDockWidget(
-            self._docks["3d"], self._docks["polar2d"], Qt.Orientation.Vertical)
-        self._dock_host.splitDockWidget(
-            self._docks["sphere"], self._docks["spectrum"], Qt.Orientation.Vertical)
+        d = self._docks
+        self._dock_host.addDockWidget(dock_host_area, d["polar2d"])
+        self._dock_host.splitDockWidget(d["polar2d"], d["spectrum"], Qt.Orientation.Horizontal)
+        self._dock_host.splitDockWidget(d["polar2d"], d["3d"], Qt.Orientation.Vertical)
+        self._dock_host.splitDockWidget(d["spectrum"], d["sphere"], Qt.Orientation.Vertical)
+        self._docks_equalized = False
 
         # Panel de Propiedades compartido — no modal, siempre al costado
         # derecho de la grilla 2×2 (en vez de un diálogo bloqueante),
@@ -914,6 +912,20 @@ class TabDirectividad(QWidget):
         lay.addWidget(self.band_selector)
 
         return w
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not self._docks_equalized:
+            self._docks_equalized = True
+            QTimer.singleShot(0, self._equalize_docks)
+
+    def _equalize_docks(self):
+        """Celdas del mismo tamaño (los docks arrancan con proporciones arbitrarias)."""
+        d, h = self._docks, self._dock_host
+        h.resizeDocks([d["polar2d"], d["spectrum"]], [1, 1], Qt.Orientation.Horizontal)
+        h.resizeDocks([d["3d"], d["sphere"]], [1, 1], Qt.Orientation.Horizontal)
+        h.resizeDocks([d["polar2d"], d["3d"]], [1, 1], Qt.Orientation.Vertical)
+        h.resizeDocks([d["spectrum"], d["sphere"]], [1, 1], Qt.Orientation.Vertical)
 
     # ── Slots internos ────────────────────────────────────────────────────
 

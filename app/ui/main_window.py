@@ -50,6 +50,8 @@ class MainWindow(QMainWindow):
 
         self._ma       = None
         self._settings = QSettings("AcousticTools", "PolarAnalyzerV2")
+        import plot.balloon as _balloon
+        _balloon.set_theme(_theme.current())   # los gráficos arrancaban con la paleta oscura por defecto
 
         self._build_ui()
         self._connect_ribbon()

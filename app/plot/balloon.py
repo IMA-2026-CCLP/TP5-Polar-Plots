@@ -24,6 +24,9 @@ _DARK_BG        = "#1a1d27"
 _GRID_COL       = "#2e3248"
 _TEXT_COL       = "#e0e0e0"
 _FONT_CSS       = "Inter, 'Segoe UI', sans-serif"
+# Tamaño de fuente único (px) para números, etiquetas, leyendas y barras de color de los 4
+# gráficos: así se ven parejos entre paneles y en la imagen exportada.
+FONT_SIZE       = 12
 _SPEC_BG        = "#1e2134"
 _RING_LINE      = "rgba(255,255,255,0.12)"
 _RING_TEXT      = "rgba(200,200,200,0.5)"
@@ -52,7 +55,7 @@ def set_theme(palette: dict) -> None:
     _OVERLAY_BORDER = palette['overlay_border']
 
 
-def _axes_traces(axis_len: float = 1.4, label_size: float = 11,
+def _axes_traces(axis_len: float = 1.4, label_size: float = FONT_SIZE,
                  line_width: float = 3) -> list:
     traces = []
     for vec, label, color in [
@@ -101,8 +104,8 @@ def _colorbar(cs_name: str, text_color: Optional[str] = None) -> dict:
         "colorbar": {
             "title": {"text": "dB", "side": "right"},
             "thickness": 16, "len": 0.6, "x": 0.92,
-            "tickfont": {"color": txt, "size": 11},
-            "titlefont": {"color": txt},
+            "tickfont": {"color": txt, "size": FONT_SIZE},
+            "titlefont": {"color": txt, "size": FONT_SIZE},
         },
     }
 
@@ -564,7 +567,7 @@ def build_balloon_html(
             R_clip[-1], z_color, cmin, cmax, colorscale,
         ))
 
-    traces += _axes_traces(label_size=style.get('axis_label_size', 11),
+    traces += _axes_traces(label_size=style.get('axis_label_size', FONT_SIZE),
                            line_width=style.get('axis_line_width', 3))
     layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width,
                             bg_color=style.get('bg_color'))
@@ -679,15 +682,15 @@ def build_sphere_html(
         "colorbar": {
             "title":     {"text": "dB", "side": "right"},
             "thickness": 16, "len": 0.6, "x": 0.92,
-            "tickfont":  {"color": style.get('text_color') or _TEXT_COL, "size": 11},
-            "titlefont": {"color": style.get('text_color') or _TEXT_COL},
+            "tickfont":  {"color": style.get('text_color') or _TEXT_COL, "size": FONT_SIZE},
+            "titlefont": {"color": style.get('text_color') or _TEXT_COL, "size": FONT_SIZE},
         },
         "lighting":      {"ambient": 0.75, "diffuse": 0.7, "specular": 0.15, "roughness": 0.4},
         "lightposition": {"x": 100, "y": 100, "z": 150},
         "hoverinfo": "skip",
     }
 
-    traces = [mesh_trace] + _axes_traces(label_size=style.get('axis_label_size', 11),
+    traces = [mesh_trace] + _axes_traces(label_size=style.get('axis_label_size', FONT_SIZE),
                                          line_width=style.get('axis_line_width', 3))
     layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width,
                             bg_color=style.get('bg_color'))
@@ -858,7 +861,7 @@ def build_polar2d_html(
     show_info:      bool = True,
     compare_bands:  Optional[list] = None,
     compare_styles: Optional[dict] = None,
-    tick_font_size: float = 11,
+    tick_font_size: float = FONT_SIZE,
     style:          Optional[dict] = None,
     update_only:    bool = False,
 ) -> str:
@@ -952,7 +955,7 @@ def build_polar2d_html(
     # ── Anillos de referencia (cada "step" dB dentro del rango) ──────────────
     rotation       = 90 if plane == "XY" else 0
     ring_color     = style.get('ring_color') or _RING_LINE
-    ring_font_size = style.get('ring_font_size', 9)
+    ring_font_size = style.get('ring_font_size', FONT_SIZE)
     ring_vals    = np.arange(np.ceil(r_floor / step) * step, r_ceil + 0.01, step)
     ring_vals    = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
     ref_db_rings = [float(v) for v in ring_vals]
@@ -1036,7 +1039,7 @@ def build_polar2d_html(
             },
         },
         "legend": {
-            "font":    {"color": style.get('text_color') or _TEXT_COL, "size": style.get('legend_font_size', 12)},
+            "font":    {"color": style.get('text_color') or _TEXT_COL, "size": style.get('legend_font_size', FONT_SIZE)},
             "bgcolor": _LEGEND_BG,
             "x": 1.0, "y": 1.0,
         },
@@ -1165,8 +1168,8 @@ def build_spectrum_html(
         "margin":  {"l": 65, "r": 20, "t": 45, "b": 70},
         "barmode": "overlay",
         "xaxis": {
-            "title":         {"text": "Banda (Hz)", "font": {"color": txt}},
-            "tickfont":      {"color": txt, "size": 9},
+            "title":         {"text": "Banda (Hz)", "font": {"color": txt, "size": FONT_SIZE}},
+            "tickfont":      {"color": txt, "size": FONT_SIZE},
             "gridcolor":     grid_color,
             "linecolor":     "rgba(255,255,255,0.2)",
             "tickangle":     -45,
@@ -1175,14 +1178,14 @@ def build_spectrum_html(
             "categoryarray": x_labels,
         },
         "yaxis": {
-            "title":    {"text": "dB SPL", "font": {"color": txt}},
-            "tickfont": {"color": txt},
+            "title":    {"text": "dB SPL", "font": {"color": txt, "size": FONT_SIZE}},
+            "tickfont": {"color": txt, "size": FONT_SIZE},
             "gridcolor": grid_color,
             "zeroline":  False,
             "range":     [y_min, y_max],
         },
         "legend": {
-            "font":    {"color": txt, "size": 9},
+            "font":    {"color": txt, "size": FONT_SIZE},
             "bgcolor": _LEGEND_BG,
             "x": 1.01, "y": 1,
         },

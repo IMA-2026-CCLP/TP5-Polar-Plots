@@ -575,10 +575,10 @@ class NativeRibbon(QWidget):
                 (None, self._dir_status)]),
             ("Nota", [(None, self._c_nota)]),
             ("Gráficos", [
-                (None, self._view_check("Superficie 3D", 'view_3d', "Superficie 3D", False)),
+                (None, self._view_check("Superficie 3D", 'view_3d', "Superficie 3D", True)),
                 (None, self._view_check("Esfera", 'view_sphere', "Esfera coloreada por nivel", True)),
                 (None, self._view_check("Polar 2D", 'view_polar2d', "Corte polar 2D", True)),
-                (None, self._view_check("Espectro", 'view_spectrum', "Espectro por azimuth", False)),
+                (None, self._view_check("Espectro", 'view_spectrum', "Espectro por azimuth", True)),
                 (None, self._view_check("Recuadro de info", 'show_info', "Banda, máximo y dinámica sobre cada gráfico", True))]),
             ("Polar 2D", [
                 ("Plano", self._c_plane),
@@ -666,10 +666,10 @@ class NativeRibbon(QWidget):
             spec_data   = int(s.get('spec_data', 0)),
             spec_global = bool(s.get('spec_global', True)),
             view_checks = {
-                '3d':       bool(s.get('view_3d',       False)),
+                '3d':       bool(s.get('view_3d',       True)),
                 'sphere':   bool(s.get('view_sphere',   True)),
                 'polar2d':  bool(s.get('view_polar2d',  True)),
-                'spectrum': bool(s.get('view_spectrum', False)),
+                'spectrum': bool(s.get('view_spectrum', True)),
             },
         )
 
