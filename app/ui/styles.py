@@ -408,14 +408,8 @@ QMenu::item {{ padding: 4px 26px 4px 22px; }}
 QMenu::item:selected {{ background: {p['accent']}; color: {p['accent_ink']}; }}
 QMenu::item:disabled {{ color: {p['text_muted']}; background: transparent; }}
 QMenu::separator {{ height: 1px; background: {p['border']}; margin: 3px 6px; }}
-QTabBar#main_tabs::tab {{
-    background: {p['bg_dark']}; border: 1px solid {p['border2']}; border-bottom: none;
-    padding: 4px 16px; margin-right: 2px; border-radius: 0; color: {p['text2']}; font-size: 9pt;
-}}
-QTabBar#main_tabs::tab:selected {{
-    background: {p['bg_base']}; color: {p['text']}; border-bottom: none; font-weight: 600;
-}}
-QTabBar#main_tabs::tab:!selected {{ margin-top: 2px; }}
+/* Pestañas principales: mismo diseño que las de los diálogos (QTabBar::tab); sólo un poco más bajas */
+QTabBar#main_tabs::tab {{ padding: 6px 24px; margin-right: 2px; }}
 QFrame#rb_line {{ background: {p['border2']}; }}
 QFrame#rb_sep  {{ background: {p['border2']}; }}
 QLabel#rb_cap  {{ color: {p['text_muted']}; font-weight: 600; }}
