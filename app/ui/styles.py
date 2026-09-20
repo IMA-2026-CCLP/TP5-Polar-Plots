@@ -421,6 +421,7 @@ QFrame#rb_sep  {{ background: {p['border2']}; }}
 QLabel#rb_cap  {{ color: {p['text_muted']}; font-weight: 600; }}
 QLabel#rb_chip {{ color: {p['text2']}; padding-right: 4px; }}
 QLabel#rb_status {{ color: {p['text_muted']}; }}
+QToolButton#rb_info {{ padding: 0; font-weight: 700; font-style: italic; border-radius: 11px; }}
 QPushButton#pill {{ padding: 2px 10px; }}
 QPushButton#pill:checked {{
     background: {p['accent_soft']}; border-color: {p['accent']}; color: {p['accent']}; font-weight: 600;

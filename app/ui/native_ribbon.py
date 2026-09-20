@@ -14,7 +14,7 @@ import json
 from PyQt6.QtCore import Qt, QLocale, pyqtSignal
 from PyQt6.QtGui import QAction, QActionGroup, QDoubleValidator
 from PyQt6.QtWidgets import (
-    QFormLayout, QGroupBox, QInputDialog, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
+    QFormLayout, QGroupBox, QInputDialog, QMessageBox, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
     QComboBox, QLineEdit, QCheckBox, QFrame, QToolButton,
 )
 
@@ -25,6 +25,7 @@ _TABS = [
     ("Procesamiento", "Visualizar señales, aplicar filtros y alinear tomas"),
     ("Directividad",  "Calcular y visualizar el patrón de directividad acústica"),
 ]
+_GCC_HELP = '<b>¿Para qué sirve?</b><br>Al alinear los micrófonos se estima el retardo entre cada uno y el de referencia con GCC-PHAT (correlación cruzada). Este umbral pone en cero, antes de correlacionar, los tramos de la señal de referencia que están por debajo de ese nivel, para que el ruido de fondo y el silencio no falseen la estimación.<br><br><b>¿Cómo se usa?</b><br>&bull; <b>Vacío</b>: no filtra nada (valor por defecto).<br>&bull; <b>Con valor</b> (dBFS): ponelo un poco por encima del ruido de fondo, por ejemplo entre &minus;55 y &minus;40 dBFS, cerca del umbral que usaste para el onset.<br>&bull; Si es demasiado alto se descartan partes útiles del canto y la alineación empeora.<br><br>Sólo afecta a <i>Alinear micrófonos</i>. <i>Alinear tomas</i> usa el Umbral del onset.'
 _CAP_W = 78   # ancho de la columna de títulos de fila (Cálculo, Vista…)
 
 
@@ -437,6 +438,22 @@ class NativeRibbon(QWidget):
         h.addWidget(self._flex(b))
         return w
 
+    def _with_info(self, field: QWidget, title: str, html: str) -> QWidget:
+        """Campo + botón (i) que abre un modal explicativo."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(4)
+        h.addWidget(self._flex(field))
+        b = QToolButton()
+        b.setText("i")
+        b.setObjectName("rb_info")
+        b.setToolTip("Qué es y cómo se usa")
+        b.setFixedSize(22, 22)
+        b.clicked.connect(lambda _=False: QMessageBox.information(self.window(), title, html))
+        h.addWidget(b)
+        return w
+
     def _group(self, title: str, rows) -> QGroupBox:
         g = QGroupBox(title)
         f = QFormLayout(g)
@@ -491,8 +508,10 @@ class NativeRibbon(QWidget):
             ("Alineación de micrófonos", [
                 ("Ventana (ms)", self._num('window_ms', 40, "Ventana de análisis GCC-PHAT (ms)")),
                 ("Mic ref", self._c_align_th),
-                ("Umbral GCC (dBFS)", self._num('gcc_thresh', 48, "Nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
-                                                nullable=True, placeholder="sin filtro")),
+                ("Umbral GCC (dBFS)", self._with_info(
+                    self._num('gcc_thresh', 48, "Nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
+                              nullable=True, placeholder="sin filtro"),
+                    "Umbral GCC", _GCC_HELP)),
                 (None, self._button("Alinear mics", "Alinea los micrófonos al de referencia con GCC-PHAT",
                                     lambda: b.alignRef(), 'align_ref', enabled=False))]),
         ])
