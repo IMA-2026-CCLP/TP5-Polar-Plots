@@ -500,12 +500,12 @@ class NativeRibbon(QWidget):
                 ("Frecuencia (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
                 (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
                                     lambda: b.applyHpf(), 'hpf', enabled=False))]),
-            ("Alineación de tomas", [
+            ("Alineación entre tomas (onset)", [
                 ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
                 ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),
                 (None, self._button("Alinear tomas", "Alinea las tomas por onset según el umbral",
                                     lambda: b.alignTakes(), 'align_takes', enabled=False))]),
-            ("Alineación de micrófonos", [
+            ("Alineación entre micrófonos (retardo)", [
                 ("Ventana (ms)", self._num('window_ms', 40, "Ventana de análisis GCC-PHAT (ms)")),
                 ("Mic ref", self._c_align_th),
                 ("Umbral GCC (dBFS)", self._with_info(
