@@ -490,8 +490,8 @@ class NativeRibbon(QWidget):
         self._c_align_th = self._combo('align_theta', 64, "Micrófono de referencia para la alineación", cb=prev, **th)
         return self._panel([
             ("Señal", [
-                ("Elevación θ", self._c_theta),
-                ("Azimut", self._c_az)]),
+                ("Elevación θ (Mic)", self._c_theta),
+                ("Azimut (Toma)", self._c_az)]),
             ("Eje Y", [
                 ("Mín – Máx", self._pair(
                     self._num('ymin', 50, "Límite inferior del eje Y. Vacío = autoescala", plot, True, "auto"),
