@@ -61,7 +61,6 @@ _DEFAULT_STYLE_BY_MODE = {
         "ring_label_angle": 45.0,
         "legend_font_size": FONT_SIZE,
         "line_width":       2.5,
-        "show_radial_grid": False,
         "smoothing_method": "savgol",
         "smoothing_window": 3,
         "interp_kind":      "cubic",
@@ -452,12 +451,8 @@ class _ViewSection(QWidget):
             )
             form_ax.addRow("Posición de etiquetas de dB:", combo_ring_pos)
             btn_ring = self._make_color_button(dlg, self._style.get('ring_color') or _balloon_mod._RING_LINE)
-            btn_ring.setToolTip("Color de los anillos punteados y del eje angular. Click para elegir.")
-            form_ax.addRow("Color de anillos/eje:", btn_ring)
-            chk_grid = QCheckBox("Mostrar grilla radial")
-            chk_grid.setChecked(self._style.get('show_radial_grid', False))
-            chk_grid.setToolTip("Grilla radial extra de Plotly, además de los anillos de dB. Normalmente no hace falta, dejar destildado.")
-            form_ax.addRow(chk_grid)
+            btn_ring.setToolTip("Color de los anillos punteados y de las líneas radiales (cada 30°). No cambia el color de los números. Click para elegir.")
+            form_ax.addRow("Color de anillos y radios:", btn_ring)
             spin_line_w = _NumEdit()
             spin_line_w.setRange(0.5, 8.0); spin_line_w.setSingleStep(0.5)
             spin_line_w.setValue(self._style.get('line_width', 2.5))
@@ -474,7 +469,6 @@ class _ViewSection(QWidget):
             fields['ring_label_angle']  = spin_ring_angle
             fields['ring_label_pos']    = combo_ring_pos
             fields['ring_color']        = btn_ring
-            fields['show_radial_grid']  = chk_grid
             fields['line_width']        = spin_line_w
             fields['legend_font_size']  = spin_legend
             outer.addWidget(box_ax)
@@ -576,7 +570,6 @@ class _ViewSection(QWidget):
                 new_style['ring_label_angle']  = fields['ring_label_angle'].value()
                 new_style['ring_label_pos']    = fields['ring_label_pos'].currentText()
                 new_style['ring_color']        = fields['ring_color'].color_hex
-                new_style['show_radial_grid']  = fields['show_radial_grid'].isChecked()
                 new_style['line_width']        = fields['line_width'].value()
                 new_style['legend_font_size']  = fields['legend_font_size'].value()
                 new_style['smoothing_method']  = fields['smoothing_method'].currentText()
