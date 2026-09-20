@@ -375,10 +375,11 @@ class NativeRibbon(QWidget):
         m.addAction(self._act_dark)
         m.addSeparator()   # debajo: mostrar/ocultar paneles (los agrega MainWindow)
 
-        m = mb.addMenu("&Herramientas")
+        m = mb.addMenu("&Calibración")
         for n in ('calibrar', 'to_spl'):
             m.addAction(self._act[n])
-        m.addSeparator()
+
+        m = mb.addMenu("&Herramientas")
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
         m.addSeparator()
@@ -482,9 +483,6 @@ class NativeRibbon(QWidget):
                 ("Frecuencia (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
                 (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
                                     lambda: b.applyHpf(), 'hpf', enabled=False))]),
-            ("Calibración", [
-                (None, self._tool('calibrar')),
-                (None, self._tool('to_spl'))]),
             ("Alineación de tomas", [
                 ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
                 ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),

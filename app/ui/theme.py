@@ -50,9 +50,9 @@ DARK = dict(
     # UI base
     bg_base="#2B2B2B", bg_panel="#353535", bg_dark="#222222",
     text="#E6E6E6", text2="#B0B0B0", text_muted="#808080",
-    accent="#5B9BD5", border="#454545", border2="#5C5C5C",
+    accent="#6FB1F0", border="#4A4A4A", border2="#6A6A6A",
     accent_ink="#0E0E0E",
-    btn_bg="#34506E", btn_border="#4E7098", btn_text="#DCEBFA", btn_hover="#3F6187",
+    btn_bg="#2F5F98", btn_border="#6FA3DC", btn_text="#FFFFFF", btn_hover="#3B74B6",
     accent_soft="rgba(91,155,213,.18)", accent_line="rgba(91,155,213,.5)",
     ok="#46D39A",
     # Ribbon
