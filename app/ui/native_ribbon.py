@@ -14,7 +14,7 @@ import json
 from PyQt6.QtCore import Qt, QLocale, pyqtSignal
 from PyQt6.QtGui import QAction, QActionGroup, QDoubleValidator
 from PyQt6.QtWidgets import (
-    QFormLayout, QGroupBox, QInputDialog, QMenu, QMessageBox, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
+    QDialog, QFormLayout, QGroupBox, QInputDialog, QMenu, QMessageBox, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
     QComboBox, QLineEdit, QCheckBox, QFrame, QToolButton,
 )
 
@@ -103,6 +103,7 @@ class NativeRibbon(QWidget):
         lay.addWidget(self._make_menubar())
         lay.addLayout(self._make_tabbar())
         # Paneles laterales (uno por pestaña) y página de Notas: MainWindow los aloja en un dock / ventana.
+        self._make_align_dialogs()
         self.proc_panel = self._panel_proc()
         self.dir_panel  = self._panel_dir()
         self.notas_page = self._page_notas()
@@ -271,6 +272,8 @@ class NativeRibbon(QWidget):
         act('save_tensor', "Guardar sesión…", "Guarda tensor + calibración + notas + directividad en .cclp", b.saveTensor, False)
         act('load_polar',  "Cargar directividad (sin audios)…", "Abre un .npz de directividad: los gráficos y su configuración, sin necesidad de los audios", b.loadPolarNpz)
         act('save_polar',  "Guardar directividad (sin audios)…", "Guarda los resultados calculados y la configuración de los gráficos en un .npz (sin los audios)", b.savePolarNpz, False)
+        act('align_takes', "Alinear entre tomas (onset)…", "Opcional: alinea el inicio de cada toma para superponerlas en la vista de Procesamiento", lambda: self._dlg_takes.exec(), False)
+        act('align_mics',  "Alinear entre micrófonos (retardo)…", "Opcional: corrige el retardo de cada micrófono respecto al de referencia (GCC-PHAT)", lambda: self._dlg_mics.exec(), False)
         act('calibrar',    "Calibración…",    "Abre la calibración: al aplicarla, el tensor pasa a dB SPL automáticamente", b.openCalibracion, False)
         act('save_mask',   "Guardar máscara…", "Guarda la segmentación de notas detectadas", b.saveMask, False)
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
@@ -367,6 +370,9 @@ class NativeRibbon(QWidget):
         self._act_dark.triggered.connect(lambda _=False: self.sig_theme_toggled.emit())
 
         m = mb.addMenu("&Herramientas")
+        for n in ('align_takes', 'align_mics'):
+            m.addAction(self._act[n])
+        m.addSeparator()
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
         m.addSeparator()
@@ -486,11 +492,10 @@ class NativeRibbon(QWidget):
 
     def _panel_proc(self):
         b = self._b
-        plot, prev = b.emitPlotParams, b.emitAlignPreview
+        plot = b.emitPlotParams
         th = dict(enc=lambda v: str(v), dec=lambda d: d)
         self._c_theta    = self._combo('theta', 78, "Elevación (micrófono) a visualizar", cb=plot, **th)
         self._c_az       = self._combo('az', 78, "Azimuth a visualizar, o 'Todos' para superponer las tomas", cb=plot, **th)
-        self._c_align_th = self._combo('align_theta', 64, "Micrófono de referencia para la alineación", cb=prev, **th)
         return self._panel([
             ("Señal", [
                 ("Elevación θ (Mic)", self._c_theta),
@@ -503,23 +508,49 @@ class NativeRibbon(QWidget):
                 ("Frecuencia (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
                 (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
                                     lambda: b.applyHpf(), 'hpf', enabled=False))]),
-            ("Alineación entre tomas (onset)", [
-                ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
-                ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),
-                (None, self._button("Alinear tomas", "Alinea las tomas por onset según el umbral",
-                                    lambda: b.alignTakes(), 'align_takes', enabled=False))]),
-            ("Alineación entre micrófonos (retardo)", [
-                ("Ventana (ms)", self._num('window_ms', 40, "Ventana de análisis GCC-PHAT (ms)")),
-                ("Mic ref", self._c_align_th),
-                ("Umbral GCC (dBFS)", self._with_info(
-                    self._num('gcc_thresh', 48, "Nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
-                              nullable=True, placeholder="sin filtro"),
-                    "Umbral GCC", _GCC_HELP)),
-                (None, self._button("Alinear mics", "Alinea los micrófonos al de referencia con GCC-PHAT",
-                                    lambda: b.alignRef(), 'align_ref', enabled=False))]),
             ("Calibración", [
                 (None, self._tool('calibrar'))]),
         ])
+
+    # ── Alineaciones (opcionales): diálogos abiertos desde Herramientas ────
+    def _align_dialog(self, title: str, rows) -> QDialog:
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setMinimumWidth(380)
+        v = QVBoxLayout(dlg)
+        g = self._group("", rows)
+        g.setObjectName("prop_page")
+        v.addWidget(g)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        close = QPushButton("Cerrar")
+        close.clicked.connect(dlg.reject)
+        row.addWidget(close)
+        v.addLayout(row)
+        return dlg
+
+    def _make_align_dialogs(self):
+        b = self._b
+        prev = b.emitAlignPreview
+        th = dict(enc=lambda v: str(v), dec=lambda d: d)
+        self._c_align_th = self._combo('align_theta', 64, "Micrófono de referencia para la alineación", cb=prev, **th)
+        self._dlg_takes = self._align_dialog("Alinear entre tomas (onset)", [
+            ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
+            ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),
+            (None, self._button("Alinear tomas", "Alinea las tomas por onset según el umbral",
+                                lambda: b.alignTakes(), 'align_takes', primary=True, enabled=False))])
+        self._dlg_mics = self._align_dialog("Alinear entre micrófonos (retardo)", [
+            ("Ventana (ms)", self._num('window_ms', 40, "Ventana de análisis GCC-PHAT (ms)")),
+            ("Mic ref", self._c_align_th),
+            ("Umbral GCC (dBFS)", self._with_info(
+                self._num('gcc_thresh', 48, "Nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
+                          nullable=True, placeholder="sin filtro"),
+                "Umbral GCC", _GCC_HELP)),
+            (None, self._button("Alinear mics", "Alinea los micrófonos al de referencia con GCC-PHAT",
+                                lambda: b.alignRef(), 'align_ref', primary=True, enabled=False))])
+        # al aplicar, el diálogo se cierra (el progreso se ve en la barra de estado)
+        self._btn['align_takes'].clicked.connect(self._dlg_takes.accept)
+        self._btn['align_ref'].clicked.connect(self._dlg_mics.accept)
 
     # ── Ventana de Notas (filas horizontales) ─────────────────────────────
     def _page_notas(self):
@@ -634,6 +665,8 @@ class NativeRibbon(QWidget):
             self._btn[n].setEnabled(True)
         self._btn['compute'].setEnabled(is_spl)
         self._act['calibrar'].setEnabled(True)
+        self._act['align_takes'].setEnabled(True)
+        self._act['align_mics'].setEnabled(True)
         self._act['save_tensor'].setEnabled(True)
 
         sr = getattr(ma, 'sr', 0) // 1000
