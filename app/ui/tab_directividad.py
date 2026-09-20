@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QCheckBox, QScrollArea,
-    QMainWindow, QDockWidget, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
+    QGridLayout, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
     QMenu, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
     QColorDialog, QInputDialog, QSplitter,
 )
@@ -152,10 +152,12 @@ class _ViewSection(QWidget):
     save_requested       = pyqtSignal(str)   # emite el modo ("3d", "sphere", etc.)
     properties_requested = pyqtSignal()      # pide abrir/actualizar el panel de Propiedades
     properties_applied   = pyqtSignal()      # se aplicó un cambio de Propiedades (para Ctrl+Z)
+    zoom_requested       = pyqtSignal(str)   # 'Ver en grande' / volver (emite el modo)
 
     def __init__(self, title: str, mode: str, parent=None):
         super().__init__(parent)
         self._mode   = mode
+        self._zoomed = False
         self._min_db: float | None = _DEFAULT_MIN_DB_BY_MODE.get(mode)
         self._max_db: float | None = _DEFAULT_MAX_DB_BY_MODE.get(mode)
         self._compare_indices: list | None = None   # sólo relevante para polar2d
@@ -187,9 +189,15 @@ class _ViewSection(QWidget):
 
         self.setMinimumHeight(80)
 
+    def set_zoomed(self, on: bool):
+        self._zoomed = on
+
     def _show_context_menu(self, x: int, y: int):
         pos = QPoint(x, y)
         menu = QMenu(self)
+
+        act_zoom = menu.addAction("Volver a los 4 gráficos" if self._zoomed else "Ver en grande")
+        menu.addSeparator()
 
         act_top = act_bottom = act_front = act_back = None
         if self._mode in ("3d", "sphere"):
@@ -215,7 +223,9 @@ class _ViewSection(QWidget):
 
         action = menu.exec(self.view.mapToGlobal(pos))
         try:
-            if action == act_properties:
+            if action == act_zoom:
+                self.zoom_requested.emit(self._mode)
+            elif action == act_properties:
                 self.properties_requested.emit()
             elif action == act_auto:
                 self._reset_scale()
@@ -826,6 +836,7 @@ class TabDirectividad(QWidget):
         for mode, sec in self._sections.items():
             sec.log.connect(self.log)
             sec.save_requested.connect(self._save_section)
+            sec.zoom_requested.connect(self.toggle_zoom)
             sec.properties_requested.connect(
                 lambda m=mode: self._show_properties_panel(m))
             sec.properties_applied.connect(
@@ -834,40 +845,31 @@ class TabDirectividad(QWidget):
         # Ctrl+Z deshace el último "Aplicar" de Propiedades (cualquier gráfico).
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_properties)
 
-        # Grilla 2×2 de paneles arrastrables — QMainWindow anidado con
-        # QDockWidgets, igual mecanismo que usa el dock del Log: se pueden
-        # mover, reacomodar o flotar arrastrándolos con el mouse.
-        self._dock_host = QMainWindow()
-        self._dock_host.setWindowFlags(Qt.WindowType.Widget)
-        # Por default Qt no permite anidar/reacomodar libremente los docks al
-        # arrastrar (dockNestingEnabled=False) — eso es lo que hacía fallar
-        # el "ponelo al costado / arriba" a veces. Con esto habilitado, el
-        # área de destino se puede volver a partir en cualquier dirección.
-        self._dock_host.setDockNestingEnabled(True)
-        self._dock_host.setDockOptions(
-            QMainWindow.DockOption.AnimatedDocks |
-            QMainWindow.DockOption.AllowNestedDocks |
-            QMainWindow.DockOption.AllowTabbedDocks
-        )
-
-        self._docks: dict[str, QDockWidget] = {}
-        for mode, sec in self._sections.items():
-            dock = QDockWidget(self._section_titles[mode], self._dock_host)
-            dock.setWidget(sec)
-            dock.setFeatures(
-                QDockWidget.DockWidgetFeature.DockWidgetMovable |
-                QDockWidget.DockWidgetFeature.DockWidgetFloatable
-            )
-            dock.setVisible(self._view_checks.get(mode, True))
-            self._docks[mode] = dock
-
-        dock_host_area = Qt.DockWidgetArea.TopDockWidgetArea
-        d = self._docks
-        self._dock_host.addDockWidget(dock_host_area, d["polar2d"])
-        self._dock_host.splitDockWidget(d["polar2d"], d["spectrum"], Qt.Orientation.Horizontal)
-        self._dock_host.splitDockWidget(d["polar2d"], d["3d"], Qt.Orientation.Vertical)
-        self._dock_host.splitDockWidget(d["spectrum"], d["sphere"], Qt.Orientation.Vertical)
-        self._docks_equalized = False
+        # Grilla 2×2 fija (como VituixCAD): los 4 gráficos siempre visibles, mismas proporciones.
+        # Con click derecho ▸ "Ver en grande" uno ocupa toda el área (ver toggle_zoom).
+        self._grid_host = QWidget()
+        grid = self._grid = QGridLayout(self._grid_host)
+        self._cell_pos = {}
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        self._cells: dict[str, QWidget] = {}
+        self._zoomed: str | None = None
+        for mode, row, col in (("polar2d", 0, 0), ("spectrum", 0, 1), ("3d", 1, 0), ("sphere", 1, 1)):
+            cell = QWidget()
+            cv = QVBoxLayout(cell)
+            cv.setContentsMargins(0, 0, 0, 0)
+            cv.setSpacing(0)
+            hdr = QLabel(self._section_titles[mode])
+            hdr.setObjectName("plot_title")
+            hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cv.addWidget(hdr)
+            cv.addWidget(self._sections[mode], 1)
+            grid.addWidget(cell, row, col)
+            self._cell_pos[mode] = (row, col)
+            self._cells[mode] = cell
+        for k in (0, 1):
+            grid.setRowStretch(k, 1)
+            grid.setColumnStretch(k, 1)
 
         # Panel de Propiedades compartido — no modal, siempre al costado
         # derecho de la grilla 2×2 (en vez de un diálogo bloqueante),
@@ -900,7 +902,7 @@ class TabDirectividad(QWidget):
         self._props_panel.hide()
 
         self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._main_splitter.addWidget(self._dock_host)
+        self._main_splitter.addWidget(self._grid_host)
         self._main_splitter.addWidget(self._props_panel)
         self._main_splitter.setStretchFactor(0, 1)
         self._main_splitter.setStretchFactor(1, 0)
@@ -913,19 +915,23 @@ class TabDirectividad(QWidget):
 
         return w
 
-    def showEvent(self, e):
-        super().showEvent(e)
-        if not self._docks_equalized:
-            self._docks_equalized = True
-            QTimer.singleShot(0, self._equalize_docks)
-
-    def _equalize_docks(self):
-        """Celdas del mismo tamaño (los docks arrancan con proporciones arbitrarias)."""
-        d, h = self._docks, self._dock_host
-        h.resizeDocks([d["polar2d"], d["spectrum"]], [1, 1], Qt.Orientation.Horizontal)
-        h.resizeDocks([d["3d"], d["sphere"]], [1, 1], Qt.Orientation.Horizontal)
-        h.resizeDocks([d["polar2d"], d["3d"]], [1, 1], Qt.Orientation.Vertical)
-        h.resizeDocks([d["spectrum"], d["sphere"]], [1, 1], Qt.Orientation.Vertical)
+    def toggle_zoom(self, mode: str):
+        """'Ver en grande': el gráfico elegido ocupa toda el área; repetir para volver a los 4.
+        Los tamaños de fuente son px literales, así que no cambian al agrandar."""
+        z = None if self._zoomed == mode else mode
+        self._zoomed = z
+        for m, cell in self._cells.items():
+            cell.setVisible(z is None or m == z)
+        r, c = self._cell_pos.get(z, (None, None))
+        for k in (0, 1):                # sólo la fila/columna del gráfico ampliado se estira
+            self._grid.setRowStretch(k, 1 if z is None or k == r else 0)
+            self._grid.setColumnStretch(k, 1 if z is None or k == c else 0)
+        for m, sec in self._sections.items():
+            sec.set_zoomed(m == z)
+        self.band_selector.setVisible(z != "spectrum")
+        if z is None:                      # los ocultos no siguieron los cambios de banda
+            for sec in self._sections.values():
+                sec.set_band(self._current_band_idx)
 
     # ── Slots internos ────────────────────────────────────────────────────
 
@@ -1104,20 +1110,6 @@ class TabDirectividad(QWidget):
             props_w = max(260, min(340, int(total * 0.18)))
             self._main_splitter.setSizes([max(total - props_w, 100), props_w])
 
-    def _apply_view_checks(self, view_checks: dict):
-        for mode, checked in view_checks.items():
-            if mode in self._docks:
-                self._docks[mode].setVisible(checked)
-                self._view_checks[mode] = checked
-        self._update_band_selector_visibility()
-
-    def _update_band_selector_visibility(self):
-        any_non_spectrum = any(
-            self._view_checks[mode]
-            for mode in ("3d", "sphere", "polar2d")
-        )
-        self.band_selector.setVisible(any_non_spectrum)
-
     def _get_current_ma(self):
         if self._nota != "Todo el audio" and self._ma and self._ma.notes:
             return self._ma.notes.get(self._nota, self._ma)
@@ -1157,6 +1149,7 @@ class TabDirectividad(QWidget):
         self._worker = Worker(
             lambda: self._run_compute(bands, ref_az, ref_th)
         )
+        self._worker.label = "Calculando directividad…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_compute_done)
         self._worker.error.connect(self._on_error)
@@ -1266,10 +1259,6 @@ class TabDirectividad(QWidget):
         self._show_info = params.get('show_info', True)
         for sec in self._sections.values():
             sec.set_show_info(self._show_info)
-
-        view_checks = params.get('view_checks', {})
-        if view_checks:
-            self._apply_view_checks(view_checks)
 
         # Si cambió la nota, recargar datos desde el MA correspondiente
         if self._nota != old_nota:

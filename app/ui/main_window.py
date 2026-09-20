@@ -4,12 +4,12 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar,
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QTextCursor
 
-from core.worker import Worker
+from core.worker import Worker, activity
 
 from ui.styles               import QSS, get_qss
 from ui.native_ribbon        import NativeRibbon
@@ -99,6 +99,18 @@ class MainWindow(QMainWindow):
         self._update_statusbar_style(_theme.current())
         self.statusBar().showMessage("Listo — Archivo ▸ Cargar audio… para empezar.")
 
+        # Indicador de operación en curso (el log está oculto por defecto)
+        self._op_label = QLabel()
+        self._op_bar = QProgressBar()
+        self._op_bar.setRange(0, 0)                 # animación "ocupado"
+        self._op_bar.setFixedSize(170, 12)
+        self._op_bar.setTextVisible(False)
+        self.statusBar().addPermanentWidget(self._op_label)
+        self.statusBar().addPermanentWidget(self._op_bar)
+        self._op_label.hide()
+        self._op_bar.hide()
+        activity.changed.connect(self._on_activity)
+
     # ── Conexiones ────────────────────────────────────────────────────────────
 
     def _connect_ribbon(self):
@@ -175,6 +187,12 @@ class MainWindow(QMainWindow):
         )
 
     # ── Slots de navegación ───────────────────────────────────────────────────
+
+    def _on_activity(self, n: int, label: str):
+        busy = n > 0
+        self._op_label.setText(label + (f"  (+{n - 1} más)" if n > 1 else ""))
+        self._op_label.setVisible(busy)
+        self._op_bar.setVisible(busy)
 
     def _on_tab_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
@@ -273,6 +291,7 @@ class MainWindow(QMainWindow):
             self._append_log(f"[ERROR] to_spl:\n{msg}")
 
         self._spl_worker = Worker(_run)
+        self._spl_worker.label = "Convirtiendo a dB SPL…"
         self._spl_worker.finished.connect(_done)
         self._spl_worker.error.connect(_err)
         self._spl_worker.log.connect(self._append_log)

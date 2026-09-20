@@ -116,6 +116,7 @@ class TabCalibracion(QWidget):
         self.btn_calibrar.setEnabled(False)
         self.log.emit("[Calibración] Iniciando calibración…")
         self._worker = Worker(self._run_calibrar)
+        self._worker.label = "Aplicando calibración…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_cal_done)
         self._worker.error.connect(self._on_error)

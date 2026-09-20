@@ -78,7 +78,7 @@ class FileLoader(QObject):
             from mic_array.patron import MicArray
             return MicArray.from_audio(path, arr, ref or None)
 
-        self._start(_run, f"[Carga] Audios de {path}")
+        self._start(_run, f"[Carga] Audios de {path}", "Cargando audios…")
 
     def load_session(self, parent=None):
         path, _ = QFileDialog.getOpenFileName(
@@ -96,13 +96,14 @@ class FileLoader(QObject):
             self._loaded_ui_state = {}
             return MicArray.from_tensor(path)
 
-        self._start(_run, f"[Carga] Sesión {path}")
+        self._start(_run, f"[Carga] Sesión {path}", "Cargando sesión…")
 
-    def _start(self, fn, msg: str):
+    def _start(self, fn, msg: str, label: str):
         if self._worker and self._worker.isRunning():
             return
         self.log.emit(msg + " …")
         self._worker = Worker(fn)
+        self._worker.label = label
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self.set_ma)
         self._worker.error.connect(lambda m: self.log.emit(f"[ERROR]\n{m}"))

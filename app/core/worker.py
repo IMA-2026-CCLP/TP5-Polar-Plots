@@ -14,9 +14,10 @@ Uso:
 """
 import sys
 import io
+import threading
 import traceback
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 
 class _StreamCapture(io.TextIOBase):
@@ -35,6 +36,26 @@ class _StreamCapture(io.TextIOBase):
         pass
 
 
+class _Activity(QObject):
+    """Cuántas tareas de fondo hay en curso y cómo se llama la última (para el indicador de la barra de estado)."""
+    changed = pyqtSignal(int, str)
+
+
+activity = _Activity()
+_running: list = []
+_lock = threading.Lock()
+
+
+def _mark(label: str, start: bool):
+    with _lock:
+        if start:
+            _running.append(label)
+        else:
+            _running.remove(label)
+        n, last = len(_running), (_running[-1] if _running else "")
+    activity.changed.emit(n, last)
+
+
 class Worker(QThread):
     """
     Ejecuta cualquier callable en un hilo separado.
@@ -43,6 +64,7 @@ class Worker(QThread):
     log      = pyqtSignal(str)    # línea de texto capturada de stdout
     finished = pyqtSignal(object) # resultado del callable (puede ser None)
     error    = pyqtSignal(str)    # traceback completo si hay excepción
+    label    = ""                # texto del indicador de progreso (asignarlo antes de start())
 
     def __init__(self, fn, *args, **kwargs):
         super().__init__()
@@ -51,6 +73,8 @@ class Worker(QThread):
         self._kwargs = kwargs
 
     def run(self):
+        label = self.label or "Procesando…"
+        _mark(label, True)
         capture = _StreamCapture(self.log)
         old_stdout = sys.stdout
         sys.stdout = capture
@@ -61,3 +85,4 @@ class Worker(QThread):
             self.error.emit(traceback.format_exc())
         finally:
             sys.stdout = old_stdout
+            _mark(label, False)

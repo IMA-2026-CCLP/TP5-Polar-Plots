@@ -14,7 +14,7 @@ import json
 from PyQt6.QtCore import Qt, QLocale, pyqtSignal
 from PyQt6.QtGui import QAction, QActionGroup, QDoubleValidator
 from PyQt6.QtWidgets import (
-    QFormLayout, QGroupBox, QInputDialog, QMessageBox, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
+    QFormLayout, QGroupBox, QInputDialog, QMenu, QMessageBox, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
     QComboBox, QLineEdit, QCheckBox, QFrame, QToolButton,
 )
 
@@ -214,24 +214,6 @@ class NativeRibbon(QWidget):
                 # Si el valor guardado ya no existe, state pasa a lo que muestra el combo.
                 self._b.state[key] = c.currentData() if key not in _INT_KEYS else int(c.currentData())
 
-    def _view_check(self, text, key, tip, default):
-        b = QCheckBox(text)
-        b.setToolTip(tip)
-
-        def load():
-            b.blockSignals(True)
-            b.setChecked(bool(self._b.state.get(key, default)))
-            b.blockSignals(False)
-
-        def toggled(on):
-            self._b.state[key] = on
-            self._b.dirDisplayChanged()
-
-        b.toggled.connect(toggled)
-        self._loaders.append(load)
-        load()
-        return b
-
     def _button(self, text, tip, fn, name=None, primary=False, enabled=True):
         b = QPushButton(text)
         b.setToolTip(tip)
@@ -321,6 +303,20 @@ class NativeRibbon(QWidget):
         self._loaders.append(load_mode)
         load_mode()
 
+        info = QAction("Recuadro de información", self)
+        info.setCheckable(True)
+        info.setToolTip("Banda, máximo y dinámica sobre cada gráfico de Directividad")
+
+        def load_info():
+            info.blockSignals(True)
+            info.setChecked(bool(b.state.get('show_info', True)))
+            info.blockSignals(False)
+
+        info.toggled.connect(lambda on: (b.state.update(show_info=on), b.dirDisplayChanged()))
+        self._loaders.append(load_info)
+        load_info()
+        self._act['info'] = info
+
         sm = QAction(self)
         sm.setToolTip("Suavizado de la envolvente (media móvil, en ms). Mayor valor = curva más suave")
 
@@ -361,17 +357,14 @@ class NativeRibbon(QWidget):
         m.addAction("Salir", lambda: self.window().close())
 
         m = self._menu_ver = mb.addMenu("&Ver")
-        sub = m.addMenu("Vista")
+        self._ver_vista = QMenu("Vista", self)          # Amplitud / Envolvente / dB (Procesamiento)
         for n in ('amp', 'envelope', 'db'):
-            sub.addAction(self._act[n])
-        m.addAction(self._act['smooth'])
-        m.addSeparator()
+            self._ver_vista.addAction(self._act[n])
+        self._ver_extra = []                             # paneles (los agrega MainWindow)
         self._act_dark = QAction("Tema oscuro", self)
         self._act_dark.setCheckable(True)
         self._act_dark.setChecked(_theme.is_dark())
         self._act_dark.triggered.connect(lambda _=False: self.sig_theme_toggled.emit())
-        m.addAction(self._act_dark)
-        m.addSeparator()   # debajo: mostrar/ocultar paneles (los agrega MainWindow)
 
         m = mb.addMenu("&Herramientas")
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
@@ -383,7 +376,23 @@ class NativeRibbon(QWidget):
 
     def add_view_action(self, action: QAction):
         """MainWindow agrega acá p. ej. el mostrar/ocultar del panel de parámetros."""
-        self._menu_ver.addAction(action)
+        self._ver_extra.append(action)
+        self._rebuild_ver(self._tabs.currentIndex())
+
+    def _rebuild_ver(self, tab: int):
+        """El menú Ver cambia según la pestaña: Procesamiento (vista de la señal) o Directividad."""
+        m = self._menu_ver
+        m.clear()
+        if tab == 0:
+            m.addMenu(self._ver_vista)
+            m.addAction(self._act['smooth'])
+        else:
+            m.addAction(self._act['info'])
+        m.addSeparator()
+        m.addAction(self._act_dark)
+        m.addSeparator()
+        for a in self._ver_extra:
+            m.addAction(a)
 
     def _make_tabbar(self) -> QHBoxLayout:
         h = QHBoxLayout()
@@ -411,6 +420,7 @@ class NativeRibbon(QWidget):
         self._chip.setText(f'<span style="color:{color}">●</span>&nbsp;{text}')
 
     def _on_tab(self, i: int):
+        self._rebuild_ver(i)
         self._b.tabClicked(i)
 
     # ── Paneles laterales (grupos por lo que se edita) ────────────────────
@@ -574,12 +584,6 @@ class NativeRibbon(QWidget):
                                     lambda: b.computeDir(), 'compute', primary=True, enabled=False)),
                 (None, self._dir_status)]),
             ("Nota", [(None, self._c_nota)]),
-            ("Gráficos", [
-                (None, self._view_check("Superficie 3D", 'view_3d', "Superficie 3D", True)),
-                (None, self._view_check("Esfera", 'view_sphere', "Esfera coloreada por nivel", True)),
-                (None, self._view_check("Polar 2D", 'view_polar2d', "Corte polar 2D", True)),
-                (None, self._view_check("Espectro", 'view_spectrum', "Espectro por azimuth", True)),
-                (None, self._view_check("Recuadro de info", 'show_info', "Banda, máximo y dinámica sobre cada gráfico", True))]),
             ("Polar 2D", [
                 ("Plano", self._c_plane),
                 ("Elevación", self._c_el),
@@ -665,12 +669,7 @@ class NativeRibbon(QWidget):
             nota        = str(s.get('nota', 'Todo el audio')),
             spec_data   = int(s.get('spec_data', 0)),
             spec_global = bool(s.get('spec_global', True)),
-            view_checks = {
-                '3d':       bool(s.get('view_3d',       True)),
-                'sphere':   bool(s.get('view_sphere',   True)),
-                'polar2d':  bool(s.get('view_polar2d',  True)),
-                'spectrum': bool(s.get('view_spectrum', True)),
-            },
+            view_checks = {'3d': True, 'sphere': True, 'polar2d': True, 'spectrum': True},
         )
 
 

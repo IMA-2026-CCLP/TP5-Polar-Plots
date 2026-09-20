@@ -202,6 +202,7 @@ class TabNotas(QWidget):
             return
         self._ma.scale = self._current_scale
         self._worker = Worker(self._run_detect, self._current_scale)
+        self._worker.label = "Detectando notas…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_detect_done)
         self._worker.error.connect(self._on_error)
@@ -324,6 +325,7 @@ class TabNotas(QWidget):
             return
         self.btn_extract.setEnabled(False)
         self._worker = Worker(self._run_extract)
+        self._worker.label = "Extrayendo notas…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_extract_done)
         self._worker.error.connect(self._on_error)
