@@ -22,7 +22,7 @@ LIGHT = dict(
     text="#1A1A1A", text2="#444444", text_muted="#7A7A7A",
     accent="#2F6DB5", border="#C8C8C8", border2="#A6A6A6",
     accent_ink="#FFFFFF",
-    btn_bg="#DCE7F4", btn_border="#9DB8D8", btn_text="#1B4A80", btn_hover="#C9DBEF",
+    btn_bg="#2F6DB5", btn_border="#2F6DB5", btn_text="#FFFFFF", btn_hover="#3E80CC",
     accent_soft="rgba(47,109,181,.14)", accent_line="rgba(47,109,181,.45)",
     ok="#1A9E5C",
     # Ribbon
@@ -52,7 +52,7 @@ DARK = dict(
     text="#E6E6E6", text2="#B0B0B0", text_muted="#808080",
     accent="#6FB1F0", border="#4A4A4A", border2="#6A6A6A",
     accent_ink="#0E0E0E",
-    btn_bg="#2F5F98", btn_border="#6FA3DC", btn_text="#FFFFFF", btn_hover="#3B74B6",
+    btn_bg="#3A78C2", btn_border="#6FA3DC", btn_text="#FFFFFF", btn_hover="#4A8AD6",
     accent_soft="rgba(91,155,213,.18)", accent_line="rgba(91,155,213,.5)",
     ok="#46D39A",
     # Ribbon

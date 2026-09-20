@@ -74,7 +74,6 @@ class NativeRibbon(QWidget):
     sig_align_preview    = pyqtSignal(float, float, object)
     sig_align_ref        = pyqtSignal(object)
     sig_open_calibracion = pyqtSignal()
-    sig_to_spl           = pyqtSignal()
     sig_plot_params      = pyqtSignal(object, object, bool, bool, object, float)
 
     sig_detect_notes     = pyqtSignal(float, float, float, float, object)
@@ -113,7 +112,6 @@ class NativeRibbon(QWidget):
         lay.addWidget(line)
 
         # Proxies de compatibilidad con MainWindow
-        self.btn_to_spl    = self._act['to_spl']
         self.btn_save_mask = self._act['save_mask']
         self.combo_bands   = _StateVal(self._b.state, 'bands',  '1/3')
         self.le_ref_az     = _StateVal(self._b.state, 'ref_az', '0')
@@ -129,7 +127,7 @@ class NativeRibbon(QWidget):
         for name in (
             'tab_changed', 'sig_load_audio', 'sig_edit_patterns', 'sig_save_tensor', 'sig_load_tensor',
             'sig_load_polar_npz', 'sig_save_polar_npz', 'sig_apply_hpf', 'sig_align_takes',
-            'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion', 'sig_to_spl',
+            'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
             'sig_save_mask', 'sig_load_mask', 'sig_compute_dir', 'sig_save_dir_npz',
             'sig_export_all_images', 'sig_dir_display_changed', 'sig_theme_toggled',
@@ -291,8 +289,7 @@ class NativeRibbon(QWidget):
         act('save_tensor', "Guardar sesión…", "Guarda tensor + calibración + notas + directividad en .cclp", b.saveTensor, False)
         act('load_polar',  "Cargar NPZ polar…", "Carga resultados de directividad exportados (.npz)", b.loadPolarNpz)
         act('save_polar',  "Guardar NPZ polar…", "Exporta solo los resultados de directividad calculados (.npz)", b.savePolarNpz, False)
-        act('calibrar',    "Calibrar…",       "Ingresar los niveles de calibración de cada micrófono", b.openCalibracion, False)
-        act('to_spl',      "Convertir a SPL", "Convierte el tensor (FS) a presión sonora usando la calibración cargada", b.toSpl, False)
+        act('calibrar',    "Calibración…",    "Abre la calibración: al aplicarla, el tensor pasa a dB SPL automáticamente", b.openCalibracion, False)
         act('save_mask',   "Guardar máscara…", "Guarda la segmentación de notas detectadas", b.saveMask, False)
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
         act('save_dir',    "Exportar NPZ",    "Exporta el patrón de directividad calculado (.npz)", b.saveDirNpz, False)
@@ -375,10 +372,6 @@ class NativeRibbon(QWidget):
         self._act_dark.triggered.connect(lambda _=False: self.sig_theme_toggled.emit())
         m.addAction(self._act_dark)
         m.addSeparator()   # debajo: mostrar/ocultar paneles (los agrega MainWindow)
-
-        m = mb.addMenu("&Calibración")
-        for n in ('calibrar', 'to_spl'):
-            m.addAction(self._act[n])
 
         m = mb.addMenu("&Herramientas")
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
@@ -500,6 +493,8 @@ class NativeRibbon(QWidget):
                 ("Frecuencia (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
                 (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
                                     lambda: b.applyHpf(), 'hpf', enabled=False))]),
+            ("Calibración", [
+                (None, self._tool('calibrar'))]),
             ("Alineación entre tomas (onset)", [
                 ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
                 ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),
@@ -575,7 +570,7 @@ class NativeRibbon(QWidget):
                                           self._num('hz_max', 56, "Frecuencia máxima a mostrar (Hz)", disp))),
                 ("Ref. azimut", self._c_ref_az),
                 ("Ref. elevación", self._c_ref_th),
-                (None, self._button("▶ Calcular", "Calcula el patrón de directividad (requiere tensor en SPL)",
+                (None, self._button("▶ Calcular", "Calcula el patrón de directividad (requiere la calibración aplicada, en Procesamiento ▸ Calibración)",
                                     lambda: b.computeDir(), 'compute', primary=True, enabled=False)),
                 (None, self._dir_status)]),
             ("Nota", [(None, self._c_nota)]),
@@ -635,7 +630,6 @@ class NativeRibbon(QWidget):
             self._btn[n].setEnabled(True)
         self._btn['compute'].setEnabled(is_spl)
         self._act['calibrar'].setEnabled(True)
-        self._act['to_spl'].setEnabled(not is_spl)
         self._act['save_tensor'].setEnabled(True)
 
         sr = getattr(ma, 'sr', 0) // 1000

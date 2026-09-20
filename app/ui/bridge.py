@@ -34,7 +34,6 @@ class Bridge(QObject):
     sig_align_ref          = pyqtSignal(object)
     sig_align_preview      = pyqtSignal(float, float, object)
     sig_open_calibracion   = pyqtSignal()
-    sig_to_spl             = pyqtSignal()
     sig_plot_params        = pyqtSignal(object, object, bool, bool, object, float)
     sig_detect_notes       = pyqtSignal(float, float, float, float, object)
     sig_edit_scale         = pyqtSignal()
@@ -156,10 +155,6 @@ class Bridge(QObject):
     @pyqtSlot()
     def openCalibracion(self):
         self.sig_open_calibracion.emit()
-
-    @pyqtSlot()
-    def toSpl(self):
-        self.sig_to_spl.emit()
 
     @pyqtSlot()
     def detectNotes(self):

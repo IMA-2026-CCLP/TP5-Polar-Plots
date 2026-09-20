@@ -120,7 +120,6 @@ class MainWindow(QMainWindow):
         rb.sig_align_preview.connect(self._on_align_preview)
         rb.sig_align_ref.connect(self._on_align_ref)
         rb.sig_open_calibracion.connect(self._open_calibracion_dialog)
-        rb.sig_to_spl.connect(self._on_to_spl)
 
         # ── Notas
         rb.sig_detect_notes.connect(self._on_detect_notes)
@@ -259,7 +258,6 @@ class MainWindow(QMainWindow):
     def _on_to_spl(self):
         if self._ma is None or self._ma._is_spl:
             return
-        self.ribbon.btn_to_spl.setEnabled(False)
 
         def _run():
             self._ma.to_spl()
@@ -270,7 +268,6 @@ class MainWindow(QMainWindow):
             self._append_log("[Calibración] Tensor convertido a SPL (Pa).")
 
         def _err(msg):
-            self.ribbon.btn_to_spl.setEnabled(True)
             self._append_log(f"[ERROR] to_spl:\n{msg}")
 
         self._spl_worker = Worker(_run)
@@ -283,7 +280,13 @@ class MainWindow(QMainWindow):
         if self._ma is None:
             return
         dlg = _CalibracionDialog(self._ma, self)
-        dlg.ma_updated.connect(self._on_ma_ready)
+
+        def applied(ma):                 # calibrar => pasar a dB SPL en el mismo paso
+            self._on_ma_ready(ma)
+            dlg.accept()
+            self._on_to_spl()
+
+        dlg.ma_updated.connect(applied)
         dlg.log.connect(self._append_log)
         dlg.exec()
 

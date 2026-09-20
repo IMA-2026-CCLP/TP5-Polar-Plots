@@ -90,17 +90,17 @@ QPushButton:disabled, QToolButton:disabled {{
 }}
 
 QPushButton#btn_primary {{
-    background: {p['accent']};
-    color: {p['accent_ink']};
-    border: 1px solid {p['accent']};
+    background: {p['btn_bg']};
+    color: {p['btn_text']};
+    border: 1px solid {p['btn_border']};
     font-weight: 600;
     font-size: 9pt;
     padding: 3px 14px;
     border-radius: 2px;
 }}
 QPushButton#btn_primary:hover {{
-    background: {p['accent_soft']};
-    color: {p['accent']};
+    background: {p['btn_hover']};
+    color: {p['btn_text']};
 }}
 QPushButton#btn_primary:disabled {{
     background: {p['border']};

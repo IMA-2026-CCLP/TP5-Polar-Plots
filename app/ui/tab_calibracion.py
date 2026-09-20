@@ -85,7 +85,7 @@ class TabCalibracion(QWidget):
         spl_row.addStretch()
         lay.addLayout(spl_row)
 
-        self.btn_calibrar = QPushButton("Calibrar")
+        self.btn_calibrar = QPushButton("Aplicar calibración")
         self.btn_calibrar.setObjectName("btn_primary")
         self.btn_calibrar.setEnabled(False)
         self.btn_calibrar.clicked.connect(self._on_calibrar)
