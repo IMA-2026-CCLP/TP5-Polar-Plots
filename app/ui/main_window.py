@@ -12,7 +12,7 @@ from PyQt6.QtGui import QFont, QTextCursor
 from core.worker import Worker
 
 from ui.styles               import QSS, get_qss
-from ui.html_ribbon          import HtmlRibbon
+from ui.native_ribbon        import NativeRibbon
 from ui                      import theme as _theme
 from ui.tab_carga            import TabCarga
 from ui.tab_preprocesamiento import TabPreprocesamiento
@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
         self.view_dir        = TabDirectividad()
 
         # Ribbon
-        self.ribbon = HtmlRibbon()
+        self.ribbon = NativeRibbon()
 
         # Stack de contenido
         self._stack = QStackedWidget()

@@ -1,7 +1,7 @@
 """ui/theme.py — Paletas clara/oscura y gestor de tema activo.
 
 Fuente única de verdad de color y tipografía para toda la app: QSS
-(styles.py), el ribbon HTML (via bridge.py → shell.html) y los widgets
+(styles.py), la barra superior nativa (native_ribbon.py) y los widgets
 pyqtgraph (f0_editor.py, waveform_editor.py, band_selector.py) leen sus
 colores de acá. Los gráficos de Directividad son la única excepción
 deliberada — su fondo queda blanco fijo sin importar el tema, ver
@@ -11,18 +11,18 @@ import os as _os
 
 _CHK = _os.path.join(_os.path.dirname(__file__), 'icons', 'check.svg').replace('\\', '/')
 
-_FONT_DISPLAY = "IBM Plex Sans Condensed"
-_FONT_BODY    = "IBM Plex Sans"
-_FONT_MONO    = "IBM Plex Mono"
+_FONT_DISPLAY = "Segoe UI"
+_FONT_BODY    = "Segoe UI"
+_FONT_MONO    = "Consolas"
 
 LIGHT = dict(
     name="light",
     # UI base — panel gris papel-técnico, superficie blanca
-    bg_base="#F5F6F7", bg_panel="#FFFFFF", bg_dark="#EDEFF2",
-    text="#1B1F24", text2="#5B6570", text_muted="#8A93A0",
-    accent="#146B64", border="#D8DCE0", border2="#C3C9CE",
+    bg_base="#F0F0F0", bg_panel="#FFFFFF", bg_dark="#E4E4E4",
+    text="#1A1A1A", text2="#444444", text_muted="#7A7A7A",
+    accent="#2F6DB5", border="#C8C8C8", border2="#A6A6A6",
     accent_ink="#FFFFFF",
-    accent_soft="rgba(20,107,100,.10)", accent_line="rgba(20,107,100,.35)",
+    accent_soft="rgba(47,109,181,.14)", accent_line="rgba(47,109,181,.45)",
     ok="#1A9E5C",
     # Ribbon
     rb_tabs="#FFFFFF", rb_panel="#F0F1F4",
@@ -47,11 +47,11 @@ LIGHT = dict(
 DARK = dict(
     name="dark",
     # UI base
-    bg_base="#15181B", bg_panel="#1D2124", bg_dark="#101214",
-    text="#EDEFF1", text2="#9AA4AA", text_muted="#6B7378",
-    accent="#3FCDB8", border="#2C3236", border2="#3A4146",
-    accent_ink="#0D1210",
-    accent_soft="rgba(63,205,184,.14)", accent_line="rgba(63,205,184,.4)",
+    bg_base="#2B2B2B", bg_panel="#353535", bg_dark="#222222",
+    text="#E6E6E6", text2="#B0B0B0", text_muted="#808080",
+    accent="#5B9BD5", border="#454545", border2="#5C5C5C",
+    accent_ink="#0E0E0E",
+    accent_soft="rgba(91,155,213,.18)", accent_line="rgba(91,155,213,.5)",
     ok="#46D39A",
     # Ribbon
     rb_tabs="#101214", rb_panel="#191D20",

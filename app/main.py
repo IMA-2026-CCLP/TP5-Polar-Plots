@@ -50,8 +50,8 @@ def main():
         app.setWindowIcon(QIcon(_ICON_PATH))
 
     _load_bundled_fonts()
-    font = QFont("IBM Plex Sans")
-    font.setPointSize(10)
+    font = QFont("Segoe UI")
+    font.setPointSize(9)
     app.setFont(font)
 
     # Aplicar en QApplication para que los popups (combos, menús) hereden el tema.

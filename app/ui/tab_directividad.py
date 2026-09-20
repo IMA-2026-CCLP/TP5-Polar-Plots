@@ -810,8 +810,8 @@ class TabDirectividad(QWidget):
     def _make_right_panel(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(4, 4, 4, 4)
-        lay.setSpacing(4)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(2)
 
         self._sections: dict[str, _ViewSection] = {
             "3d":       _ViewSection("Superficie 3D", "3d"),

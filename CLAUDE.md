@@ -36,11 +36,11 @@ There is no test suite, linter, or type checker configured in this repo.
 
 `QWebEngineView` **must** be imported before the `QApplication` is constructed (see the comment in `main.py`) — this is a hard Qt requirement, not a style choice.
 
-### UI shell: ribbon is HTML, not native widgets
+### UI shell: native menu + tabs + parameter rows (VituixCAD-style)
 
-`MainWindow` hosts a `QStackedWidget` of four tab views (Carga → Preprocesamiento → Notas → Directividad, in `ui/tab_*.py`) under a single global toolbar, `HtmlRibbon` (`ui/html_ribbon.py`). The ribbon itself is **not** built from Qt widgets — it's an HTML/JS page (`ui/shell.html`) rendered in a `QWebEngineView`, talking to Python through a `QWebChannel`-exposed `Bridge` QObject (`ui/bridge.py`). JS calls `pyqtSlot`s on `Bridge` to emit `pyqtSignal`s; `Bridge.state` is a plain dict holding the current value of every ribbon control, updated wholesale via `Bridge.updateState(json_str)` (a `dict.update`, not a replace) whenever any control changes. `HtmlRibbon` re-exposes those signals as its own for `MainWindow` to connect to.
+`MainWindow` hosts a `QStackedWidget` of four tab views (Carga → Preprocesamiento → Notas → Directividad, in `ui/tab_*.py`) under a single global top bar, `NativeRibbon` (`ui/native_ribbon.py`): a `QMenuBar`, a `QTabBar`, and one page of compact parameter rows per tab, all plain Qt widgets styled sober/flat by `ui/styles.py` + `ui/theme.py`. (It replaced an HTML/JS ribbon in a `QWebEngineView`; `QWebEngineView` is still needed for the Plotly `BalloonView`s.) `Bridge` (`ui/bridge.py`) is no longer a WebChannel object — it just holds `state` (a plain dict with the current value of every control) and the slots that build each signal's arguments from it. Widgets write `Bridge.state` directly and call those slots; `NativeRibbon` re-exposes the resulting signals for `MainWindow` to connect. Menu items and toolbar buttons share `QAction`s so enabled state stays in sync.
 
-When changing default UI state (e.g. which panels are visible by default), the value has to agree in three places: the HTML control's initial state in `shell.html`, `Bridge.state`'s initial dict, and any fallback default read via `.get(key, default)` downstream — `Bridge.state`'s initial value wins once a `.cclp` session is loaded, since `_on_ma_ready` in `main_window.py` does `bridge.state.update(loaded_ui_state)`.
+When changing default UI state (e.g. which panels are visible by default), the value lives in `Bridge.state`'s initial dict (widgets read their initial value from it via `_loaders`), plus any fallback default read via `.get(key, default)` downstream. `Bridge.state`'s initial value is overridden once a `.cclp` session is loaded, since `_on_ma_ready` in `main_window.py` does `bridge.state.update(loaded_ui_state)` and `NativeRibbon.set_ma_loaded` then re-syncs every widget from `state`.
 
 ### Domain model: `MicArray`
 
@@ -66,4 +66,4 @@ Two distinct on-disk formats, both NPZ under the hood:
 
 ### Packaging
 
-`polar_analyzer.spec` bundles `librosa`, `pyqtgraph`, `numba`, and `soundfile` via `collect_all()` in a try/except loop (these have import-time dynamic behavior PyInstaller's static analysis misses on its own). Icons and `ui/shell.html` are added as explicit `datas`. Output is a onedir build (`dist/PolarPatternAnalyzer/`, `_internal/` subfolder + `.exe`) — when sharing the built app, the whole folder must be zipped, not just the `.exe` (it will fail with a missing-DLL error otherwise since the internal Qt/Python DLLs live in `_internal/`).
+`polar_analyzer.spec` bundles `librosa`, `pyqtgraph`, `numba`, and `soundfile` via `collect_all()` in a try/except loop (these have import-time dynamic behavior PyInstaller's static analysis misses on its own). Icons and fonts are added as explicit `datas`. Output is a onedir build (`dist/PolarPatternAnalyzer/`, `_internal/` subfolder + `.exe`) — when sharing the built app, the whole folder must be zipped, not just the `.exe` (it will fail with a missing-DLL error otherwise since the internal Qt/Python DLLs live in `_internal/`).

@@ -1,8 +1,8 @@
 """
-ui/bridge.py — QObject expuesto al JS via QWebChannel.
+ui/bridge.py — Estado de los controles de la barra superior + slots que arman los parámetros de cada acción.
 
-El HTML llama a los slots de este objeto para notificar acciones del usuario.
-HtmlRibbon escucha las señales de este objeto y las reenvía a MainWindow.
+NativeRibbon guarda acá el valor de cada control (`state`), llama a estos slots al actuar
+el usuario y reenvía las señales resultantes a MainWindow.
 """
 import json
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -10,7 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 class Bridge(QObject):
 
-    # ── Python → JS (JS se subscribe con bridge.<sig>.connect(fn)) ───────────
+    # ── (heredado del ribbon HTML; NativeRibbon no los usa) ───────────────────
     statusUpdated    = pyqtSignal(str, bool)   # text, ok
     maLoaded         = pyqtSignal(str)          # JSON: {thetas, angles, is_spl}
     themeChanged     = pyqtSignal(str)          # JSON: paleta completa de theme.py
@@ -20,7 +20,7 @@ class Bridge(QObject):
     dirStatusChanged = pyqtSignal(str)          # status text
     enableBtn        = pyqtSignal(str, bool)    # html element id, enabled
 
-    # ── JS → Python (HtmlRibbon conecta a estas) ──────────────────────────────
+    # ── Acción del usuario → NativeRibbon reenvía a MainWindow ────────────────
     sig_tab_changed        = pyqtSignal(int)
     sig_height             = pyqtSignal(int)
     sig_load_audio         = pyqtSignal()
