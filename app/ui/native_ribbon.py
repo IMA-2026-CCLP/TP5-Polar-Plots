@@ -23,7 +23,6 @@ from ui import theme as _theme
 
 _TABS = [
     ("Procesamiento", "Visualizar señales, aplicar filtros y alinear tomas"),
-    ("Notas",         "Detectar y segmentar notas musicales en el audio"),
     ("Directividad",  "Calcular y visualizar el patrón de directividad acústica"),
 ]
 _CAP_W = 78   # ancho de la columna de títulos de fila (Cálculo, Vista…)
@@ -63,6 +62,7 @@ class NativeRibbon(QWidget):
 
     sig_load_audio      = pyqtSignal()
     sig_edit_patterns   = pyqtSignal()
+    sig_open_notas      = pyqtSignal()
     sig_save_tensor     = pyqtSignal()
     sig_load_tensor     = pyqtSignal()
     sig_load_polar_npz  = pyqtSignal()
@@ -102,7 +102,8 @@ class NativeRibbon(QWidget):
         self._make_actions()
         lay.addWidget(self._make_menubar())
         lay.addLayout(self._make_tabbar())
-        self._pages = [self._page_proc(), self._page_notas(), self._page_dir()]
+        self._pages = [self._page_proc(), self._page_dir()]
+        self.notas_page = self._page_notas()   # no va en la barra: MainWindow lo aloja en la ventana de Notas
         for p in self._pages:
             lay.addWidget(p)
         line = QFrame()
@@ -305,6 +306,7 @@ class NativeRibbon(QWidget):
 
         act('load_audio',  "Cargar audio…",   "Carga una carpeta de audios WAV y construye el tensor de medición", b.loadAudio)
         act('patterns',    "Patrones de archivos…", "Cómo se llaman los archivos de audio ({MIC} = micrófono, {H} = azimut)", b.editPatterns)
+        act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
         act('load_tensor', "Cargar sesión…",  "Carga una sesión (.cclp) o tensor (.npz) guardado", b.loadTensor)
         act('save_tensor', "Guardar sesión…", "Guarda tensor + calibración + notas + directividad en .cclp", b.saveTensor, False)
         act('load_polar',  "Cargar NPZ polar…", "Carga resultados de directividad exportados (.npz)", b.loadPolarNpz)
@@ -339,7 +341,7 @@ class NativeRibbon(QWidget):
         for n in ('calibrar', 'to_spl'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('edit_scale', 'save_mask', 'load_mask'):
+        for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
         m.addSeparator()
         for n in ('save_dir', 'export_all'):

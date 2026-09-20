@@ -22,6 +22,20 @@ from ui.tab_directividad     import TabDirectividad
 from core.data_store         import load_results, save_results
 
 
+class _NotasWindow(QWidget):
+    """Ventana no modal de Notas: parámetros de detección arriba y la vista de segmentos/F0 abajo."""
+    def __init__(self, params: QWidget, view: QWidget, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("Detección de notas")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(params)
+        lay.addWidget(view, 1)
+        avail = self.screen().availableGeometry()
+        self.resize(min(1000, avail.width() - 40), min(680, avail.height() - 40))
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self):
@@ -56,8 +70,7 @@ class MainWindow(QMainWindow):
         # Stack de contenido
         self._stack = QStackedWidget()
         self._stack.addWidget(self.view_prepro)     # 0  (home)
-        self._stack.addWidget(self.view_notas)      # 1
-        self._stack.addWidget(self.view_dir)        # 2
+        self._stack.addWidget(self.view_dir)        # 1
         self._stack.setCurrentIndex(0)
 
         # Layout central
@@ -68,6 +81,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.ribbon)
         lay.addWidget(self._stack, 1)
         self.setCentralWidget(central)
+        self.notas_win = _NotasWindow(self.ribbon.notas_page, self.view_notas, self)
 
         self._setup_log_dock()
 
@@ -85,6 +99,7 @@ class MainWindow(QMainWindow):
         rb.sig_load_audio.connect(lambda: self.loader.load_audio(self))
         rb.sig_load_tensor.connect(lambda: self.loader.load_session(self))
         rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
+        rb.sig_open_notas.connect(self._open_notas)
         rb.sig_save_tensor.connect(self._on_save_session)
         rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
         rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
@@ -154,6 +169,11 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
 
+    def _open_notas(self):
+        self.notas_win.show()
+        self.notas_win.raise_()
+        self.notas_win.activateWindow()
+
     # ── Slots de Archivo ──────────────────────────────────────────────────────
 
     def _on_save_session(self):
@@ -169,7 +189,7 @@ class MainWindow(QMainWindow):
             data = load_results(path)
             # Cambiar a Directividad ANTES de cargar para que las secciones
             # sean visibles cuando _refresh_display() las actualice
-            self.ribbon._switch_tab(2)
+            self.ribbon._switch_tab(1)
             self.view_dir.load_from_npz(data)
             self.ribbon.set_dir_computed(data['thetas'])
             self.ribbon.set_dir_status(
