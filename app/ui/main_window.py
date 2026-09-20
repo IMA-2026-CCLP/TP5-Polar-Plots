@@ -4,9 +4,11 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar, QMessageBox,
 )
-from PyQt6.QtCore import Qt, QSettings
+from pathlib import Path
+
+from PyQt6.QtCore import Qt, QSettings, QTimer
 from PyQt6.QtGui import QFont, QTextCursor
 
 from core.worker import Worker, activity
@@ -171,6 +173,7 @@ class MainWindow(QMainWindow):
 
         self.view_dir.log.connect(self._append_log)
         self.view_dir.computed.connect(self._on_dir_computed)
+        self.view_dir.compute_finished.connect(lambda: QTimer.singleShot(0, self._offer_save_directivity))
 
     # ── Tema ──────────────────────────────────────────────────────────────────
 
@@ -265,8 +268,10 @@ class MainWindow(QMainWindow):
             n.dir_levels is not None for n in ma.notes.values())
         if not has_global and not has_notes:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar directividad", "", "NPZ (*.npz)")
+        start = str(self._settings.value("last_polar_dir", "")) + "/directividad.npz"
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar directividad", start, "NPZ (*.npz)")
         if path:
+            self._settings.setValue("last_polar_dir", str(Path(path).parent))
             self._save_polar_npz_file(path, ma)
 
     def _save_polar_npz_file(self, path: str, ma):
@@ -436,6 +441,22 @@ class MainWindow(QMainWindow):
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()
         self.view_dir.apply_display_params(params)
+
+    def _offer_save_directivity(self):
+        """Tras Calcular: ofrece guardar el archivo de directividad (elige la ubicación en el diálogo de archivo)."""
+        ma = self.view_dir.get_ma()
+        if ma is None or ma.dir_levels is None:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Directividad calculada")
+        box.setText("¿Querés guardar el archivo de directividad?")
+        box.setInformativeText("Así podés volver a ver los gráficos más adelante sin reprocesar los audios.")
+        btn_save = box.addButton("Guardar…", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Ahora no", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_save)
+        box.exec()
+        if box.clickedButton() is btn_save:
+            self._on_save_polar_npz()
 
     def _on_dir_computed(self, thetas, status: str):
         self.ribbon.set_dir_computed(thetas)

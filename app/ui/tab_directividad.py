@@ -826,6 +826,7 @@ class _ViewSection(QWidget):
 class TabDirectividad(QWidget):
     log      = pyqtSignal(str)
     computed = pyqtSignal(object, str)  # (thetas_np, status_text)
+    compute_finished = pyqtSignal()     # terminó un cálculo pedido con 'Calcular' (no al cargar datos)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1244,6 +1245,7 @@ class TabDirectividad(QWidget):
                 status,
             )
         self.log.emit("[Directividad] Todas las configuraciones calculadas.")
+        self.compute_finished.emit()
 
     def load_from_npz(self, data: dict) -> list:
         """Carga resultados desde el dict devuelto por data_store.load_results().
