@@ -20,8 +20,21 @@ from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
 from core.worker import Worker
 from ui.balloon_view import BalloonView
+from ui.polar2d_view import Polar2DView
+from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
+from ui.widgets import NumEdit as _NumEdit
 from plot.balloon import COLORSCALES, _COMPARE_COLORS
+
+# polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView);
+# superficie_3d y esfera siguen en Plotly/QWebEngineView (BalloonView) hasta
+# que se migren a pyqtgraph.opengl en una pasada aparte.
+_VIEW_CLASS_BY_MODE = {
+    "3d":       BalloonView,
+    "sphere":   BalloonView,
+    "polar2d":  Polar2DView,
+    "spectrum": SpectrumView,
+}
 
 _MODE_LABELS = {
     "3d":       "superficie_3d",
@@ -59,44 +72,6 @@ _DEFAULT_STYLE_BY_MODE = {
 _DEFAULT_MIN_DB_BY_MODE = {"polar2d": -20.0}
 _DEFAULT_MAX_DB_BY_MODE = {"polar2d": 10.0}
 _DEFAULT_TICK_FONT_SIZE_BY_MODE = {"polar2d": 16.0}
-
-
-class _NumEdit(QLineEdit):
-    """Campo de texto simple para valores numéricos — reemplaza a
-    QDoubleSpinBox en todo el panel de Propiedades (sin flechitas de
-    incremento/decremento, sólo texto editable). Réplica el API mínimo
-    usado (setRange/setSingleStep/setDecimals/setValue/value) para no
-    tener que tocar el resto del código que arma los campos."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._lo = None
-        self._hi = None
-        self._decimals = 2
-        self.setFixedWidth(70)
-
-    def setRange(self, lo, hi):
-        self._lo, self._hi = lo, hi
-
-    def setSingleStep(self, step):
-        pass   # sin flechitas, no aplica
-
-    def setDecimals(self, n):
-        self._decimals = n
-
-    def setValue(self, v):
-        self.setText(str(int(round(v))) if self._decimals == 0 else f"{v:g}")
-
-    def value(self) -> float:
-        try:
-            v = float(self.text().strip().replace(',', '.'))
-        except ValueError:
-            v = 0.0
-        if self._lo is not None:
-            v = max(self._lo, v)
-        if self._hi is not None:
-            v = min(self._hi, v)
-        return v
 
 
 # ── Worker para cómputo batch (todo el audio + todas las notas) ───────────────
@@ -196,7 +171,7 @@ class _ViewSection(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        self.view = BalloonView()
+        self.view = _VIEW_CLASS_BY_MODE[mode]()
         self.view.set_view_mode(mode)
         self.view.log.connect(self.log)
         self.view.set_style(self._style)
@@ -239,7 +214,7 @@ class _ViewSection(QWidget):
         menu.addSeparator()
         act_save = menu.addAction("Guardar imagen…")
 
-        action = menu.exec(self.view._web.mapToGlobal(pos))
+        action = menu.exec(self.view.mapToGlobal(pos))
         try:
             if action == act_properties:
                 self.properties_requested.emit()
@@ -1431,3 +1406,4 @@ class TabDirectividad(QWidget):
         """Propaga el cambio de tema a todas las secciones de visualización."""
         for sec in self._sections.values():
             sec.view.apply_theme(palette)
+        self.band_selector.apply_theme(palette)

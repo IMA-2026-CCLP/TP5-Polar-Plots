@@ -785,6 +785,65 @@ def _polar_ring_raw(lev_2d, azimuths, elevations, plane, el_index):
     return az_full, r_full, title_extra, hover_label
 
 
+def compute_polar2d_ring(lev_2d, band_index, band_hz, azimuths, elevations,
+                         plane, el_index, style: Optional[dict] = None) -> dict:
+    """
+    Prepara UNA traza de anillo del Polar 2D: datos crudos (_polar_ring_raw)
+    → suavizado circular opcional → interpolación 1D → normalización a 0 dB
+    en az=0°. Devuelve el mismo dict que build_polar2d_html apila en `rings`,
+    reutilizable por cualquier backend de render (Plotly o pyqtgraph).
+    """
+    style = style or {}
+    az_full, r_full, title_extra, hover_label = _polar_ring_raw(
+        lev_2d, azimuths, elevations, plane, el_index
+    )
+
+    # ── Suavizado circular opcional (previo a interpolar) ─────────────────
+    smoothing_window = int(style.get('smoothing_window', 0))
+    smoothing_method = style.get('smoothing_method', 'gaussian')
+    if smoothing_window >= 2:
+        r_full = _smooth_circular(r_full, smoothing_window, method=smoothing_method)
+
+    # ── Interpolación 1D (idem plot_polar_2d en patron.py) ───────────────
+    interp_kind = style.get('interp_kind', 'cubic')
+    interp_deg  = style.get('interp_deg', 1.0)
+    try:
+        if interp_kind == 'none' or not interp_deg:
+            raise ValueError("interpolación desactivada")
+        from scipy.interpolate import interp1d
+        phi_new    = np.arange(az_full[0], az_full[-1] + interp_deg * 0.01, interp_deg)
+        phi_new    = phi_new[phi_new <= az_full[-1]]
+        r_full     = interp1d(az_full, r_full, kind=interp_kind)(phi_new)
+        az_full    = phi_new
+    except Exception:
+        pass   # interp_kind='none', scipy no disponible, o error → sin interpolar
+
+    # ── Normalizar: 0 dB en az=0° (idem GUI/ui/polar_plot_2d.py) ─────────
+    ref_idx = int(np.argmin(np.abs(az_full)))
+    ref_val = float(r_full[ref_idx])
+    if not np.isfinite(ref_val):
+        valid_mask = np.isfinite(r_full)
+        dists = np.abs(az_full)
+        dists[~valid_mask] = np.inf
+        best = int(np.argmin(dists))
+        ref_val = float(r_full[best]) if np.isfinite(r_full[best]) else 0.0
+
+    valid = np.isfinite(r_full)
+    gmin  = float(np.nanmin(r_full - ref_val)) if valid.any() else -60.0
+    gmax  = float(np.nanmax(r_full - ref_val)) if valid.any() else 0.0
+    r_rel = np.where(valid, r_full - ref_val, -60.0)
+
+    az_closed = np.append(az_full, az_full[0])
+    r_closed  = np.append(r_rel,   r_rel[0])
+    r_abs_cl  = np.append(r_full,  r_full[0])
+
+    return dict(
+        band_index=band_index, band_hz=band_hz, az_closed=az_closed, r_closed=r_closed,
+        r_abs_cl=r_abs_cl, title_extra=title_extra, hover_label=hover_label,
+        gmin=gmin, gmax=gmax,
+    )
+
+
 def build_polar2d_html(
     levels:        np.ndarray,
     azimuths:      np.ndarray,
@@ -872,57 +931,10 @@ def build_polar2d_html(
     bands_to_plot = compare_bands if compare_bands else [(band_index, band_hz)]
     multi = len(bands_to_plot) > 1
 
-    rings = []
-    for bi, bhz in bands_to_plot:
-        lev_2d = levels[:, :, bi]
-        az_full, r_full, title_extra, hover_label = _polar_ring_raw(
-            lev_2d, azimuths, elevations, plane, el_index
-        )
-
-        # ── Suavizado circular opcional (previo a interpolar) ─────────────────
-        smoothing_window = int(style.get('smoothing_window', 0))
-        smoothing_method = style.get('smoothing_method', 'gaussian')
-        if smoothing_window >= 2:
-            r_full = _smooth_circular(r_full, smoothing_window, method=smoothing_method)
-
-        # ── Interpolación 1D (idem plot_polar_2d en patron.py) ───────────────
-        interp_kind = style.get('interp_kind', 'cubic')
-        interp_deg  = style.get('interp_deg', 1.0)
-        try:
-            if interp_kind == 'none' or not interp_deg:
-                raise ValueError("interpolación desactivada")
-            from scipy.interpolate import interp1d
-            phi_new    = np.arange(az_full[0], az_full[-1] + interp_deg * 0.01, interp_deg)
-            phi_new    = phi_new[phi_new <= az_full[-1]]
-            r_full     = interp1d(az_full, r_full, kind=interp_kind)(phi_new)
-            az_full    = phi_new
-        except Exception:
-            pass   # interp_kind='none', scipy no disponible, o error → sin interpolar
-
-        # ── Normalizar: 0 dB en az=0° (idem GUI/ui/polar_plot_2d.py) ─────────
-        ref_idx = int(np.argmin(np.abs(az_full)))
-        ref_val = float(r_full[ref_idx])
-        if not np.isfinite(ref_val):
-            valid_mask = np.isfinite(r_full)
-            dists = np.abs(az_full)
-            dists[~valid_mask] = np.inf
-            best = int(np.argmin(dists))
-            ref_val = float(r_full[best]) if np.isfinite(r_full[best]) else 0.0
-
-        valid = np.isfinite(r_full)
-        gmin  = float(np.nanmin(r_full - ref_val)) if valid.any() else -60.0
-        gmax  = float(np.nanmax(r_full - ref_val)) if valid.any() else 0.0
-        r_rel = np.where(valid, r_full - ref_val, -60.0)
-
-        az_closed = np.append(az_full, az_full[0])
-        r_closed  = np.append(r_rel,   r_rel[0])
-        r_abs_cl  = np.append(r_full,  r_full[0])
-
-        rings.append(dict(
-            band_index=bi, band_hz=bhz, az_closed=az_closed, r_closed=r_closed,
-            r_abs_cl=r_abs_cl, title_extra=title_extra, hover_label=hover_label,
-            gmin=gmin, gmax=gmax,
-        ))
+    rings = [
+        compute_polar2d_ring(levels[:, :, bi], bi, bhz, azimuths, elevations, plane, el_index, style)
+        for bi, bhz in bands_to_plot
+    ]
 
     # ── Rango dinámico combinado: min/max de TODAS las bandas mostradas ───────
     step    = style.get('ring_step', 5.0)

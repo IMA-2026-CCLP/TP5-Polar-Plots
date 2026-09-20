@@ -15,6 +15,7 @@ from PyQt6.QtWebEngineCore import QWebEngineSettings
 from PyQt6.QtWebChannel import QWebChannel
 
 from ui.bridge import Bridge
+from ui import theme as _theme
 
 _SHELL_PATH = os.path.join(os.path.dirname(__file__), 'shell.html')
 _TAB_H    = 50
@@ -156,6 +157,9 @@ class HtmlRibbon(QWidget):
             return
         from ui.tab_notas import SCALE_PRESETS
         self._bridge.presetsLoaded.emit(json.dumps(list(SCALE_PRESETS.keys())))
+        # Empuja la paleta actual apenas el HTML está listo — theme.py es
+        # la única fuente de verdad de color, shell.html no hardcodea hex.
+        self._bridge.themeChanged.emit(json.dumps(_theme.current()))
 
     def _js(self, code: str):
         self._view.page().runJavaScript(code)
@@ -168,8 +172,8 @@ class HtmlRibbon(QWidget):
         self._bridge.state['tab'] = idx
 
     def _update_theme_icon(self, palette: dict):
-        """RibbonBar actualiza el ícono; aquí notificamos al HTML."""
-        self._bridge.themeChanged.emit(palette['name'])
+        """RibbonBar actualiza el ícono; aquí empujamos la paleta completa al HTML."""
+        self._bridge.themeChanged.emit(json.dumps(palette))
 
     def set_ma_loaded(self, ma):
         thetas = list(ma.thetas)

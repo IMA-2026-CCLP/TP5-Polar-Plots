@@ -1,59 +1,79 @@
-"""ui/theme.py — Paletas oscura/clara y gestor de tema activo."""
+"""ui/theme.py — Paletas clara/oscura y gestor de tema activo.
+
+Fuente única de verdad de color y tipografía para toda la app: QSS
+(styles.py), el ribbon HTML (via bridge.py → shell.html) y los widgets
+pyqtgraph (f0_editor.py, waveform_editor.py, band_selector.py) leen sus
+colores de acá. Los gráficos de Directividad son la única excepción
+deliberada — su fondo queda blanco fijo sin importar el tema, ver
+tab_directividad.py.
+"""
 import os as _os
 
 _CHK = _os.path.join(_os.path.dirname(__file__), 'icons', 'check.svg').replace('\\', '/')
 
+_FONT_DISPLAY = "IBM Plex Sans Condensed"
+_FONT_BODY    = "IBM Plex Sans"
+_FONT_MONO    = "IBM Plex Mono"
+
+LIGHT = dict(
+    name="light",
+    # UI base — panel gris papel-técnico, superficie blanca
+    bg_base="#F5F6F7", bg_panel="#FFFFFF", bg_dark="#EDEFF2",
+    text="#1B1F24", text2="#5B6570", text_muted="#8A93A0",
+    accent="#146B64", border="#D8DCE0", border2="#C3C9CE",
+    accent_ink="#FFFFFF",
+    accent_soft="rgba(20,107,100,.10)", accent_line="rgba(20,107,100,.35)",
+    ok="#1A9E5C",
+    # Ribbon
+    rb_tabs="#FFFFFF", rb_panel="#F0F1F4",
+    rb_hint="#5B6570", rb_icon="#5B6570",
+    rb_sep="#D8DCE0", rb_btn_bg="#EDEFF2", rb_btn_bor="#D8DCE0",
+    rb_grp_lbl="#8A93A0", rb_disabled="#C3C9CE",
+    # Plot chrome (los 4 gráficos de Directividad ignoran esto, ver arriba)
+    plot_bg="#FFFFFF", plot_grid="#D8DCE0", plot_text="#1B1F24",
+    spec_plot_bg="#FFFFFF",
+    # Overlays / polar
+    polar_ring_line="rgba(27,31,36,0.15)",
+    polar_ring_text="rgba(91,101,112,0.7)",
+    polar_axis_line="rgba(27,31,36,0.2)",
+    polar_axis_grid="rgba(27,31,36,0.1)",
+    legend_bg="rgba(27,31,36,0.04)",
+    overlay_bg="rgba(255,255,255,.9)",
+    overlay_border="rgba(27,31,36,.15)",
+    chk_icon=_CHK,
+    font_display=_FONT_DISPLAY, font_body=_FONT_BODY, font_mono=_FONT_MONO,
+)
+
 DARK = dict(
     name="dark",
     # UI base
-    bg_base="#13151f", bg_panel="#1d2035", bg_dark="#0f1119",
-    text="#dde3f4", text2="#9aa6cc", text_muted="#6b7898",
-    accent="#6070d0", border="#252840", border2="#353a58",
+    bg_base="#15181B", bg_panel="#1D2124", bg_dark="#101214",
+    text="#EDEFF1", text2="#9AA4AA", text_muted="#6B7378",
+    accent="#3FCDB8", border="#2C3236", border2="#3A4146",
+    accent_ink="#0D1210",
+    accent_soft="rgba(63,205,184,.14)", accent_line="rgba(63,205,184,.4)",
+    ok="#46D39A",
     # Ribbon
-    rb_tabs="#0d0f18", rb_panel="#181b2c",
-    rb_hint="#8a96be", rb_icon="#9aa6cc",
-    rb_sep="#353a58", rb_btn_bg="#1e2238", rb_btn_bor="#3a3f60",
-    rb_grp_lbl="#606880", rb_disabled="#2e3248",
-    # Plot
-    plot_bg="#1a1d27", plot_grid="#2e3248", plot_text="#e0e0e0",
-    spec_plot_bg="#1e2134",
+    rb_tabs="#101214", rb_panel="#191D20",
+    rb_hint="#9AA4AA", rb_icon="#9AA4AA",
+    rb_sep="#3A4146", rb_btn_bg="#22262A", rb_btn_bor="#3A4146",
+    rb_grp_lbl="#6B7378", rb_disabled="#2C3236",
+    # Plot chrome (los 4 gráficos de Directividad ignoran esto, ver arriba)
+    plot_bg="#1D2124", plot_grid="#2C3236", plot_text="#EDEFF1",
+    spec_plot_bg="#1D2124",
     # Overlays / polar
     polar_ring_line="rgba(255,255,255,0.12)",
     polar_ring_text="rgba(200,200,200,0.5)",
     polar_axis_line="rgba(255,255,255,0.2)",
     polar_axis_grid="rgba(255,255,255,0.1)",
     legend_bg="rgba(255,255,255,0.04)",
-    overlay_bg="rgba(255,255,255,.08)",
+    overlay_bg="rgba(29,33,36,.9)",
     overlay_border="rgba(255,255,255,.15)",
     chk_icon=_CHK,
+    font_display=_FONT_DISPLAY, font_body=_FONT_BODY, font_mono=_FONT_MONO,
 )
 
-LIGHT = dict(
-    name="light",
-    # UI base
-    bg_base="#f4f5fa", bg_panel="#ffffff", bg_dark="#eaecf4",
-    text="#1e2035", text2="#4a5070", text_muted="#6a7090",
-    accent="#5060c0", border="#d0d4e8", border2="#b8bcd0",
-    # Ribbon
-    rb_tabs="#dddfe8", rb_panel="#e8eaf2",
-    rb_hint="#5a6080", rb_icon="#5a6080",
-    rb_sep="#b8bcd0", rb_btn_bg="#d0d2de", rb_btn_bor="#b0b4c8",
-    rb_grp_lbl="#7a80a0", rb_disabled="#b0b4c8",
-    # Plot
-    plot_bg="#f8f8fc", plot_grid="#d8daea", plot_text="#1e2035",
-    spec_plot_bg="#f0f2fa",
-    # Overlays / polar
-    polar_ring_line="rgba(0,0,0,0.15)",
-    polar_ring_text="rgba(80,80,80,0.7)",
-    polar_axis_line="rgba(0,0,0,0.2)",
-    polar_axis_grid="rgba(0,0,0,0.1)",
-    legend_bg="rgba(0,0,0,0.04)",
-    overlay_bg="rgba(255,255,255,.9)",
-    overlay_border="rgba(30,32,53,.15)",
-    chk_icon=_CHK,
-)
-
-_current = DARK
+_current = LIGHT
 
 
 def current() -> dict:
@@ -62,7 +82,7 @@ def current() -> dict:
 
 def toggle() -> dict:
     global _current
-    _current = LIGHT if _current is DARK else DARK
+    _current = DARK if _current is LIGHT else LIGHT
     return _current
 
 
