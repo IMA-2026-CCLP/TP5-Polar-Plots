@@ -22,6 +22,11 @@ from ui.tab_directividad     import TabDirectividad
 from core.data_store         import load_results, save_results
 
 
+# Controles de Directividad que se guardan con el .npz para reabrir los gráficos igual
+_DIR_UI_KEYS = ('bands', 'hz_min', 'hz_max', 'ref_az', 'ref_th', 'colorscale', 'el_idx', 'polar_plane',
+                'show_info', 'symmetry', 'nota', 'spec_data', 'spec_global')
+
+
 class _NotasWindow(QWidget):
     """Ventana no modal de Notas: parámetros de detección arriba y la vista de segmentos/F0 abajo."""
     def __init__(self, params: QWidget, view: QWidget, parent=None):
@@ -219,23 +224,32 @@ class MainWindow(QMainWindow):
 
     def _on_load_polar_npz(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Cargar NPZ polar", "", "NPZ (*.npz)"
+            self, "Cargar directividad", "", "NPZ (*.npz)"
         )
-        if not path:
-            return
+        if path:
+            self._load_polar_npz_file(path)
+
+    def _load_polar_npz_file(self, path: str):
         try:
             data = load_results(path)
+            view = data['metadata'].get('view') or {}
             # Cambiar a Directividad ANTES de cargar para que las secciones
             # sean visibles cuando _refresh_display() las actualice
             self.ribbon._switch_tab(1)
-            self.view_dir.load_from_npz(data)
+            notes = self.view_dir.load_from_npz(data)
             self.ribbon.set_dir_computed(data['thetas'])
+            self.ribbon.set_notes_loaded(notes)
+            if view.get('ui'):                       # controles como estaban al guardar
+                self.ribbon.apply_ui_state(view['ui'])
+            if view.get('view_dir'):                 # propiedades de cada gráfico
+                self.view_dir.apply_view_config(view['view_dir'])
+            self.view_dir.apply_display_params(self.ribbon.get_dir_display_params())
             self.ribbon.set_dir_status(
-                f"NPZ cargado\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
+                f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
-            self._append_log(f"[Directividad] NPZ cargado desde {path}")
+            self._append_log(f"[Directividad] Cargado desde {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al cargar NPZ polar: {e}")
+            self._append_log(f"[ERROR] Al cargar directividad: {e}")
 
     def _on_save_polar_npz(self):
         # OJO: self._ma sólo se actualiza al cargar/preprocesar/calibrar
@@ -251,17 +265,25 @@ class MainWindow(QMainWindow):
             n.dir_levels is not None for n in ma.notes.values())
         if not has_global and not has_notes:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar NPZ polar", "", "NPZ (*.npz)")
-        if not path:
-            return
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar directividad", "", "NPZ (*.npz)")
+        if path:
+            self._save_polar_npz_file(path, ma)
+
+    def _save_polar_npz_file(self, path: str, ma):
         try:
             rb = self.ribbon
+            st = rb._bridge.state
+            view = {
+                'ui': {k: st[k] for k in _DIR_UI_KEYS if k in st},
+                'view_dir': self.view_dir.get_view_config(),
+            }
             save_results(
                 filepath       = path,
                 ma             = ma,
                 bands          = rb.combo_bands.currentText(),
                 ref_azimuth    = int(float(rb.le_ref_az.text() or 0)),
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
+                view           = view,
             )
             self._append_log(f"[Directividad] Guardado → {path}")
         except Exception as e:

@@ -269,8 +269,8 @@ class NativeRibbon(QWidget):
         act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
         act('load_tensor', "Cargar sesión…",  "Carga una sesión (.cclp) o tensor (.npz) guardado", b.loadTensor)
         act('save_tensor', "Guardar sesión…", "Guarda tensor + calibración + notas + directividad en .cclp", b.saveTensor, False)
-        act('load_polar',  "Cargar NPZ polar…", "Carga resultados de directividad exportados (.npz)", b.loadPolarNpz)
-        act('save_polar',  "Guardar NPZ polar…", "Exporta solo los resultados de directividad calculados (.npz)", b.savePolarNpz, False)
+        act('load_polar',  "Cargar directividad (sin audios)…", "Abre un .npz de directividad: los gráficos y su configuración, sin necesidad de los audios", b.loadPolarNpz)
+        act('save_polar',  "Guardar directividad (sin audios)…", "Guarda los resultados calculados y la configuración de los gráficos en un .npz (sin los audios)", b.savePolarNpz, False)
         act('calibrar',    "Calibración…",    "Abre la calibración: al aplicarla, el tensor pasa a dB SPL automáticamente", b.openCalibracion, False)
         act('save_mask',   "Guardar máscara…", "Guarda la segmentación de notas detectadas", b.saveMask, False)
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
@@ -642,6 +642,11 @@ class NativeRibbon(QWidget):
         self._sync()                 # numéricos/checks/pills desde state (p. ej. sesión cargada)
         self._b.emitPlotParams()
         self._b.emitAlignPreview()
+
+    def apply_ui_state(self, d: dict):
+        """Vuelca valores guardados (p. ej. de un .npz de directividad) a Bridge.state y a los controles."""
+        self._b.state.update(d)
+        self._sync()
 
     def set_notes_loaded(self, notes: list):
         self._fill(self._c_nota, [("Todo el audio", "Todo el audio")] + [(n, n) for n in notes], 'nota')

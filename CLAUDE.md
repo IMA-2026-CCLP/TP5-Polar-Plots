@@ -62,7 +62,7 @@ Tabs pass a shared `MicArray` instance up the chain via `ma_ready`/`ma_updated` 
 
 Two distinct on-disk formats, both NPZ under the hood:
 - **`.cclp`** (`core/session.py`) — full working session: raw tensor (SPL reverted before saving), array metadata, calibration, computed directivity, extracted notes, and UI state as JSON.
-- **directivity `.npz`** (`core/data_store.py`) — directivity-only results for exchange/inspection, schema documented at the top of that file. `save_results()` will use the first computed note as the "global" section if the user never computed directivity on "Todo el audio", so the file is always loadable even when only per-note directivity exists.
+- **directivity `.npz`** (`core/data_store.py`) — directivity-only results for exchange/inspection, schema documented at the top of that file. `save_results()` will use the first computed note as the "global" section if the user never computed directivity on "Todo el audio", so the file is always loadable even when only per-note directivity exists. It also stores `metadata['view']` (the Directividad controls in `_DIR_UI_KEYS` plus each plot's Propiedades via `TabDirectividad.get_view_config()`), and loading it (`MainWindow._load_polar_npz_file`) repopulates the four plots, the note selector and the controls **without audio or a `MicArray`** (`TabDirectividad._npz` serves per-note data).
 
 ### Packaging
 

@@ -736,8 +736,11 @@ class _ViewSection(QWidget):
         Devuelve False si no hay nada para deshacer."""
         if not self._props_undo_stack:
             return False
-        snap = self._props_undo_stack.pop()
-        self._style          = snap['style']
+        self._apply_snapshot(self._props_undo_stack.pop())
+        return True
+
+    def _apply_snapshot(self, snap: dict):
+        self._style          = dict(snap['style'])
         self._min_db         = snap['min_db']
         self._max_db         = snap['max_db']
         self._tick_font_size = snap['tick_font_size']
@@ -750,7 +753,20 @@ class _ViewSection(QWidget):
         elif self._mode == "polar2d":
             self.view.set_tick_font_size(self._tick_font_size)
         self.view.set_style(self._style)
-        return True
+
+    def get_config(self) -> dict:
+        """Propiedades del gráfico en forma serializable (para guardar junto con los datos)."""
+        c = self._snapshot_properties()
+        c['compare_indices'] = [int(i) for i in self._compare_indices] if self._compare_indices else None
+        c['compare_styles'] = {str(k): v for k, v in self._compare_styles.items()}
+        return c
+
+    def apply_config(self, c: dict):
+        self._apply_snapshot(c)
+        self._compare_indices = c.get('compare_indices')
+        self._compare_styles = {int(k): v for k, v in (c.get('compare_styles') or {}).items()}
+        self.view.set_compare_bands(self._compare_indices)
+        self.view.set_compare_styles(self._compare_styles)
 
     def set_data(self, **kwargs):
         self.view.set_data(**kwargs)
@@ -794,6 +810,7 @@ class TabDirectividad(QWidget):
         self._plane            = "XY"
         self._show_info        = True
         self._current_band_idx = 0
+        self._npz: dict | None = None   # resultados cargados de un .npz (sin MicArray): {nota: {...}}
 
         # Estado de controles del ribbon — actualizados por apply_display_params()
         self._hz_min      = 200.0
@@ -1128,6 +1145,7 @@ class TabDirectividad(QWidget):
 
     def set_ma(self, ma):
         self._ma = ma
+        self._npz = None
         if ma.dir_levels is not None:
             self._show_results(ma)
             status = (
@@ -1215,20 +1233,45 @@ class TabDirectividad(QWidget):
             )
         self.log.emit("[Directividad] Todas las configuraciones calculadas.")
 
-    def load_from_npz(self, data: dict):
-        """Carga resultados desde el dict devuelto por data_store.load_results()."""
-        self._full_levels   = data['dir_levels'].astype(np.float32)
+    def load_from_npz(self, data: dict) -> list:
+        """Carga resultados desde el dict devuelto por data_store.load_results().
+        Guarda también los datos por nota para poder cambiar de nota sin MicArray.
+        Devuelve los nombres de nota disponibles."""
+        f32 = lambda k: data[k].astype(np.float32) if k in data else None
+        self._npz = {"Todo el audio": dict(levels=f32('dir_levels'), spl_ref=f32('spl_ref'),
+                                            spl_ref_az=f32('spl_ref_per_az'))}
+        notes = []
+        for key in data:
+            if key.startswith('note_') and key.endswith('_dir_levels'):
+                name = key[len('note_'):-len('_dir_levels')]
+                notes.append(name)
+                self._npz[name] = dict(levels=f32(key), spl_ref=f32(f'note_{name}_spl_ref'),
+                                       spl_ref_az=f32(f'note_{name}_spl_ref_per_az'))
         self._full_azimuths = data['azimuths'].astype(np.float32)
         self._full_thetas   = data['thetas'].astype(np.float32)
         self._full_bands    = data['dir_freqs'].astype(np.float32)
+        self._apply_npz_entry("Todo el audio")
+        return notes
 
-        self._eq_ref_spl = data['spl_ref'].astype(np.float32)
-        if 'spl_ref_per_az' in data:
-            self._raw_ref_spl = data['spl_ref_per_az'].astype(np.float32)
-        else:
-            self._raw_ref_spl = None   # NPZ antiguo, guardado sin el espectro por toma
-
+    def _apply_npz_entry(self, name: str):
+        e = self._npz[name]
+        self._full_levels = e['levels']
+        self._eq_ref_spl  = e['spl_ref']
+        self._raw_ref_spl = e['spl_ref_az']   # None en NPZ antiguos (sin espectro por toma)
         self._refresh_display()
+
+    def get_view_config(self) -> dict:
+        """Propiedades de los 4 gráficos + banda activa (se guardan junto con el .npz de directividad)."""
+        return {'sections': {m: s.get_config() for m, s in self._sections.items()},
+                'band_index': int(self._current_band_idx)}
+
+    def apply_view_config(self, cfg: dict):
+        for m, c in (cfg.get('sections') or {}).items():
+            if m in self._sections:
+                self._sections[m].apply_config(c)
+        self._current_band_idx = int(cfg.get('band_index', 0))
+        self._refresh_display()
+        self.band_selector.set_index(self._current_band_idx)
 
     def apply_display_params(self, params: dict):
         """
@@ -1262,6 +1305,9 @@ class TabDirectividad(QWidget):
 
         # Si cambió la nota, recargar datos desde el MA correspondiente
         if self._nota != old_nota:
+            if self._npz is not None and self._nota in self._npz:
+                self._apply_npz_entry(self._nota)
+                return
             current_ma = self._get_current_ma()
             if current_ma is not None and current_ma.dir_levels is not None:
                 self._show_results(current_ma)

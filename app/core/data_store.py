@@ -11,6 +11,8 @@ Formato acordado:
                                            (para el panel Espectro). Ausente en NPZ viejos.
   metadata        JSON string              ver save_results()
 
+metadata['view'] (opcional): controles de visualización y propiedades de cada gráfico.
+
 Sección opcional por nota (prefijo 'note_'):
   note_Fa4_dir_levels        (n_az, n_thetas, n_bands)
   note_Fa4_spl_ref           (n_bands,)
@@ -62,6 +64,7 @@ def save_results(
     bands: str = '1/3',
     ref_azimuth: int = 0,
     ref_theta_plot: int = 0,
+    view: dict | None = None,
 ) -> None:
     """
     Guarda el patrón de directividad de un MicArray en el formato NPZ acordado.
@@ -74,6 +77,8 @@ def save_results(
     bands          : resolución de bandas usada
     ref_azimuth    : azimuth de referencia
     ref_theta_plot : theta de referencia del plot
+    view           : configuración de visualización (controles + propiedades de cada gráfico,
+                     JSON-serializable); se guarda en metadata['view'] para reabrir tal cual
     """
     notes_to_save = notes_list or (list(ma.notes.keys()) if ma.notes else [])
     notes_to_save = [n for n in notes_to_save
@@ -104,6 +109,8 @@ def save_results(
         "saved_at":       datetime.now().isoformat(timespec='seconds'),
         "notes":          notes_to_save,
     }
+    if view:
+        meta["view"] = view
 
     dir_lev = ma_global.dir_levels[:, theta_indices, :]  # (n_az, n_thetas_num, n_bands)
 
@@ -129,7 +136,7 @@ def save_results(
         if n_spl_ref_az is not None:
             kwargs[f'note_{note_name}_spl_ref_per_az'] = n_spl_ref_az
 
-    kwargs['metadata'] = np.array([json.dumps(meta, ensure_ascii=False)])
+    kwargs['metadata'] = np.array([json.dumps(meta, ensure_ascii=False, default=lambda o: o.item() if hasattr(o, 'item') else str(o))])
 
     np.savez_compressed(filepath, **kwargs)
     size_kb = Path(filepath).stat().st_size / 1024

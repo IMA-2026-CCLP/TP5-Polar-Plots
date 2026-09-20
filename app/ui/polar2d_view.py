@@ -260,7 +260,9 @@ class Polar2DView(QWidget):
 
         self._plot.clear()
         if self._legend is not None:
-            self._legend.scene().removeItem(self._legend)
+            scene = self._legend.scene()
+            if scene is not None:              # puede haber salido ya de la escena (plot.clear())
+                scene.removeItem(self._legend)
             self._legend = None
 
         ring_color = self._style.get('ring_color') or '#000000'
