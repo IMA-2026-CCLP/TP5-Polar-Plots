@@ -493,8 +493,6 @@ class NativeRibbon(QWidget):
                 ("Frecuencia (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
                 (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
                                     lambda: b.applyHpf(), 'hpf', enabled=False))]),
-            ("Calibración", [
-                (None, self._tool('calibrar'))]),
             ("Alineación entre tomas (onset)", [
                 ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
                 ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),
@@ -509,6 +507,8 @@ class NativeRibbon(QWidget):
                     "Umbral GCC", _GCC_HELP)),
                 (None, self._button("Alinear mics", "Alinea los micrófonos al de referencia con GCC-PHAT",
                                     lambda: b.alignRef(), 'align_ref', enabled=False))]),
+            ("Calibración", [
+                (None, self._tool('calibrar'))]),
         ])
 
     # ── Ventana de Notas (filas horizontales) ─────────────────────────────
