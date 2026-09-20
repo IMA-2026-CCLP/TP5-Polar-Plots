@@ -50,8 +50,8 @@ _DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
 # acompaña al bg_color para que las etiquetas no queden claras sobre
 # fondo blanco si la app está en tema oscuro.
 _DEFAULT_STYLE_BY_MODE = {
-    "3d":       {"bg_color": "#ffffff", "text_color": "#1a1a1a"},
-    "sphere":   {"bg_color": "#ffffff", "text_color": "#1a1a1a"},
+    "3d":       {"bg_color": "#ffffff", "text_color": "#000000"},
+    "sphere":   {"bg_color": "#ffffff", "text_color": "#000000"},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -67,7 +67,7 @@ _DEFAULT_STYLE_BY_MODE = {
         "interp_kind":      "cubic",
         "interp_deg":       2.0,
     },
-    "spectrum": {"bg_color": "#ffffff", "text_color": "#1a1a1a"},
+    "spectrum": {"bg_color": "#ffffff", "text_color": "#000000"},
 }
 _DEFAULT_MIN_DB_BY_MODE = {"polar2d": -20.0}
 _DEFAULT_MAX_DB_BY_MODE = {"polar2d": 10.0}

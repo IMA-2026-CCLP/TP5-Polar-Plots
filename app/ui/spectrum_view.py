@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 from core.data_store import freq_label
+from plot.balloon import FONT_SIZE
 
 pg.setConfigOptions(antialias=True)
 
@@ -58,17 +59,21 @@ class SpectrumView(QWidget):
         self._plot = pg.PlotWidget()
         self._plot.setBackground('#ffffff')   # fondo fijo, ver tab_directividad.py
         self._plot.showGrid(x=False, y=True, alpha=0.15)
-        self._plot.setLabel('left', 'dB SPL', color='#1a1a1a')
-        self._plot.setLabel('bottom', 'Frecuencia [Hz]', color='#1a1a1a')
-        for ax in ('left', 'bottom'):          # ejes oscuros sobre el fondo blanco fijo
-            self._plot.getAxis(ax).setPen('#1a1a1a')
-            self._plot.getAxis(ax).setTextPen('#1a1a1a')
+        self._plot.setLabel('left', 'dB SPL', color='#000000', **{'font-size': f'{FONT_SIZE}px'})
+        self._plot.setLabel('bottom', 'Frecuencia [Hz]', color='#000000', **{'font-size': f'{FONT_SIZE}px'})
+        tick_font = QFont("Segoe UI")
+        tick_font.setPixelSize(FONT_SIZE)
+        for ax in ('left', 'bottom'):          # ejes negros sobre el fondo blanco fijo
+            axis = self._plot.getAxis(ax)
+            axis.setPen('#000000')
+            axis.setTextPen('#000000')
+            axis.setStyle(tickFont=tick_font)
         self._plot.getPlotItem().setMenuEnabled(False)
         self._legend = None
 
         self._info_label = QLabel(self._plot)
         self._info_label.setStyleSheet(
-            "background: rgba(255,255,255,.9); color: #1a1a1a; "
+            "background: rgba(255,255,255,.9); color: #000000; "
             "border-radius: 6px; padding: 6px 10px; font-size: 9pt;"
         )
         self._info_label.move(8, 8)
