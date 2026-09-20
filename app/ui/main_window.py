@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
         self._ma       = None
         self._settings = QSettings("AcousticTools", "PolarAnalyzerV2")
         import plot.balloon as _balloon
-        _balloon.set_theme(_theme.current())   # los gráficos arrancaban con la paleta oscura por defecto
+        _balloon.set_theme(_theme.LIGHT)   # gráficos siempre en claro (fondo blanco), aunque la app esté en oscuro
 
         self._build_ui()
         self._connect_ribbon()
@@ -172,7 +172,6 @@ class MainWindow(QMainWindow):
     def _toggle_theme(self):
         import plot.balloon as _balloon
         p = _theme.toggle()
-        _balloon.set_theme(p)
         qss = get_qss(p)
         QApplication.instance().setStyleSheet(qss)
         self.setStyleSheet(qss)

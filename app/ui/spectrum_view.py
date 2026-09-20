@@ -53,12 +53,16 @@ class SpectrumView(QWidget):
 
         self._placeholder = QLabel("Calculá la directividad\npara ver el espectro aquí.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setFont(QFont("IBM Plex Sans", 12))
+        self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
 
         self._plot = pg.PlotWidget()
         self._plot.setBackground('#ffffff')   # fondo fijo, ver tab_directividad.py
         self._plot.showGrid(x=False, y=True, alpha=0.15)
-        self._plot.setLabel('left', 'dB SPL')
+        self._plot.setLabel('left', 'dB SPL', color='#1a1a1a')
+        self._plot.setLabel('bottom', 'Frecuencia [Hz]', color='#1a1a1a')
+        for ax in ('left', 'bottom'):          # ejes oscuros sobre el fondo blanco fijo
+            self._plot.getAxis(ax).setPen('#1a1a1a')
+            self._plot.getAxis(ax).setTextPen('#1a1a1a')
         self._plot.getPlotItem().setMenuEnabled(False)
         self._legend = None
 

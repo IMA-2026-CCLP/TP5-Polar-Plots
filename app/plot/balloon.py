@@ -1168,7 +1168,7 @@ def build_spectrum_html(
         "margin":  {"l": 65, "r": 20, "t": 45, "b": 70},
         "barmode": "overlay",
         "xaxis": {
-            "title":         {"text": "Banda (Hz)", "font": {"color": txt, "size": FONT_SIZE}},
+            "title":         {"text": "Frecuencia [Hz]", "font": {"color": txt, "size": FONT_SIZE}},
             "tickfont":      {"color": txt, "size": FONT_SIZE},
             "gridcolor":     grid_color,
             "linecolor":     "rgba(255,255,255,0.2)",

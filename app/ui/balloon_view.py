@@ -157,7 +157,7 @@ class BalloonView(QWidget):
         )
 
         from ui import theme as _t
-        self._apply_theme_styles(_t.current())
+        self._apply_theme_styles(_t.LIGHT)
         self._placeholder.setFont(QFont("Segoe UI", 12))
 
         layout.addWidget(self._placeholder)
@@ -165,12 +165,9 @@ class BalloonView(QWidget):
         self._web.hide()
 
     def _apply_theme_styles(self, palette: dict):
-        bg = palette['plot_bg']
-        self._web.setStyleSheet(f"background:{bg};")
-        self._placeholder.setStyleSheet(
-            f"color: {palette['text_muted']}; font-size: 13pt; background: {bg};"
-            f" border: 2px dashed {palette['border']}; border-radius: 16px; padding: 40px;"
-        )
+        # Los gráficos son siempre de fondo blanco, en tema claro y oscuro: se ignora la paleta.
+        self._web.setStyleSheet("background:#ffffff;")
+        self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
 
     def _set_html_safe(self, html: str):
         self._html_loaded = False
@@ -556,7 +553,7 @@ class BalloonView(QWidget):
                 )
             else:
                 from ui import theme as _t
-                _p = _t.current()
+                _p = _t.LIGHT
                 html = (
                     f"<html><body style='background:{_p['plot_bg']};color:{_p['text_muted']};"
                     "display:flex;align-items:center;justify-content:center;height:100%;'>"

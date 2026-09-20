@@ -69,7 +69,7 @@ class Polar2DView(QWidget):
 
         self._placeholder = QLabel("Calculá la directividad\npara ver el patrón polar aquí.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setFont(QFont("IBM Plex Sans", 12))
+        self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
 
         self._plot = pg.PlotWidget()
         self._plot.setBackground('#ffffff')   # fondo fijo, ver tab_directividad.py
