@@ -14,7 +14,7 @@ import json
 from PyQt6.QtCore import Qt, QLocale, pyqtSignal
 from PyQt6.QtGui import QAction, QDoubleValidator
 from PyQt6.QtWidgets import (
-    QInputDialog, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
+    QFormLayout, QGroupBox, QInputDialog, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
     QComboBox, QLineEdit, QCheckBox, QFrame, QToolButton,
 )
 
@@ -102,10 +102,10 @@ class NativeRibbon(QWidget):
         self._make_actions()
         lay.addWidget(self._make_menubar())
         lay.addLayout(self._make_tabbar())
-        self._pages = [self._page_proc(), self._page_dir()]
-        self.notas_page = self._page_notas()   # no va en la barra: MainWindow lo aloja en la ventana de Notas
-        for p in self._pages:
-            lay.addWidget(p)
+        # Paneles laterales (uno por pestaña) y página de Notas: MainWindow los aloja en un dock / ventana.
+        self.proc_panel = self._panel_proc()
+        self.dir_panel  = self._panel_dir()
+        self.notas_page = self._page_notas()
         line = QFrame()
         line.setObjectName("rb_line")
         line.setFixedHeight(1)
@@ -215,10 +215,8 @@ class NativeRibbon(QWidget):
                 # Si el valor guardado ya no existe, state pasa a lo que muestra el combo.
                 self._b.state[key] = c.currentData() if key not in _INT_KEYS else int(c.currentData())
 
-    def _pill(self, text, key, tip, default):
-        b = QPushButton(text)
-        b.setObjectName("pill")
-        b.setCheckable(True)
+    def _view_check(self, text, key, tip, default):
+        b = QCheckBox(text)
         b.setToolTip(tip)
 
         def load():
@@ -378,7 +376,7 @@ class NativeRibbon(QWidget):
         m.addSeparator()
         m.addAction("Salir", lambda: self.window().close())
 
-        m = mb.addMenu("&Ver")
+        m = self._menu_ver = mb.addMenu("&Ver")
         sub = m.addMenu("Vista")
         for n in ('envelope', 'db'):
             sub.addAction(self._act[n])
@@ -401,6 +399,10 @@ class NativeRibbon(QWidget):
             m.addAction(self._act[n])
         return mb
 
+    def add_view_action(self, action: QAction):
+        """MainWindow agrega acá p. ej. el mostrar/ocultar del panel de parámetros."""
+        self._menu_ver.addAction(action)
+
     def _make_tabbar(self) -> QHBoxLayout:
         h = QHBoxLayout()
         h.setContentsMargins(6, 0, 8, 0)
@@ -408,6 +410,7 @@ class NativeRibbon(QWidget):
         self._tabs.setObjectName("main_tabs")
         self._tabs.setDrawBase(False)
         self._tabs.setExpanding(False)
+        self._tabs.setUsesScrollButtons(False)
         for i, (name, tip) in enumerate(_TABS):
             self._tabs.addTab(name)
             self._tabs.setTabToolTip(i, tip)
@@ -426,44 +429,90 @@ class NativeRibbon(QWidget):
         self._chip.setText(f'<span style="color:{color}">●</span>&nbsp;{text}')
 
     def _on_tab(self, i: int):
-        for k, p in enumerate(self._pages):
-            p.setVisible(k == i)
         self._b.tabClicked(i)
 
-    # ── Páginas ───────────────────────────────────────────────────────────
-    def _page_proc(self):
+    # ── Paneles laterales (grupos por lo que se edita) ────────────────────
+    def _flex(self, w: QWidget) -> QWidget:
+        """Los controles de un panel se estiran al ancho disponible (las fábricas fijan un ancho de barra)."""
+        w.setMinimumWidth(0)
+        w.setMaximumWidth(16777215)
+        w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return w
+
+    def _pair(self, a: QWidget, b: QWidget) -> QWidget:
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(4)
+        h.addWidget(self._flex(a))
+        h.addWidget(QLabel("–"))
+        h.addWidget(self._flex(b))
+        return w
+
+    def _group(self, title: str, rows) -> QGroupBox:
+        g = QGroupBox(title)
+        f = QFormLayout(g)
+        f.setContentsMargins(8, 4, 8, 8)
+        f.setSpacing(5)
+        f.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        for label, w in rows:
+            self._flex(w)
+            f.addRow(label, w) if label else f.addRow(w)
+        return g
+
+    def _panel(self, groups) -> QScrollArea:
+        inner = QWidget()
+        v = QVBoxLayout(inner)
+        v.setContentsMargins(6, 4, 6, 6)
+        v.setSpacing(4)
+        for title, rows in groups:
+            v.addWidget(self._group(title, rows))
+        v.addStretch()
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.Shape.NoFrame)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sc.setMinimumWidth(250)
+        sc.setWidget(inner)
+        return sc
+
+    def _panel_proc(self):
         b = self._b
-        plot = b.emitPlotParams
-        prev = b.emitAlignPreview
+        plot, prev = b.emitPlotParams, b.emitAlignPreview
         th = dict(enc=lambda v: str(v), dec=lambda d: d)
-
-        self._c_theta = self._combo('theta', 78, "Elevación (micrófono) a visualizar", cb=plot, **th)
-        self._c_az    = self._combo('az', 78, "Azimuth a visualizar, o 'Todos' para superponer las tomas", cb=plot, **th)
-
+        self._c_theta    = self._combo('theta', 78, "Elevación (micrófono) a visualizar", cb=plot, **th)
+        self._c_az       = self._combo('az', 78, "Azimuth a visualizar, o 'Todos' para superponer las tomas", cb=plot, **th)
         self._c_align_th = self._combo('align_theta', 64, "Micrófono de referencia para la alineación", cb=prev, **th)
-        return self._page([
-            ("Vista", [
-                "θ", self._c_theta, "Az", self._c_az, '|',
-                "Min", self._num('ymin', 50, "Límite inferior del eje Y. Vacío = autoescala", plot, True, "-60"),
-                "Max", self._num('ymax', 50, "Límite superior del eje Y. Vacío = autoescala", plot, True, "0")]),
-            ("Filtro / SPL", [
-                "HPF", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)"), "Hz",
-                self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
-                             lambda: b.applyHpf(), 'hpf', enabled=False), '|',
-                self._tool('calibrar'), self._tool('to_spl')]),
-            ("Alineación", [
-                "Onset", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev), "s",
-                "Umbral", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev), "dB",
-                self._button("Alinear tomas", "Alinea las tomas por onset según el umbral",
-                             lambda: b.alignTakes(), 'align_takes', enabled=False), '|',
-                "Vent", self._num('window_ms', 40, "Ventana de análisis GCC-PHAT (ms)"), "ms",
-                "Mic ref", self._c_align_th,
-                "GCC", self._num('gcc_thresh', 48, "Nivel mínimo de la toma para GCC-PHAT (dBFS). Vacío = sin filtro",
-                                 nullable=True, placeholder="dBFS"),
-                self._button("Alinear mics", "Alinea los micrófonos al de referencia con GCC-PHAT",
-                             lambda: b.alignRef(), 'align_ref', enabled=False)]),
+        return self._panel([
+            ("Señal", [
+                ("Elevación θ", self._c_theta),
+                ("Azimut", self._c_az)]),
+            ("Eje Y", [
+                ("Mín – Máx", self._pair(
+                    self._num('ymin', 50, "Límite inferior del eje Y. Vacío = autoescala", plot, True, "auto"),
+                    self._num('ymax', 50, "Límite superior del eje Y. Vacío = autoescala", plot, True, "auto")))]),
+            ("Filtro pasa-altos", [
+                ("Frecuencia (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
+                (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
+                                    lambda: b.applyHpf(), 'hpf', enabled=False))]),
+            ("Calibración", [
+                (None, self._tool('calibrar')),
+                (None, self._tool('to_spl'))]),
+            ("Alineación de tomas", [
+                ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
+                ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),
+                (None, self._button("Alinear tomas", "Alinea las tomas por onset según el umbral",
+                                    lambda: b.alignTakes(), 'align_takes', enabled=False))]),
+            ("Alineación de micrófonos", [
+                ("Ventana (ms)", self._num('window_ms', 40, "Ventana de análisis GCC-PHAT (ms)")),
+                ("Mic ref", self._c_align_th),
+                ("Umbral GCC (dBFS)", self._num('gcc_thresh', 48, "Nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
+                                                nullable=True, placeholder="sin filtro")),
+                (None, self._button("Alinear mics", "Alinea los micrófonos al de referencia con GCC-PHAT",
+                                    lambda: b.alignRef(), 'align_ref', enabled=False))]),
         ])
 
+    # ── Ventana de Notas (filas horizontales) ─────────────────────────────
     def _page_notas(self):
         b = self._b
         self._c_preset = QComboBox()
@@ -489,7 +538,7 @@ class NativeRibbon(QWidget):
                              lambda: b.detectNotes(), 'detect', enabled=False)]),
         ])
 
-    def _page_dir(self):
+    def _panel_dir(self):
         b = self._b
         disp = b.dirDisplayChanged
         as_int = dict(enc=lambda v: str(int(float(v))) if v is not None else None,
@@ -513,34 +562,42 @@ class NativeRibbon(QWidget):
                                      ("YZ (vert. 90°/270°)", "YZ")], on_plane)
         self._dir_status = QLabel("Sin datos.")
         self._dir_status.setObjectName("rb_status")
-        return self._page([
+        self._dir_status.setWordWrap(True)
+        return self._panel([
             ("Cálculo", [
-                "Bandas", self._combo('bands', 96, "Resolución frecuencial",
-                                      [("1/3 de octava", "1/3"), ("Octava", "octave")]),
-                "Hz", self._num('hz_min', 52, "Frecuencia mínima a mostrar (Hz)", disp), "–",
-                self._num('hz_max', 56, "Frecuencia máxima a mostrar (Hz)", disp),
-                "Ref Az", self._c_ref_az, "Ref θ", self._c_ref_th,
-                self._button("▶ Calcular", "Calcula el patrón de directividad (requiere tensor en SPL)",
-                             lambda: b.computeDir(), 'compute', primary=True, enabled=False), '|',
-                "Nota", self._c_nota, self._dir_status]),
-            ("Vista", [
-                "Color", self._combo('colorscale', 84, "Paleta de colores de los gráficos",
-                                     [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis")], disp),
-                "Plano", self._c_plane, "Elev", self._c_el,
-                "Sim", self._combo('symmetry', 112, "Simetría: espeja los datos medidos para completar el patrón",
-                                   [("Sin simetría", "none"), ("XZ (izq↔der)", "azimuth"),
-                                    ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp), '|',
-                self._pill("3D", 'view_3d', "Superficie 3D", False),
-                self._pill("Esfera", 'view_sphere', "Esfera coloreada por nivel", True),
-                self._pill("Polar 2D", 'view_polar2d', "Corte polar 2D", True),
-                self._pill("Espectro", 'view_spectrum', "Espectro por azimuth", False),
-                self._pill("Info", 'show_info', "Recuadro de información (banda, máx, dinámica)", True)]),
+                ("Bandas", self._combo('bands', 96, "Resolución frecuencial",
+                                       [("1/3 de octava", "1/3"), ("Octava", "octave")])),
+                ("Rango (Hz)", self._pair(self._num('hz_min', 52, "Frecuencia mínima a mostrar (Hz)", disp),
+                                          self._num('hz_max', 56, "Frecuencia máxima a mostrar (Hz)", disp))),
+                ("Ref. azimut", self._c_ref_az),
+                ("Ref. elevación", self._c_ref_th),
+                (None, self._button("▶ Calcular", "Calcula el patrón de directividad (requiere tensor en SPL)",
+                                    lambda: b.computeDir(), 'compute', primary=True, enabled=False)),
+                (None, self._dir_status)]),
+            ("Nota", [(None, self._c_nota)]),
+            ("Gráficos", [
+                (None, self._view_check("Superficie 3D", 'view_3d', "Superficie 3D", False)),
+                (None, self._view_check("Esfera", 'view_sphere', "Esfera coloreada por nivel", True)),
+                (None, self._view_check("Polar 2D", 'view_polar2d', "Corte polar 2D", True)),
+                (None, self._view_check("Espectro", 'view_spectrum', "Espectro por azimuth", False)),
+                (None, self._view_check("Recuadro de info", 'show_info', "Banda, máximo y dinámica sobre cada gráfico", True))]),
+            ("Polar 2D", [
+                ("Plano", self._c_plane),
+                ("Elevación", self._c_el),
+                ("Simetría", self._combo('symmetry', 112, "Simetría: espeja los datos medidos para completar el patrón",
+                                         [("Sin simetría", "none"), ("XZ (izq↔der)", "azimuth"),
+                                          ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp))]),
+            ("Paleta de color", [
+                (None, self._combo('colorscale', 84, "Paleta de colores de los gráficos 3D y esfera",
+                                   [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis")], disp))]),
             ("Espectro", [
-                "Audio", self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
-                                     [("Originales", 0), ("Igualados en nivel", 1)], disp),
-                "Vista", self._combo('spec_global', 84, "Global: promedio de todos los ángulos. Por toma: una curva por azimuth",
-                                     [("Global", True), ("Por toma", False)], disp), '|',
-                self._tool('save_dir'), self._tool('export_all')]),
+                ("Audio", self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
+                                      [("Originales", 0), ("Igualados en nivel", 1)], disp)),
+                ("Curvas", self._combo('spec_global', 84, "Global: promedio de todos los ángulos. Por toma: una curva por azimuth",
+                                       [("Global", True), ("Por toma", False)], disp))]),
+            ("Exportar", [
+                (None, self._tool('save_dir')),
+                (None, self._tool('export_all'))]),
         ])
 
     # ── API pública idéntica a HtmlRibbon ─────────────────────────────────

@@ -74,13 +74,22 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(0)
 
         # Layout central
-        central = QWidget()
-        lay = QVBoxLayout(central)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self.ribbon)
-        lay.addWidget(self._stack, 1)
-        self.setCentralWidget(central)
+        # Menú + pestañas arriba a todo el ancho; parámetros en un dock movible a la izquierda
+        self.setMenuWidget(self.ribbon)
+        self.setCentralWidget(self._stack)
+        self._params_stack = QStackedWidget()
+        self._params_stack.addWidget(self.ribbon.proc_panel)     # 0
+        self._params_stack.addWidget(self.ribbon.dir_panel)      # 1
+        self._params_dock = QDockWidget("Parámetros", self)
+        self._params_dock.setWidget(self._params_stack)
+        self._params_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                                      QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+                                      QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._params_dock)
+        self.setCorner(Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.resizeDocks([self._params_dock], [300], Qt.Orientation.Horizontal)
+        self.ribbon.add_view_action(self._params_dock.toggleViewAction())
         self.notas_win = _NotasWindow(self.ribbon.notas_page, self.view_notas, self)
 
         self._setup_log_dock()
@@ -168,6 +177,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
+        self._params_stack.setCurrentIndex(idx)
 
     def _open_notas(self):
         self.notas_win.show()

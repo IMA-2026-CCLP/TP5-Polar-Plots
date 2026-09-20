@@ -48,8 +48,8 @@ QGroupBox {{
     background: transparent;
     border: 1px solid {p['border']};
     border-radius: 2px;
-    margin-top: 22px;
-    padding: 12px 8px 8px;
+    margin-top: 10px;
+    padding: 10px 6px 6px;
     font-size: 9pt;
     font-weight: 600;
     color: {p['text2']};
