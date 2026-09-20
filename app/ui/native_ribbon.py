@@ -377,8 +377,10 @@ class NativeRibbon(QWidget):
         m.addAction("Salir", lambda: self.window().close())
 
         m = mb.addMenu("&Ver")
-        for n in ('envelope', 'db', 'smooth'):
-            m.addAction(self._act[n])
+        sub = m.addMenu("Vista")
+        for n in ('envelope', 'db'):
+            sub.addAction(self._act[n])
+        m.addAction(self._act['smooth'])
         m.addSeparator()
         self._act_dark = QAction("Tema oscuro", self)
         self._act_dark.setCheckable(True)
