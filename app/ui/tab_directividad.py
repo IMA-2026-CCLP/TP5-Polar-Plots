@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QCheckBox, QScrollArea,
     QGridLayout, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
     QMenu, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
-    QColorDialog, QInputDialog, QSplitter,
+    QColorDialog, QInputDialog, QSplitter, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
@@ -301,8 +301,19 @@ class _ViewSection(QWidget):
         """
         from plot import balloon as _balloon_mod
 
-        dlg = QWidget()   # contenedor de los campos; nombre histórico, ya no es un QDialog
-        outer = QVBoxLayout(dlg)
+        # Una pestaña por sección (Escala, Fondo, Ejes…): así todo entra sin deslizar.
+        dlg = tabs = QTabWidget()
+        tabs.tabBar().setUsesScrollButtons(False)
+
+        class _Tabs:                       # cada group box que se "agrega" pasa a ser una pestaña
+            def addWidget(self, box):
+                tabs.addTab(box, box.title())
+                box.setTitle("")
+                box.setObjectName("prop_page")
+            def addStretch(self, *_):
+                pass
+
+        outer = _Tabs()
         fields: dict = {}
 
         if self._mode != "spectrum":
@@ -357,7 +368,7 @@ class _ViewSection(QWidget):
             fields['axis_line_width'] = spin_axis_w
             outer.addWidget(box_ax)
 
-            box_interp = QGroupBox("Interpolación / suavizado")
+            box_interp = QGroupBox("Suavizado")
             form_interp = QFormLayout(box_interp)
             spin_interp_deg = _NumEdit()
             spin_interp_deg.setRange(0.5, 10.0); spin_interp_deg.setSingleStep(0.5)
@@ -477,7 +488,7 @@ class _ViewSection(QWidget):
             fields['legend_font_size']  = spin_legend
             outer.addWidget(box_ax)
 
-            box_interp = QGroupBox("Interpolación / suavizado")
+            box_interp = QGroupBox("Suavizado")
             form_interp = QFormLayout(box_interp)
             combo_smooth_method = QComboBox()
             combo_smooth_method.setMaximumWidth(120)
@@ -620,11 +631,8 @@ class _ViewSection(QWidget):
             else:                               # botón de color
                 w.on_change = sched
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(dlg)
-        scroll.flush = lambda: timer.isActive() and (timer.stop(), _safe_apply())   # al cerrar, no perder el último cambio
-        return scroll
+        tabs.flush = lambda: timer.isActive() and (timer.stop(), _safe_apply())   # al cerrar, no perder el último cambio
+        return tabs
 
     def restore_defaults(self):
         """Vuelve el gráfico a la configuración estándar del programa (ver _DEFAULT_*)."""
@@ -1109,9 +1117,7 @@ class TabDirectividad(QWidget):
         win = self.window()
         dlg = QDialog(win)
         dlg.setWindowTitle(f"Propiedades — {self._section_titles[mode]}")
-        dlg.resize(400, max(360, min(640, win.height() - 100)))
-        g = win.geometry()
-        dlg.move(g.right() - dlg.width() - 24, g.top() + 60)
+        dlg.setMinimumWidth(430)
 
         lay = QVBoxLayout(dlg)
         holder = QVBoxLayout()
@@ -1138,6 +1144,9 @@ class TabDirectividad(QWidget):
         row.addWidget(btn_close)
         lay.addLayout(row)
         dlg.finished.connect(lambda _=0: current['w'].flush())
+        dlg.adjustSize()
+        g = win.geometry()
+        dlg.move(g.right() - dlg.width() - 24, g.top() + 60)
         dlg.exec()
 
     def _get_current_ma(self):

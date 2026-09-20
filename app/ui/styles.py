@@ -423,6 +423,7 @@ QLabel#rb_chip {{ color: {p['text2']}; padding-right: 4px; }}
 QLabel#rb_status {{ color: {p['text_muted']}; }}
 QToolButton#rb_info {{ padding: 0; font-weight: 700; font-style: italic; border-radius: 11px; }}
 QLabel#plot_title {{ background: {p['bg_dark']}; border: 1px solid {p['border2']}; padding: 2px 6px; }}
+QGroupBox#prop_page {{ border: none; margin-top: 0; padding-top: 8px; }}
 QPushButton#pill {{ padding: 2px 10px; }}
 QPushButton#pill:checked {{
     background: {p['accent_soft']}; border-color: {p['accent']}; color: {p['accent']}; font-weight: 600;
