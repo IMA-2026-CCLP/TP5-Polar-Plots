@@ -301,7 +301,7 @@ class NativeRibbon(QWidget):
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
 
     def _make_view_actions(self):
-        """Ver ▸ Vista: Envolvente / dB (checkables) y Suavizado… (modal). Estado en Bridge.state."""
+        """Menú Ver: Envolvente / dB (checkables) y Suavizado… (modal). Estado en Bridge.state."""
         b, plot = self._b, self._b.emitPlotParams
 
         def checkable(name, text, key, tip):
@@ -377,11 +377,8 @@ class NativeRibbon(QWidget):
         m.addAction("Salir", lambda: self.window().close())
 
         m = mb.addMenu("&Ver")
-        sub = m.addMenu("Vista")
-        for n in ('envelope', 'db'):
-            sub.addAction(self._act[n])
-        sub.addSeparator()
-        sub.addAction(self._act['smooth'])
+        for n in ('envelope', 'db', 'smooth'):
+            m.addAction(self._act[n])
         m.addSeparator()
         self._act_dark = QAction("Tema oscuro", self)
         self._act_dark.setCheckable(True)
