@@ -92,22 +92,22 @@ QPushButton:disabled {{
 }}
 
 QPushButton#btn_primary {{
-    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-        stop:0 #5d70cc, stop:1 #4858b8);
-    color: #ffffff;
-    border: none;
+    background: {p['accent']};
+    color: {p['accent_ink']};
+    border: 1px solid {p['accent']};
     font-weight: 600;
     font-size: 10.5pt;
     padding: 9px 20px;
     border-radius: 9px;
 }}
 QPushButton#btn_primary:hover {{
-    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-        stop:0 #6d80dc, stop:1 #5868c8);
+    background: {p['accent_soft']};
+    color: {p['accent']};
 }}
 QPushButton#btn_primary:disabled {{
     background: {p['border']};
     color: {p['text_muted']};
+    border-color: {p['border']};
 }}
 
 QPushButton#btn_danger {{
@@ -187,8 +187,7 @@ QProgressBar {{
     font-size: 8pt;
 }}
 QProgressBar::chunk {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-        stop:0 #4858b8, stop:1 #6070d0);
+    background: {p['accent']};
     border-radius: 5px;
 }}
 
@@ -346,16 +345,15 @@ QSlider::groove:horizontal {{
 }}
 QSlider::handle:horizontal {{
     background: {p['accent']};
-    border: 2px solid #8090e0;
+    border: 2px solid {p['accent']};
     width: 14px;
     height: 14px;
     border-radius: 7px;
     margin: -5px 0;
 }}
-QSlider::handle:horizontal:hover {{ background: #8090e0; }}
+QSlider::handle:horizontal:hover {{ background: {p['accent']}; }}
 QSlider::sub-page:horizontal {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-        stop:0 #4858b8, stop:1 #6070d0);
+    background: {p['accent']};
     border-radius: 2px;
 }}
 
@@ -374,11 +372,11 @@ QRadioButton::indicator, QCheckBox::indicator {{
 QRadioButton::indicator {{ border-radius: 8px; }}
 QRadioButton::indicator:checked {{
     background: {p['accent']};
-    border-color: #8090e0;
+    border-color: {p['accent']};
 }}
 QCheckBox::indicator:checked {{
     background: {p['accent']};
-    border-color: #8090e0;
+    border-color: {p['accent']};
     image: url("{chk}");
 }}
 QRadioButton::indicator:hover, QCheckBox::indicator:hover {{

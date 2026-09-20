@@ -312,6 +312,10 @@ class BalloonView(QWidget):
         self._placeholder.show()
 
     _EXPORT_FORMATS = ('png', 'svg', 'jpeg', 'webp')   # soportados por Plotly.toImage() en navegador
+    # Tamaño lógico fijo (px CSS) del export: mismo aspecto y misma proporción
+    # texto/gráfico sin importar el tamaño de ventana. `scale` (DPI) lo multiplica.
+    # ponytail: un solo tamaño para las 4 vistas; hacerlo por vista si el Polar 2D pide cuadrado.
+    _EXPORT_W, _EXPORT_H = 1000, 800
 
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
         """
@@ -392,7 +396,8 @@ class BalloonView(QWidget):
 
         js = (
             "(function(){"
-            f"Plotly.toImage(document.getElementById('plot'), {{format:'{fmt}', scale:{scale}}})"
+            f"Plotly.toImage(document.getElementById('plot'), {{format:'{fmt}', scale:{scale}, "
+            f"width:{self._EXPORT_W}, height:{self._EXPORT_H}}})"
             ".then(function(url){"
             "  var CHUNK=400000;"
             "  var n=Math.max(1, Math.ceil(url.length/CHUNK));"

@@ -96,7 +96,7 @@ class HtmlRibbon(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(_TAB_H + 1 + _RIBBON_H)
+        self.setFixedHeight(_TAB_H + 1 + _RIBBON_H)   # inicial; el HTML informa el alto real (sig_height)
 
         # Bridge + WebChannel
         self._bridge  = Bridge(self)
@@ -129,6 +129,7 @@ class HtmlRibbon(QWidget):
     def _wire(self):
         b = self._bridge
         b.sig_tab_changed.connect(self.tab_changed)
+        b.sig_height.connect(self.setFixedHeight)
         b.sig_load_audio.connect(self.sig_load_audio)
         b.sig_save_tensor.connect(self.sig_save_tensor)
         b.sig_load_tensor.connect(self.sig_load_tensor)

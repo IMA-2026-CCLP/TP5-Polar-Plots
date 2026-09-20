@@ -22,6 +22,7 @@ class Bridge(QObject):
 
     # ── JS → Python (HtmlRibbon conecta a estas) ──────────────────────────────
     sig_tab_changed        = pyqtSignal(int)
+    sig_height             = pyqtSignal(int)
     sig_load_audio         = pyqtSignal()
     sig_save_tensor        = pyqtSignal()
     sig_load_tensor        = pyqtSignal()
@@ -69,6 +70,10 @@ class Bridge(QObject):
         }
 
     # ── Slots llamados desde JS ───────────────────────────────────────────────
+
+    @pyqtSlot(int)
+    def ribbonHeight(self, h):
+        self.sig_height.emit(h)
 
     @pyqtSlot(int)
     def tabClicked(self, idx):

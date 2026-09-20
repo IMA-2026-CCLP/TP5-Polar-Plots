@@ -27,8 +27,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Polar Pattern CCLP")
-        self.setMinimumSize(1200, 750)
-        self.resize(1440, 860)
+        # Mínimos y tamaño inicial acotados a la pantalla disponible (sin taskbar):
+        # un mínimo fijo de 1200x750 no entraba en 1366x768.
+        avail = self.screen().availableGeometry()
+        self.setMinimumSize(min(900, avail.width()), min(560, avail.height()))
+        self.resize(min(1440, avail.width()), min(860, avail.height()))
         self.setStyleSheet(QSS)
 
         self._ma       = None
@@ -410,8 +413,9 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
-        # altura inicial al estar en la parte inferior
-        self.resizeDocks([self._log_dock], [150], Qt.Orientation.Vertical)
+        # altura inicial proporcional a la pantalla (150 px fijos se comían el gráfico en 768p)
+        self.resizeDocks([self._log_dock], [max(60, int(self.screen().availableGeometry().height() * 0.12))],
+                         Qt.Orientation.Vertical)
 
         # ajustar restricciones de tamaño según dónde está anclado
         self._log_dock.dockLocationChanged.connect(self._on_log_dock_location)

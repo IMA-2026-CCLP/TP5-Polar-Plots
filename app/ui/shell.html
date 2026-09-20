@@ -41,6 +41,7 @@ body{
 
 /* ── Tab Bar ── */
 #tab-bar{
+  white-space:nowrap;
   height:50px;
   flex:none;
   background:var(--bar);
@@ -90,17 +91,26 @@ body{
 /* ── Ribbon Sep ── */
 #rib-sep{height:1px;background:var(--line);flex:none}
 
+@media (max-width:1050px){.app-sub,.app-ver{display:none}}
+
 /* ── Ribbon ── */
 #ribbon{
-  height:112px;flex:none;
+  flex:none;
   background:var(--rib);
   overflow:hidden;
 }
-.rp{height:100%;display:none;align-items:stretch;padding:10px 14px 8px}
+.rp{display:none;flex-wrap:wrap;justify-content:center;align-items:stretch;align-content:flex-start;
+  gap:8px;padding:10px 12px 10px}
 .rp.on{display:flex}
 
 /* Grupo ribbon */
-.rg{display:flex;flex-direction:column;padding:0 14px}
+.rg{display:flex;flex-direction:column;padding:6px 12px 4px;flex:none;min-height:88px;
+  border:1px solid var(--line);border-radius:8px}
+/* Los grupos pasan a la fila siguiente cuando no entran (ver fitRibbon: Python ajusta el alto).
+   El separador vertical no tiene sentido con filas que se parten: cada grupo es una "tarjeta". */
+.vs{display:none}
+@media (max-width:1500px){.rg{padding:6px 8px 4px}.rgb{gap:6px}.rp{gap:6px;padding:10px 8px}}
+@media (max-width:1150px){.rg{padding:6px 5px 4px}.rp{gap:4px;padding:10px 4px}}
 .rgb{flex:1;display:flex;align-items:center;gap:10px}
 .rgl{
   font-size:8.5px;letter-spacing:0.16em;color:var(--muted);
@@ -227,7 +237,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
 
   <!-- RIBBON · ARCHIVO -->
   <div class="rp" id="rp0">
-    <div class="rg" style="padding:0 18px">
+    <div class="rg">
       <div class="rgb" style="gap:10px">
         <div class="bico" onclick="B('loadAudio')" title="Carga carpeta de audios WAV y construye el tensor de medición">
           <div class="bico-box" style="font-family:var(--mono);font-size:13px;font-weight:700">.wav</div>
@@ -245,7 +255,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
       <div class="rgl">AUDIO / SESIÓN</div>
     </div>
     <div class="vs"></div>
-    <div class="rg" style="padding:0 18px">
+    <div class="rg">
       <div class="rgb" style="gap:10px">
         <div class="bico" onclick="B('loadPolarNpz')" title="Carga resultados de directividad exportados en formato .npz">
           <div class="bico-box">▦</div>
@@ -263,7 +273,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
   <!-- RIBBON · PROCESAMIENTO -->
   <div class="rp" id="rp1">
     <!-- VISTA -->
-    <div class="rg" style="padding:0 12px">
+    <div class="rg">
       <div class="rgb" style="gap:14px">
         <div class="col">
           <div class="row">
@@ -321,7 +331,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- HPF -->
-    <div class="rg" style="padding:0 10px">
+    <div class="rg">
       <div class="rgb" style="flex-direction:column;justify-content:center;gap:7px">
         <div class="row">
           <span class="lbl">Frec</span>
@@ -337,7 +347,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- ALINEACIÓN -->
-    <div class="rg" style="padding:0 12px">
+    <div class="rg">
       <div class="rgb" style="gap:0">
         <div class="col" style="gap:6px">
           <div class="row" style="gap:10px">
@@ -391,7 +401,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- CALIBRAR -->
-    <div class="rg" style="padding:0 12px">
+    <div class="rg">
       <div class="rgb" style="gap:10px">
         <div class="bico" id="bico-calibrar" data-dis="1"
           onclick="if(this.dataset.dis==='0')B('openCalibracion')"
@@ -409,7 +419,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
   <!-- RIBBON · NOTAS -->
   <div class="rp" id="rp2">
     <!-- ESCALA -->
-    <div class="rg" style="padding:0 14px">
+    <div class="rg">
       <div class="rgb" style="gap:8px">
         <select class="inp" id="sel-preset" style="width:130px"
           onchange="B2('presetChanged',this.value)"
@@ -422,7 +432,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- DETECCIÓN -->
-    <div class="rg" style="padding:0 14px">
+    <div class="rg">
       <div class="rgb" style="flex-direction:column;justify-content:center;gap:9px">
         <div class="row" style="gap:10px">
           <span class="lbl">Tol ¢</span>
@@ -458,7 +468,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- MÁSCARA -->
-    <div class="rg" style="padding:0 14px">
+    <div class="rg">
       <div class="rgb" style="gap:10px">
         <div class="bico" id="bico-save-mask" data-dis="1"
           onclick="if(this.dataset.dis==='0')B('saveMask')"
@@ -479,9 +489,10 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
   <!-- RIBBON · DIRECTIVIDAD -->
   <div class="rp on" id="rp3">
     <!-- CÁLCULO -->
-    <div class="rg" style="padding:0 14px">
-      <div class="rgb" style="gap:14px">
-        <div style="display:grid;grid-template-columns:auto auto;gap:7px 8px;align-items:center">
+    <div class="rg">
+      <div class="rgb" style="flex-direction:column;justify-content:center;gap:6px">
+       <div style="display:flex;gap:12px;align-items:center">
+        <div style="display:grid;grid-template-columns:auto auto;gap:6px 8px;align-items:center">
           <span class="lbl">Bandas</span>
           <select class="inp" id="sel-bands" style="width:70px"
             onchange="S('bands',this.value)"
@@ -502,7 +513,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
         </div>
         <div class="col">
           <div class="row">
-            <span class="lbl" style="width:44px">Ref Az</span>
+            <span class="lbl" style="width:38px">Ref Az</span>
             <select class="inp" id="sel-ref-az" style="width:60px"
               onchange="S('ref_az',+this.value)"
               title="Azimuth del punto de referencia para normalizar la directividad (0° = frente al instrumento)">
@@ -510,7 +521,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
             </select>
           </div>
           <div class="row">
-            <span class="lbl" style="width:44px">Ref θ</span>
+            <span class="lbl" style="width:38px">Ref θ</span>
             <select class="inp" id="sel-ref-th" style="width:60px"
               onchange="S('ref_th',+this.value)"
               title="Elevación del punto de referencia para normalizar la directividad (0° = plano horizontal)">
@@ -518,6 +529,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
             </select>
           </div>
         </div>
+       </div>
         <button class="ba" id="btn-compute" disabled onclick="B('computeDir')"
           title="Calcula el patrón de directividad completo a partir del tensor en SPL (requiere calibración aplicada)">▶ Calcular</button>
       </div>
@@ -525,24 +537,25 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- NOTA -->
-    <div class="rg" style="padding:0 12px">
-      <div class="rgb">
-        <select class="inp" id="sel-nota" style="width:140px"
+    <div class="rg">
+      <div class="rgb" style="flex-direction:column;justify-content:center;align-items:flex-start;gap:6px">
+        <select class="inp" id="sel-nota" style="width:122px"
           onchange="S('nota',this.value);B('dirDisplayChanged')"
           title="Selecciona la nota a graficar o 'Todo el audio' para usar el tensor completo">
           <option>Todo el audio</option>
         </select>
+        <div id="dir-status" style="font-size:10px;color:var(--text2);max-width:122px;line-height:1.3">Sin datos.</div>
       </div>
       <div class="rgl">NOTA</div>
     </div>
     <div class="vs"></div>
     <!-- VISUALIZACIÓN -->
-    <div class="rg" style="padding:0 12px">
-      <div class="rgb" style="flex-direction:column;justify-content:center;gap:8px">
-        <div class="row" style="gap:8px">
+    <div class="rg">
+      <div class="rgb" style="flex-direction:column;justify-content:center;gap:6px">
+        <div style="display:grid;grid-template-columns:auto auto;gap:6px 8px;align-items:center">
           <div class="row" style="gap:5px">
             <span class="lbl">Color</span>
-            <select class="inp" id="sel-cs" style="width:90px"
+            <select class="inp" id="sel-cs" style="width:80px"
               onchange="S('colorscale',this.value);B('dirDisplayChanged')"
               title="Paleta de colores para los gráficos de directividad">
               <option>Plasma</option><option>Viridis</option><option>Turbo</option>
@@ -551,17 +564,17 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
           </div>
           <div class="row" style="gap:5px">
             <span class="lbl">Plano</span>
-            <select class="inp" id="sel-plane" style="width:110px"
+            <select class="inp" id="sel-plane" style="width:96px"
               onchange="onPlaneChanged(this.value)"
               title="Plano del corte polar 2D: XY (horizontal, elevación fija), XZ o YZ (verticales, pasan por el cénit)">
-              <option value="XY">XY (horizontal)</option>
-              <option value="XZ">XZ (vertical, Az 0°/180°)</option>
-              <option value="YZ">YZ (vertical, Az 90°/270°)</option>
+              <option value="XY">XY (horiz.)</option>
+              <option value="XZ">XZ (vert. 0°/180°)</option>
+              <option value="YZ">YZ (vert. 90°/270°)</option>
             </select>
           </div>
           <div class="row" style="gap:5px">
             <span class="lbl">Elev</span>
-            <select class="inp" id="sel-el" style="width:80px"
+            <select class="inp" id="sel-el" style="width:92px"
               onchange="S('el_idx',this.selectedIndex===0?null:this.selectedIndex-1);B('dirDisplayChanged')"
               title="Ángulo de elevación a mostrar en el gráfico polar 2D (corte horizontal del patrón). Sólo aplica al plano XY.">
               <option>Auto (0°)</option>
@@ -569,7 +582,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
           </div>
           <div class="row" style="gap:5px">
             <span class="lbl">Sim</span>
-            <select class="inp" id="sel-sym" style="width:110px"
+            <select class="inp" id="sel-sym" style="width:115px"
               onchange="S('symmetry',['none','azimuth','elevation','both'][this.selectedIndex]);B('dirDisplayChanged')"
               title="Simetría a aplicar: espeja los datos medidos para completar el patrón asumiendo simetría del instrumento">
               <option>Sin simetría</option>
@@ -579,7 +592,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
             </select>
           </div>
         </div>
-        <div class="row" style="gap:6px">
+        <div style="display:flex;gap:6px;justify-content:center;align-items:center">
           <span class="pill off" id="pill-3d"      onclick="togglePill(this,'view_3d')"      title="Muestra u oculta la vista de superficie 3D del patrón de directividad">3D</span>
           <span class="pill on" id="pill-sphere"  onclick="togglePill(this,'view_sphere')"  title="Muestra u oculta la vista de esfera coloreada con el nivel por dirección">Esfera</span>
           <span class="pill on" id="pill-polar2d" onclick="togglePill(this,'view_polar2d')" title="Muestra u oculta el gráfico polar 2D en el plano de elevación seleccionado">Polar 2D</span>
@@ -591,11 +604,11 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- ESPECTRO -->
-    <div class="rg" style="padding:0 10px">
+    <div class="rg">
       <div class="rgb" style="flex-direction:column;justify-content:center;gap:7px">
         <div class="row" style="gap:5px">
           <span class="lbl" style="width:36px">Audio</span>
-          <select class="inp" id="sel-spec-data" style="width:130px"
+          <select class="inp" id="sel-spec-data" style="width:110px"
             onchange="S('spec_data',this.selectedIndex);B('dirDisplayChanged')"
             title="Datos a graficar: señales originales en nivel absoluto, o igualadas en nivel para comparar solo la forma espectral">
             <option>Originales</option>
@@ -604,7 +617,7 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
         </div>
         <div class="row" style="gap:5px">
           <span class="lbl" style="width:36px">Vista</span>
-          <select class="inp" id="sel-spec-view" style="width:130px"
+          <select class="inp" id="sel-spec-view" style="width:110px"
             onchange="S('spec_global',this.selectedIndex===0);B('dirDisplayChanged')"
             title="Global: promedio de todos los ángulos. Por toma: espectro individual de cada azimuth">
             <option>Global</option>
@@ -616,8 +629,8 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
     </div>
     <div class="vs"></div>
     <!-- GUARDAR -->
-    <div class="rg" style="padding:0 12px">
-      <div class="rgb" style="gap:10px">
+    <div class="rg">
+      <div class="rgb" style="gap:4px">
         <div class="bico" id="bico-save-dir" data-dis="1"
           onclick="if(this.dataset.dis==='0')B('saveDirNpz')"
           title="Exporta el patrón de directividad calculado como archivo .npz (dir_levels, dir_freqs, thetas)">
@@ -633,8 +646,6 @@ select.inp{cursor:pointer;appearance:none;padding-right:20px;
       </div>
       <div class="rgl">GUARDAR</div>
     </div>
-    <!-- STATUS DIRECTIVIDAD -->
-    <div id="dir-status" style="font-size:10.5px;color:var(--text2);max-width:120px;line-height:1.4;padding:0 10px;align-self:center">Sin datos.</div>
   </div>
 
 </div><!-- #ribbon -->
@@ -795,6 +806,17 @@ function setBicoEnabled(id, on) {
 
 // ── Tab switching ─────────────────────────────────────────────────────────
 var _curTab = 3;
+// Ribbon responsive: los grupos se acomodan en filas (flex-wrap) y le avisamos a Python el alto
+// resultante para que la barra ocupe justo lo necesario.
+var _lastH = 0;
+function fitRibbon() {
+  var r = document.getElementById('ribbon');
+  var h = Math.ceil(r.offsetTop + r.scrollHeight);
+  if (h !== _lastH) { _lastH = h; B2('ribbonHeight', h); }
+}
+window.addEventListener('resize', fitRibbon);
+window.addEventListener('load', function(){ setTimeout(fitRibbon, 50); });
+
 function switchTab(i) {
   if (i === _curTab) return;
   document.getElementById('tab' + _curTab).classList.remove('on');
@@ -802,6 +824,7 @@ function switchTab(i) {
   _curTab = i;
   document.getElementById('tab' + i).classList.add('on');
   document.getElementById('rp'  + i).classList.add('on');
+  fitRibbon();
   B2('tabClicked', i);
 }
 // Fuerza el cambio de tab desde Python sin depender del valor previo de
@@ -812,6 +835,7 @@ function forceTab(i) {
   _curTab = i;
   document.getElementById('tab' + i).classList.add('on');
   document.getElementById('rp'  + i).classList.add('on');
+  fitRibbon();
   B2('tabClicked', i);
 }
 
