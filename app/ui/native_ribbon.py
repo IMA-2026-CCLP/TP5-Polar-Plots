@@ -387,6 +387,7 @@ class NativeRibbon(QWidget):
         self._act_dark.setChecked(_theme.is_dark())
         self._act_dark.triggered.connect(lambda _=False: self.sig_theme_toggled.emit())
         m.addAction(self._act_dark)
+        m.addSeparator()   # debajo: mostrar/ocultar paneles (los agrega MainWindow)
 
         m = mb.addMenu("&Herramientas")
         for n in ('calibrar', 'to_spl'):

@@ -437,6 +437,7 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
+        self.ribbon.add_view_action(self._log_dock.toggleViewAction())
         # altura inicial proporcional a la pantalla (150 px fijos se comían el gráfico en 768p)
         self.resizeDocks([self._log_dock], [max(60, int(self.screen().availableGeometry().height() * 0.12))],
                          Qt.Orientation.Vertical)
