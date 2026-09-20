@@ -67,7 +67,7 @@ _DEFAULT_STYLE_BY_MODE = {
         "interp_kind":      "cubic",
         "interp_deg":       2.0,
     },
-    "spectrum": {"bg_color": "#ffffff", "text_color": "#000000"},
+    "spectrum": {"bg_color": "#ffffff", "text_color": "#000000", "bar_color": "#146B64"},
 }
 _DEFAULT_MIN_DB_BY_MODE = {"polar2d": -20.0}
 _DEFAULT_MAX_DB_BY_MODE = {"polar2d": 10.0}
@@ -283,15 +283,16 @@ class _ViewSection(QWidget):
             if c.isValid():
                 _btn.color_hex = c.name()
                 _btn.setStyleSheet(f"background:{_btn.color_hex};border:1px solid #555;")
+                if getattr(_btn, 'on_change', None):
+                    _btn.on_change()
         btn.clicked.connect(_pick)
         return btn
 
     def build_properties_widget(self, close_cb) -> QWidget:
         """
-        Contenido del panel de Propiedades del gráfico — vive en un
-        panel no modal al costado derecho (ver TabDirectividad._show_properties_panel),
-        para poder seguir viendo/ajustando el gráfico mientras se cambian
-        valores. Las secciones que aplican dependen del tipo de vista
+        Contenido de Propiedades del gráfico (dentro del modal de
+        TabDirectividad._show_properties_panel). Cada cambio se aplica solo,
+        con un pequeño retardo, sin botón "Aplicar". Las secciones que aplican dependen del tipo de vista
         (self._mode): escala, fondo, ejes/grilla (3D/Esfera), ejes/traza
         (Polar 2D) o barras/grilla (Espectro).
 
@@ -537,7 +538,7 @@ class _ViewSection(QWidget):
         elif self._mode == "spectrum":
             box_sp = QGroupBox("Barras / grilla")
             form_sp = QFormLayout(box_sp)
-            btn_bar = self._make_color_button(dlg, self._style.get('bar_color') or "#5865f2")
+            btn_bar = self._make_color_button(dlg, self._style.get('bar_color') or "#146B64")
             btn_bar.setToolTip("Color de las barras cuando el modo de vista está en 'Global'. No aplica al modo 'Por toma' (usa un color distinto por azimuth).")
             form_sp.addRow("Color de barras (modo Global):", btn_bar)
             btn_grid_sp = self._make_color_button(dlg, self._style.get('grid_color') or _balloon_mod._GRID_COL)
@@ -548,8 +549,6 @@ class _ViewSection(QWidget):
             outer.addWidget(box_sp)
 
         def _apply():
-            self._push_undo_snapshot()
-
             if self._mode != "spectrum":
                 try:
                     self._min_db = float(fields['min_db'].text()) if fields['min_db'].text().strip() else None
@@ -596,20 +595,52 @@ class _ViewSection(QWidget):
             self.view.set_style(self._style)
             self.properties_applied.emit()
 
-        btn_row   = QHBoxLayout()
-        btn_apply = QPushButton("Aplicar")
-        btn_close = QPushButton("Cerrar")
-        btn_apply.clicked.connect(_apply)
-        btn_close.clicked.connect(close_cb)
-        btn_row.addWidget(btn_apply)
-        btn_row.addWidget(btn_close)
-        outer.addLayout(btn_row)
         outer.addStretch(1)
+
+        # Edición en vivo: cualquier cambio dispara _apply con un retardo (evita re-renderizar por cada tecla)
+        timer = QTimer(dlg)
+        timer.setSingleShot(True)
+        timer.setInterval(400)
+
+        def _safe_apply():
+            try:
+                _apply()
+            except Exception:       # texto a medio escribir, etc.
+                pass
+
+        timer.timeout.connect(_safe_apply)
+        sched = lambda *_: timer.start()
+        for w in fields.values():
+            if isinstance(w, QComboBox):
+                w.currentTextChanged.connect(sched)
+            elif isinstance(w, QCheckBox):
+                w.toggled.connect(sched)
+            elif isinstance(w, QLineEdit):      # incluye _NumEdit
+                w.textChanged.connect(sched)
+            else:                               # botón de color
+                w.on_change = sched
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(dlg)
+        scroll.flush = lambda: timer.isActive() and (timer.stop(), _safe_apply())   # al cerrar, no perder el último cambio
         return scroll
+
+    def restore_defaults(self):
+        """Vuelve el gráfico a la configuración estándar del programa (ver _DEFAULT_*)."""
+        self._style          = dict(_DEFAULT_STYLE_BY_MODE.get(self._mode, {}))
+        self._min_db         = _DEFAULT_MIN_DB_BY_MODE.get(self._mode)
+        self._max_db         = _DEFAULT_MAX_DB_BY_MODE.get(self._mode)
+        self._tick_font_size = FONT_SIZE
+        self._axis_color     = None
+        self._axis_width     = 1
+        self.view.set_db_range(self._min_db, self._max_db)
+        if self._mode in ("3d", "sphere"):
+            self.view.set_axis_style(self._axis_color, self._axis_width)
+        elif self._mode == "polar2d":
+            self.view.set_tick_font_size(self._tick_font_size)
+        self.view.set_style(self._style)
+        self.properties_applied.emit()
 
     def _prompt_compare_bands(self):
         bands = self.view._bands
@@ -888,43 +919,7 @@ class TabDirectividad(QWidget):
             grid.setRowStretch(k, 1)
             grid.setColumnStretch(k, 1)
 
-        # Panel de Propiedades compartido — no modal, siempre al costado
-        # derecho de la grilla 2×2 (en vez de un diálogo bloqueante),
-        # reutilizado y repoblado según cuál gráfico lo pidió (ver
-        # _show_properties_panel). Se usa un QSplitter en vez de acoplarlo
-        # como un QDockWidget más dentro de _dock_host porque los 4 gráficos
-        # ya ocupan las 4 "esquinas" de ese QMainWindow anidado (todos bajo
-        # TopDockWidgetArea) — agregar un dock ahí con RightDockWidgetArea
-        # termina cayendo debajo de la grilla en vez de al costado, ya que
-        # Top/Bottom tienen prioridad sobre las esquinas por default en Qt.
-        self._props_panel = QWidget()
-        self._props_panel.setMinimumWidth(260)
-        self._props_panel.setMaximumWidth(340)
-        props_lay = QVBoxLayout(self._props_panel)
-        props_lay.setContentsMargins(4, 4, 4, 4)
-
-        title_row = QHBoxLayout()
-        self._props_title = QLabel("Propiedades")
-        self._props_title.setStyleSheet("font-weight:600;")
-        btn_props_close = QPushButton("✕")
-        btn_props_close.setFixedSize(22, 22)
-        btn_props_close.setToolTip("Cerrar panel de Propiedades")
-        btn_props_close.clicked.connect(lambda: self._props_panel.hide())
-        title_row.addWidget(self._props_title, 1)
-        title_row.addWidget(btn_props_close)
-        props_lay.addLayout(title_row)
-
-        self._props_content_holder = QVBoxLayout()
-        props_lay.addLayout(self._props_content_holder, 1)
-        self._props_panel.hide()
-
-        self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._main_splitter.addWidget(self._grid_host)
-        self._main_splitter.addWidget(self._props_panel)
-        self._main_splitter.setStretchFactor(0, 1)
-        self._main_splitter.setStretchFactor(1, 0)
-
-        lay.addWidget(self._main_splitter, 1)
+        lay.addWidget(self._grid_host, 1)
 
         self.band_selector = BandSelectorWidget()
         self.band_selector.band_changed.connect(self._on_band_changed)
@@ -1104,28 +1099,45 @@ class TabDirectividad(QWidget):
             return
         if self._sections[mode].undo_properties():
             self.log.emit(f"[Directividad] Deshecho último cambio de Propiedades ({self._section_titles[mode]}).")
-            if self._props_panel.isVisible():
-                self._show_properties_panel(mode)
 
     def _show_properties_panel(self, mode: str):
-        """Repuebla el panel de Propiedades compartido con los campos del
-        gráfico indicado y lo muestra (no modal, siempre al costado
-        derecho de la grilla de gráficos, ver QSplitter en _make_right_panel)."""
+        """Propiedades del gráfico en un modal: los cambios se ven en vivo (sin 'Aplicar') y hay
+        'Restaurar por defecto'. Se ubica a la derecha para dejar a la vista los gráficos."""
         sec = self._sections[mode]
+        sec._push_undo_snapshot()          # Ctrl+Z vuelve al estado previo a esta edición
+        win = self.window()
+        dlg = QDialog(win)
+        dlg.setWindowTitle(f"Propiedades — {self._section_titles[mode]}")
+        dlg.resize(400, max(360, min(640, win.height() - 100)))
+        g = win.geometry()
+        dlg.move(g.right() - dlg.width() - 24, g.top() + 60)
 
-        while self._props_content_holder.count():
-            item = self._props_content_holder.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        lay = QVBoxLayout(dlg)
+        holder = QVBoxLayout()
+        lay.addLayout(holder, 1)
+        current = {}
 
-        widget = sec.build_properties_widget(self._props_panel.hide)
-        self._props_content_holder.addWidget(widget)
-        self._props_title.setText(f"Propiedades — {self._section_titles[mode]}")
-        self._props_panel.show()
-        if self._main_splitter.sizes()[1] < 10:
-            total = sum(self._main_splitter.sizes()) or self.width() or 1000
-            props_w = max(260, min(340, int(total * 0.18)))
-            self._main_splitter.setSizes([max(total - props_w, 100), props_w])
+        def build():
+            while holder.count():
+                item = holder.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            current['w'] = sec.build_properties_widget(dlg.close)
+            holder.addWidget(current['w'])
+
+        build()
+        row = QHBoxLayout()
+        btn_reset = QPushButton("Restaurar por defecto")
+        btn_reset.setToolTip("Vuelve este gráfico a la configuración estándar del programa")
+        btn_reset.clicked.connect(lambda: (sec.restore_defaults(), build()))
+        btn_close = QPushButton("Cerrar")
+        btn_close.clicked.connect(dlg.accept)
+        row.addWidget(btn_reset)
+        row.addStretch(1)
+        row.addWidget(btn_close)
+        lay.addLayout(row)
+        dlg.finished.connect(lambda _=0: current['w'].flush())
+        dlg.exec()
 
     def _get_current_ma(self):
         if self._nota != "Todo el audio" and self._ma and self._ma.notes:
