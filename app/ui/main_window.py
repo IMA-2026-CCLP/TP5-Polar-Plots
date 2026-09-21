@@ -400,10 +400,9 @@ class MainWindow(QMainWindow):
             "Si la medición se hizo con un único micrófono, o con canales de sensibilidad equivalente, "
             "el efecto es despreciable."
         )
-        btn_go = box.addButton("Calcular sin calibrar", QMessageBox.ButtonRole.AcceptRole)
-        btn_cal = box.addButton("Calibrar…", QMessageBox.ButtonRole.ActionRole)
-        box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(btn_cal)
+        btn_go = box.addButton("Ok, continuar", QMessageBox.ButtonRole.AcceptRole)
+        btn_cal = box.addButton("Calibrar", QMessageBox.ButtonRole.ActionRole)
+        box.setDefaultButton(btn_cal)      # cerrar la ventana (Esc / X) cancela el cálculo
         box.exec()
         clicked = box.clickedButton()
         if clicked is btn_cal:
