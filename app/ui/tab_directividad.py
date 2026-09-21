@@ -1344,7 +1344,9 @@ class TabDirectividad(QWidget):
         else:
             suggested = f"dir_{mode_label}_{nota}.png"
 
-        filters = "PNG (*.png);;SVG vectorial (*.svg);;JPEG (*.jpg);;WEBP (*.webp)"
+        # El SVG del Espectro no es fiel (las barras no se recortan al eje): sólo PNG/JPEG/WEBP
+        filters = ("PNG (*.png);;JPEG (*.jpg);;WEBP (*.webp)" if mode == "spectrum"
+                   else "PNG (*.png);;SVG vectorial (*.svg);;JPEG (*.jpg);;WEBP (*.webp)")
         path, selected_filter = QFileDialog.getSaveFileName(
             self, "Guardar imagen", suggested, filters
         )
@@ -1372,7 +1374,7 @@ class TabDirectividad(QWidget):
 
         self._sections[mode].export_image(path, dpi=dpi, fmt=fmt)
 
-    def export_all_images(self, folder: str, prefix: str, dpi: int = 300, modes=None):
+    def export_all_images(self, folder: str, prefix: str, dpi: int = 300, modes=None, fmt: str = 'png'):
         """
         Exporta de una sola vez las imágenes de todas las vistas habilitadas
         (pills del ribbon), para todas las bandas del rango actualmente
@@ -1380,6 +1382,7 @@ class TabDirectividad(QWidget):
         que se exporta una única vez.
 
         modes : vistas a exportar (None = las 4).
+        fmt   : 'png' o 'svg'; el SVG (vectorial) sólo aplica a Polar 2D; el resto sale en PNG.
 
         Nombres: {prefix}_{freq}Hz_{vista}.png  (3D/Esfera/Polar2D)
                  {prefix}_{vista}.png            (Espectro)
@@ -1403,7 +1406,8 @@ class TabDirectividad(QWidget):
                 continue
             for bi in band_indices:
                 freq = int(round(float(self._full_bands[bi])))
-                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}.png"))
+                ext = "svg" if (fmt == "svg" and mode == "polar2d") else "png"
+                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}.{ext}"))
         if "spectrum" in modes:
             tasks.append(("spectrum", None, f"{prefix}_{_MODE_LABELS['spectrum']}.png"))
 
@@ -1448,6 +1452,7 @@ class TabDirectividad(QWidget):
         sec  = self._sections[mode]
         path = str(Path(self._export_folder) / filename)
         self._export_dlg.setLabelText(f"Exportando: {filename}")
+        file_fmt = 'svg' if filename.endswith('.svg') else 'png'
 
         def _after_export(ok):
             self._export_done += 1
@@ -1462,9 +1467,9 @@ class TabDirectividad(QWidget):
             # loadFinished al que engancharse. Un margen fijo alcanza porque
             # Plotly.react() es casi instantáneo comparado a una recarga completa.
             QTimer.singleShot(250, lambda: sec.export_image(
-                path, dpi=self._export_dpi, on_done=_after_export))
+                path, dpi=self._export_dpi, fmt=file_fmt, on_done=_after_export))
         else:
-            sec.export_image(path, dpi=self._export_dpi, on_done=_after_export)
+            sec.export_image(path, dpi=self._export_dpi, fmt=file_fmt, on_done=_after_export)
 
     def apply_theme(self, palette: dict):
         """Propaga el cambio de tema a todas las secciones de visualización."""

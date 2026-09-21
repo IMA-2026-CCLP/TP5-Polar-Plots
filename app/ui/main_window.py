@@ -4,7 +4,7 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar, QMessageBox, QCheckBox,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar, QMessageBox, QCheckBox, QComboBox,
 )
 from pathlib import Path
 
@@ -452,8 +452,15 @@ class MainWindow(QMainWindow):
 
         le_dpi = QLineEdit("300")
         le_dpi.setFixedWidth(70)
-        le_dpi.setToolTip("Resolución de exportación en DPI. Valor típico: 300.")
+        le_dpi.setToolTip("Resolución de la imagen. El ancho en píxeles es 720 × DPI / 96 (300 DPI ≈ 2250 px). "
+                          "Se guarda también en el archivo. Valor típico: 300.")
         form.addRow("DPI:", le_dpi)
+
+        combo_fmt = QComboBox()
+        combo_fmt.addItem("PNG (imagen)", "png")
+        combo_fmt.addItem("SVG (vectorial) — solo Polar 2D", "svg")
+        combo_fmt.setToolTip("SVG no se pixela al ampliar. Espectro, Superficie 3D y Esfera se exportan siempre en PNG.")
+        form.addRow("Formato:", combo_fmt)
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -479,7 +486,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             dpi = 300
         dpi = max(72, min(1200, dpi))
-        self.view_dir.export_all_images(folder, prefix, dpi=dpi, modes=modes)
+        self.view_dir.export_all_images(folder, prefix, dpi=dpi, modes=modes, fmt=combo_fmt.currentData())
 
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()

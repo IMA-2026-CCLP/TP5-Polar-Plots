@@ -310,12 +310,8 @@ class BalloonView(QWidget):
         self._placeholder.show()
 
     _EXPORT_FORMATS = ('png', 'svg', 'jpeg', 'webp')   # soportados por Plotly.toImage() en navegador
-    # Tamaño lógico fijo (px CSS) del export: mismo aspecto y misma proporción
-    # texto/gráfico sin importar el tamaño de ventana. `scale` (DPI) lo multiplica.
-    # ponytail: un solo tamaño para las 4 vistas; hacerlo por vista si el Polar 2D pide cuadrado.
-    _EXPORT_W, _EXPORT_H = 720, 540
 
-    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, _retry: bool = True):
         """
         Exporta el gráfico real vía Plotly.toImage() (calidad de render de
         Plotly, no una captura de pantalla), usando exactamente el mismo
@@ -341,7 +337,11 @@ class BalloonView(QWidget):
                   export_all_images en TabDirectividad).
         """
         fmt = fmt if fmt in self._EXPORT_FORMATS else 'png'
-        scale = max(1, round(dpi / 96.0))
+        # Se re-renderiza en vectorial/WebGL a mayor resolución (no es una captura): mismo aspecto y
+        # proporción de texto que en pantalla, con ancho final = EXPORT_BASE_W * DPI / 96 píxeles.
+        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
+        target_w = dpi / 96.0 * EXPORT_BASE_W      # ancho final en píxeles
+        scale = round(target_w / max(1, self._web.width()), 4)   # sólo para el log
 
         import uuid
         exp_id = uuid.uuid4().hex
@@ -369,6 +369,8 @@ class BalloonView(QWidget):
             try:
                 with open(path, 'wb') as f:
                     f.write(base64.b64decode(data_url.split(',', 1)[1]))
+                if fmt == 'png':
+                    set_png_dpi(path, dpi)
                 self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, escala {scale}×, {fmt})")
                 if on_done:
                     on_done(True)
@@ -380,11 +382,17 @@ class BalloonView(QWidget):
             if rid != exp_id:
                 return
             _cleanup()
+            if _retry:      # un fallo aislado (p. ej. WebGL ocupado): reintenta antes de caer a la captura
+                self.export_image(path, dpi, fmt, on_done, _retry=False)
+                return
             self.log.emit(f"[Dir] Plotly.toImage falló ({err}) — se usa captura de pantalla como respaldo.")
             self._export_via_grab(path, on_done)
 
         def _on_timeout():
             _cleanup()
+            if _retry:
+                self.export_image(path, dpi, fmt, on_done, _retry=False)
+                return
             self._export_via_grab(path, on_done)
 
         page.export_ready.connect(_on_ready)
@@ -394,8 +402,13 @@ class BalloonView(QWidget):
 
         js = (
             "(function(){"
-            f"Plotly.toImage(document.getElementById('plot'), {{format:'{fmt}', scale:{scale}, "
-            f"width:{self._EXPORT_W}, height:{self._EXPORT_H}}})"
+            "var el=document.getElementById('plot');"
+            # Sin width/height explícitos Plotly usa 700×450 (no el tamaño del panel): se pasan los reales.
+            "var W=(el._fullLayout&&el._fullLayout.width)||el.offsetWidth, H=(el._fullLayout&&el._fullLayout.height)||el.offsetHeight;"
+            # La malla WebGL se rasteriza con plotGlPixelRatio (por defecto 2): se sube a la escala pedida
+            # para que la superficie también salga nítida al ampliar (con tope por límites de la GPU).
+            f"if(el._context) el._context.plotGlPixelRatio=Math.min(8, Math.max(2, {target_w}/Math.max(1,W)));"
+            f"Plotly.toImage(el, {{format:'{fmt}', width:W, height:H, scale:{target_w}/Math.max(1,W)}})"
             ".then(function(url){"
             "  var CHUNK=400000;"
             "  var n=Math.max(1, Math.ceil(url.length/CHUNK));"
