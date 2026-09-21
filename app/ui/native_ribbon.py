@@ -636,8 +636,10 @@ class NativeRibbon(QWidget):
                 (None, self._combo('colorscale', 84, "Paleta de colores de los gráficos 3D y esfera",
                                    [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis")], disp))]),
             ("Espectro", [
-                ("Audio", self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
-                                      [("Originales", 0), ("Igualados en nivel", 1)], disp)),
+                ("Audio", self._with_info(
+                    self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
+                                [("Originales", 0), ("Igualados en nivel", 1)], disp),
+                    "Espectro: Originales / Igualados en nivel", '<b>Originales</b><br>Espectro del micrófono de referencia en cada toma, tal como se midió. Incluye las diferencias de nivel con que el cantante emitió en cada toma.<br><br><b>Igualados en nivel</b><br>Espectro después de la corrección de emisión que usa el cálculo de directividad: se compensa, banda por banda, la diferencia de nivel de cada toma respecto de la toma de referencia (Ref. azimut). Así todas las tomas quedan al mismo nivel y solo importa la forma del espectro, no cuánto cantó más fuerte o más suave en cada toma.<br><br>Como la corrección se calcula con ese mismo micrófono, en <i>Igualados</i> todas las tomas coinciden; la vista Por toma sirve sobre todo con <i>Originales</i>.')),
                 ("Curvas", self._combo('spec_global', 84, "Global: promedio de todos los ángulos. Por toma: una curva por azimuth",
                                        [("Global", True), ("Por toma", False)], disp))]),
         ])

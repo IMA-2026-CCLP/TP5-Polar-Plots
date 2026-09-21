@@ -86,6 +86,7 @@ class Polar2DView(QWidget):
         self._plot.hideAxis('left')
         self._plot.getPlotItem().setMenuEnabled(False)
         self._legend = None
+        self._plot.getPlotItem().legend = None
 
         self._info_label = QLabel(self._plot)
         self._info_label.setStyleSheet(
@@ -265,14 +266,15 @@ class Polar2DView(QWidget):
             ang = np.radians(rotation + np.asarray(theta_deg, float))
             return r * np.cos(ang), r * np.sin(ang)
 
-        self._plot.clear()
-        if self._legend is not None:
-            scene = self._legend.scene()
-            if scene is not None:              # puede haber salido ya de la escena (plot.clear())
-                scene.removeItem(self._legend)
-            self._legend = None
+        self._plot.clear()          # también vacía las entradas de la leyenda, pero no la leyenda en sí
 
-        ring_color = self._style.get('ring_color') or '#000000'
+        st = self._style
+        ring_color = st.get('ring_color') or '#000000'
+        ring_pen   = pg.mkPen(ring_color, width=float(st.get('ring_width', 1)),
+                              style=_DASH_QT.get(st.get('ring_dash', 'dot'), Qt.PenStyle.DotLine))
+        spoke_pen  = pg.mkPen(st.get('spoke_color') or ring_color, width=float(st.get('spoke_width', 1)),
+                              style=_DASH_QT.get(st.get('spoke_dash', 'dot'), Qt.PenStyle.DotLine))
+        show_spokes = st.get('show_spokes', True)
         ring_font  = self._style.get('ring_font_size', 9)
         ring_vals  = np.arange(math.ceil(r_floor / step) * step, r_ceil + 0.01, step)
         ring_vals  = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
@@ -280,7 +282,7 @@ class Polar2DView(QWidget):
         for db in ring_vals:
             r_ring = float(db_to_r(db))
             rx, ry = to_xy(theta_ring, r_ring)
-            circle = pg.PlotCurveItem(rx, ry, pen=pg.mkPen(ring_color, width=1, style=Qt.PenStyle.DotLine))
+            circle = pg.PlotCurveItem(rx, ry, pen=ring_pen)
             self._plot.addItem(circle)
             label_ang = self._style.get('ring_label_angle', 92)
             lx, ly = to_xy(label_ang, r_ring)
@@ -297,12 +299,11 @@ class Polar2DView(QWidget):
             txt.setFont(_px_font(self._tick_font_size))
             txt.setPos(ax, ay)
             self._plot.addItem(txt)
-            sx, sy = to_xy(a, 1.0)
-            spoke = pg.PlotCurveItem([0, sx], [0, sy], pen=pg.mkPen(ring_color, width=1, style=Qt.PenStyle.DotLine))
-            self._plot.addItem(spoke)
+            if show_spokes:
+                sx, sy = to_xy(a, 1.0)
+                self._plot.addItem(pg.PlotCurveItem([0, sx], [0, sy], pen=spoke_pen))
 
-        if multi:
-            self._legend = self._plot.addLegend(offset=(-10, 10))
+        self._update_legend(multi)
 
         default_width = self._style.get('line_width', 2.5)
         for i, ring in enumerate(rings):
@@ -331,6 +332,34 @@ class Polar2DView(QWidget):
         self._info_label.setVisible(self._show_info)
 
         self._db_to_r_params = (r_floor, dyn_range, rotation)
+
+    _LEGEND_POS = {                      # (ancla del cuadro, ancla del gráfico, desplazamiento)
+        'top-right':    ((1, 0), (1, 0), (-10, 10)),
+        'top-left':     ((0, 0), (0, 0), (10, 10)),
+        'bottom-right': ((1, 1), (1, 1), (-10, -10)),
+        'bottom-left':  ((0, 1), (0, 1), (10, -10)),
+    }
+
+    def _update_legend(self, multi: bool):
+        """Una sola leyenda que se reutiliza: quitarla de la escena y volver a pedirla (addLegend devuelve la
+        misma ya sacada) hacía que desapareciera al editar colores/grosores."""
+        pi = self._plot.getPlotItem()
+        if not multi or not self._style.get('show_legend', True):
+            if pi.legend is not None:
+                pi.legend.setVisible(False)
+            self._legend = None
+            return
+        if pi.legend is None or pi.legend.scene() is None:
+            pi.legend = None
+            self._legend = self._plot.addLegend(offset=(-10, 10))
+        else:
+            self._legend = pi.legend
+        lg = self._legend
+        lg.setVisible(True)
+        pos = self._LEGEND_POS.get(self._style.get('legend_pos', 'top-right'), self._LEGEND_POS['top-right'])
+        lg.anchor(*pos)
+        lg.setLabelTextSize(f"{int(self._style.get('legend_font_size', FONT_SIZE))}px")
+        lg.setLabelTextColor('#000000')
 
     # ── Hover ────────────────────────────────────────────────────────────
 
