@@ -305,7 +305,7 @@ class NativeRibbon(QWidget):
         self._loaders.append(load_mode)
         load_mode()
 
-        info = QAction("Recuadro de información", self)
+        info = QAction("Información gráficos", self)
         info.setCheckable(True)
         info.setToolTip("Banda, máximo y dinámica sobre cada gráfico de Directividad")
 
