@@ -182,7 +182,7 @@ class WaveformEditorWidget(QWidget):
 
         ma = self._ma
         self._plot.setLabel(
-            'left', 'dBFS' if self._db else ('Envolvente' if self._env else 'Amplitud')
+            'left', ('dB SPL' if getattr(self._ma, '_is_spl', False) else 'dBFS') if self._db else ('Envolvente' if self._env else 'Amplitud')
         )
 
         i_th = 0

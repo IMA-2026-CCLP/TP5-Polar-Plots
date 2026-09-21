@@ -4,17 +4,20 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar, QMessageBox, QCheckBox, QComboBox,
 )
-from PyQt6.QtCore import Qt, QSettings
+from pathlib import Path
+
+from PyQt6.QtCore import Qt, QSettings, QTimer
 from PyQt6.QtGui import QFont, QTextCursor
 
-from core.worker import Worker
+from core.worker import Worker, activity
 
+from version                 import __version__, APP_NAME
 from ui.styles               import QSS, get_qss
-from ui.html_ribbon          import HtmlRibbon
+from ui.native_ribbon        import NativeRibbon
 from ui                      import theme as _theme
-from ui.tab_carga            import TabCarga
+from ui.file_loader          import FileLoader
 from ui.tab_preprocesamiento import TabPreprocesamiento
 from ui.tab_calibracion      import TabCalibracion
 from ui.tab_notas            import TabNotas, ScaleEditorDialog
@@ -22,11 +25,30 @@ from ui.tab_directividad     import TabDirectividad
 from core.data_store         import load_results, save_results
 
 
+# Controles de Directividad que se guardan con el .npz para reabrir los gráficos igual
+_DIR_UI_KEYS = ('bands', 'hz_min', 'hz_max', 'ref_az', 'ref_th', 'colorscale', 'el_idx', 'polar_plane',
+                'show_info', 'symmetry', 'nota', 'spec_data', 'spec_global')
+
+
+class _NotasWindow(QWidget):
+    """Ventana no modal de Notas: parámetros de detección arriba y la vista de segmentos/F0 abajo."""
+    def __init__(self, params: QWidget, view: QWidget, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("Detección de notas")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(params)
+        lay.addWidget(view, 1)
+        avail = self.screen().availableGeometry()
+        self.resize(min(1000, avail.width() - 40), min(680, avail.height() - 40))
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Polar Pattern CCLP")
+        self.setWindowTitle(f"{APP_NAME}  v{__version__}")
         # Mínimos y tamaño inicial acotados a la pantalla disponible (sin taskbar):
         # un mínimo fijo de 1200x750 no entraba en 1366x768.
         avail = self.screen().availableGeometry()
@@ -36,6 +58,8 @@ class MainWindow(QMainWindow):
 
         self._ma       = None
         self._settings = QSettings("AcousticTools", "PolarAnalyzerV2")
+        import plot.balloon as _balloon
+        _balloon.set_theme(_theme.LIGHT)   # gráficos siempre en claro (fondo blanco), aunque la app esté en oscuro
 
         self._build_ui()
         self._connect_ribbon()
@@ -45,35 +69,57 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         # Vistas de contenido
-        self.view_archivo    = TabCarga()
+        self.loader          = FileLoader(self._settings, self)
         self.view_prepro     = TabPreprocesamiento()
         self.view_notas      = TabNotas()
         self.view_dir        = TabDirectividad()
 
         # Ribbon
-        self.ribbon = HtmlRibbon()
+        self.ribbon = NativeRibbon()
 
         # Stack de contenido
         self._stack = QStackedWidget()
-        self._stack.addWidget(self.view_archivo)    # 0
-        self._stack.addWidget(self.view_prepro)     # 1
-        self._stack.addWidget(self.view_notas)      # 2
-        self._stack.addWidget(self.view_dir)        # 3
-        self._stack.setCurrentIndex(3)              # Directividad por defecto
+        self._stack.addWidget(self.view_prepro)     # 0  (home)
+        self._stack.addWidget(self.view_dir)        # 1
+        self._stack.setCurrentIndex(0)
 
         # Layout central
-        central = QWidget()
-        lay = QVBoxLayout(central)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self.ribbon)
-        lay.addWidget(self._stack, 1)
-        self.setCentralWidget(central)
+        # Menú + pestañas arriba a todo el ancho; parámetros en un dock movible a la izquierda
+        self.setMenuWidget(self.ribbon)
+        self.setCentralWidget(self._stack)
+        self._params_stack = QStackedWidget()
+        self._params_stack.addWidget(self.ribbon.proc_panel)     # 0
+        self._params_stack.addWidget(self.ribbon.dir_panel)      # 1
+        self._params_dock = QDockWidget("Parámetros", self)
+        self._params_dock.setWidget(self._params_stack)
+        self._params_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                                      QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+                                      QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._params_dock)
+        self.setCorner(Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.resizeDocks([self._params_dock], [300], Qt.Orientation.Horizontal)
+        self.ribbon.add_view_action(self._params_dock.toggleViewAction())
+        self.notas_win = _NotasWindow(self.ribbon.notas_page, self.view_notas, self)
 
         self._setup_log_dock()
 
         self._update_statusbar_style(_theme.current())
-        self.statusBar().showMessage("Listo.")
+        self.statusBar().showMessage("Listo — Archivo ▸ Cargar audio… para empezar.")
+
+        # Indicador de operación en curso (el log está oculto por defecto)
+        self._op_label = QLabel()
+        self._op_bar = QProgressBar()
+        self._op_bar.setRange(0, 0)                 # animación "ocupado"
+        self._op_bar.setFixedSize(170, 12)
+        self._op_bar.setTextVisible(False)
+        self.statusBar().addPermanentWidget(self._op_label)
+        self.statusBar().addPermanentWidget(self._op_bar)
+        self._op_label.hide()
+        self._op_bar.hide()
+        activity.changed.connect(self._on_activity)
+        activity.progress.connect(self._on_progress)
+        self._op_base = ""
 
     # ── Conexiones ────────────────────────────────────────────────────────────
 
@@ -83,8 +129,10 @@ class MainWindow(QMainWindow):
         # Navegación
         rb.tab_changed.connect(self._on_tab_changed)
         # ── Archivo
-        rb.sig_load_audio.connect(lambda: self._show_archivo_mode('audio'))
-        rb.sig_load_tensor.connect(lambda: self._show_archivo_mode('tensor'))
+        rb.sig_load_audio.connect(lambda: self.loader.load_audio(self))
+        rb.sig_load_tensor.connect(lambda: self.loader.load_session(self))
+        rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
+        rb.sig_open_notas.connect(self._open_notas)
         rb.sig_save_tensor.connect(self._on_save_session)
         rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
         rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
@@ -96,7 +144,6 @@ class MainWindow(QMainWindow):
         rb.sig_align_preview.connect(self._on_align_preview)
         rb.sig_align_ref.connect(self._on_align_ref)
         rb.sig_open_calibracion.connect(self._open_calibracion_dialog)
-        rb.sig_to_spl.connect(self._on_to_spl)
 
         # ── Notas
         rb.sig_detect_notes.connect(self._on_detect_notes)
@@ -115,8 +162,8 @@ class MainWindow(QMainWindow):
         rb.sig_theme_toggled.connect(self._toggle_theme)
 
         # ── Señales de retorno de las vistas
-        self.view_archivo.ma_ready.connect(self._on_ma_ready)
-        self.view_archivo.log.connect(self._append_log)
+        self.loader.ma_ready.connect(self._on_ma_ready)
+        self.loader.log.connect(self._append_log)
 
         self.view_prepro.ma_updated.connect(self._on_ma_ready)
         self.view_prepro.log.connect(self._append_log)
@@ -127,13 +174,13 @@ class MainWindow(QMainWindow):
 
         self.view_dir.log.connect(self._append_log)
         self.view_dir.computed.connect(self._on_dir_computed)
+        self.view_dir.compute_finished.connect(lambda: QTimer.singleShot(0, self._offer_save_directivity))
 
     # ── Tema ──────────────────────────────────────────────────────────────────
 
     def _toggle_theme(self):
         import plot.balloon as _balloon
         p = _theme.toggle()
-        _balloon.set_theme(p)
         qss = get_qss(p)
         QApplication.instance().setStyleSheet(qss)
         self.setStyleSheet(qss)
@@ -151,39 +198,62 @@ class MainWindow(QMainWindow):
 
     # ── Slots de navegación ───────────────────────────────────────────────────
 
+    def _on_progress(self, done: int, total: int):
+        if total > 0:
+            self._op_bar.setRange(0, total)
+            self._op_bar.setValue(done)
+            self._op_label.setText(f"{self._op_base}  {100 * done // total} %")
+
+    def _on_activity(self, n: int, label: str):
+        busy = n > 0
+        self._op_base = label + (f"  (+{n - 1} más)" if n > 1 else "")
+        self._op_bar.setRange(0, 0)          # animación "ocupado" hasta que llegue el primer progreso
+        self._op_label.setText(self._op_base)
+        self._op_label.setVisible(busy)
+        self._op_bar.setVisible(busy)
+
     def _on_tab_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
+        self._params_stack.setCurrentIndex(idx)
 
-    def _show_archivo_mode(self, mode: str):
-        self.ribbon._switch_tab(0)
-        self.view_archivo.set_source_mode(mode)
+    def _open_notas(self):
+        self.notas_win.show()
+        self.notas_win.raise_()
+        self.notas_win.activateWindow()
 
     # ── Slots de Archivo ──────────────────────────────────────────────────────
 
     def _on_save_session(self):
-        self.view_archivo._on_guardar_npz(
-            ui_state=self.ribbon._bridge.state.copy()
-        )
+        self.loader.save_session(self, ui_state=self.ribbon._bridge.state.copy())
 
     def _on_load_polar_npz(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Cargar NPZ polar", "", "NPZ (*.npz)"
+            self, "Cargar directividad", "", "NPZ (*.npz)"
         )
-        if not path:
-            return
+        if path:
+            self._load_polar_npz_file(path)
+
+    def _load_polar_npz_file(self, path: str):
         try:
             data = load_results(path)
+            view = data['metadata'].get('view') or {}
             # Cambiar a Directividad ANTES de cargar para que las secciones
             # sean visibles cuando _refresh_display() las actualice
-            self.ribbon._switch_tab(3)
-            self.view_dir.load_from_npz(data)
+            self.ribbon._switch_tab(1)
+            notes = self.view_dir.load_from_npz(data)
             self.ribbon.set_dir_computed(data['thetas'])
+            self.ribbon.set_notes_loaded(notes)
+            if view.get('ui'):                       # controles como estaban al guardar
+                self.ribbon.apply_ui_state(view['ui'])
+            if view.get('view_dir'):                 # propiedades de cada gráfico
+                self.view_dir.apply_view_config(view['view_dir'])
+            self.view_dir.apply_display_params(self.ribbon.get_dir_display_params())
             self.ribbon.set_dir_status(
-                f"NPZ cargado\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
+                f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
-            self._append_log(f"[Directividad] NPZ cargado desde {path}")
+            self._append_log(f"[Directividad] Cargado desde {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al cargar NPZ polar: {e}")
+            self._append_log(f"[ERROR] Al cargar directividad: {e}")
 
     def _on_save_polar_npz(self):
         # OJO: self._ma sólo se actualiza al cargar/preprocesar/calibrar
@@ -199,17 +269,27 @@ class MainWindow(QMainWindow):
             n.dir_levels is not None for n in ma.notes.values())
         if not has_global and not has_notes:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar NPZ polar", "", "NPZ (*.npz)")
-        if not path:
-            return
+        start = str(self._settings.value("last_polar_dir", "")) + "/directividad.npz"
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar directividad", start, "NPZ (*.npz)")
+        if path:
+            self._settings.setValue("last_polar_dir", str(Path(path).parent))
+            self._save_polar_npz_file(path, ma)
+
+    def _save_polar_npz_file(self, path: str, ma):
         try:
             rb = self.ribbon
+            st = rb._bridge.state
+            view = {
+                'ui': {k: st[k] for k in _DIR_UI_KEYS if k in st},
+                'view_dir': self.view_dir.get_view_config(),
+            }
             save_results(
                 filepath       = path,
                 ma             = ma,
                 bands          = rb.combo_bands.currentText(),
                 ref_azimuth    = int(float(rb.le_ref_az.text() or 0)),
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
+                view           = view,
             )
             self._append_log(f"[Directividad] Guardado → {path}")
         except Exception as e:
@@ -235,7 +315,6 @@ class MainWindow(QMainWindow):
     def _on_to_spl(self):
         if self._ma is None or self._ma._is_spl:
             return
-        self.ribbon.btn_to_spl.setEnabled(False)
 
         def _run():
             self._ma.to_spl()
@@ -246,10 +325,10 @@ class MainWindow(QMainWindow):
             self._append_log("[Calibración] Tensor convertido a SPL (Pa).")
 
         def _err(msg):
-            self.ribbon.btn_to_spl.setEnabled(True)
             self._append_log(f"[ERROR] to_spl:\n{msg}")
 
         self._spl_worker = Worker(_run)
+        self._spl_worker.label = "Convirtiendo a dB SPL…"
         self._spl_worker.finished.connect(_done)
         self._spl_worker.error.connect(_err)
         self._spl_worker.log.connect(self._append_log)
@@ -259,7 +338,13 @@ class MainWindow(QMainWindow):
         if self._ma is None:
             return
         dlg = _CalibracionDialog(self._ma, self)
-        dlg.ma_updated.connect(self._on_ma_ready)
+
+        def applied(ma):                 # calibrar => pasar a dB SPL en el mismo paso
+            self._on_ma_ready(ma)
+            dlg.accept()
+            self._on_to_spl()
+
+        dlg.ma_updated.connect(applied)
         dlg.log.connect(self._append_log)
         dlg.exec()
 
@@ -273,9 +358,12 @@ class MainWindow(QMainWindow):
             self.ribbon.btn_save_mask.setEnabled(True)
 
     def _on_edit_scale(self):
-        dlg = ScaleEditorDialog(self.view_notas.get_scale(), self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self.view_notas.set_scale(dlg.get_scale())
+        dlg = ScaleEditorDialog(self.view_notas.get_scale(), self.ribbon.current_scale_name(), self.notas_win)
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        if dlg.db_changed or (accepted and dlg.selected_name):
+            self.ribbon.refresh_scales(dlg.selected_name)      # actualiza el combo (y elige la escala)
+        if accepted:
+            self.view_notas.set_scale(dlg.get_scale())         # pisa con lo que quedó en la tabla (ediciones sin guardar)
 
     def _on_save_mask(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -295,7 +383,36 @@ class MainWindow(QMainWindow):
     # ── Slots de Directividad ─────────────────────────────────────────────────
 
     def _on_compute_dir(self, bands, hz_min, hz_max, ref_az, ref_th):
+        if not self._confirm_uncalibrated():
+            return
         self.view_dir.compute_all(bands, hz_min, hz_max, ref_az, ref_th)
+
+    def _confirm_uncalibrated(self) -> bool:
+        """Calcular sin calibrar está permitido, pero se advierte de la limitación (True = continuar)."""
+        ma = self.view_dir.get_ma() or self._ma
+        if ma is None or ma._is_spl:
+            return True
+        box = QMessageBox(QMessageBox.Icon.Warning, "Calibración no aplicada", "", parent=self)
+        box.setText("No se aplicó la calibración de los micrófonos.")
+        box.setInformativeText(
+            "En mediciones con múltiples micrófonos, la sensibilidad de cada canal puede diferir "
+            "(del orden de 1 a 3 dB). Sin calibrar, esas diferencias no se corrigen y se confunden "
+            "con directividad real, por lo que los resultados pueden no ser adecuados para un análisis "
+            "cuantitativo.\n\n"
+            "Los niveles se expresarán en dBFS (no en dB SPL) y el patrón quedará relativo a la "
+            "posición de referencia.\n\n"
+            "Si la medición se hizo con un único micrófono, o con canales de sensibilidad equivalente, "
+            "el efecto es despreciable."
+        )
+        btn_go = box.addButton("Ok, continuar", QMessageBox.ButtonRole.AcceptRole)
+        btn_cal = box.addButton("Calibrar", QMessageBox.ButtonRole.ActionRole)
+        box.setDefaultButton(btn_cal)      # cerrar la ventana (Esc / X) cancela el cálculo
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is btn_cal:
+            self._open_calibracion_dialog()
+            return False
+        return clicked is btn_go
 
     def _on_save_dir_npz(self):
         self._on_save_polar_npz()
@@ -306,8 +423,18 @@ class MainWindow(QMainWindow):
             return
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("Exportar todas las imágenes")
+        dlg.setWindowTitle("Exportar imágenes de directividad")
         form = QFormLayout(dlg)
+
+        checks = {}
+        box = QVBoxLayout()
+        for mode, label in (("polar2d", "Polar 2D"), ("spectrum", "Espectro"),
+                            ("3d", "Superficie 3D"), ("sphere", "Esfera")):
+            cb = QCheckBox(label)
+            cb.setChecked(True)
+            checks[mode] = cb
+            box.addWidget(cb)
+        form.addRow("Gráficos:", box)
 
         le_prefix = QLineEdit("directividad")
         form.addRow("Nombre base:", le_prefix)
@@ -329,8 +456,15 @@ class MainWindow(QMainWindow):
 
         le_dpi = QLineEdit("300")
         le_dpi.setFixedWidth(70)
-        le_dpi.setToolTip("Resolución de exportación en DPI. Valor típico: 300.")
+        le_dpi.setToolTip("Resolución de la imagen. El ancho en píxeles es 720 × DPI / 96 (300 DPI ≈ 2250 px). "
+                          "Se guarda también en el archivo. Valor típico: 300.")
         form.addRow("DPI:", le_dpi)
+
+        combo_fmt = QComboBox()
+        combo_fmt.addItem("PNG (imagen)", "png")
+        combo_fmt.addItem("SVG (vectorial) — solo Polar 2D", "svg")
+        combo_fmt.setToolTip("SVG no se pixela al ampliar. Espectro, Superficie 3D y Esfera se exportan siempre en PNG.")
+        form.addRow("Formato:", combo_fmt)
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -341,6 +475,10 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
+        modes = [m for m, cb in checks.items() if cb.isChecked()]
+        if not modes:
+            self._append_log("[Dir] Exportación cancelada: no se eligió ningún gráfico.")
+            return
         prefix = le_prefix.text().strip() or "directividad"
         folder = le_folder.text().strip()
         if not folder:
@@ -352,11 +490,27 @@ class MainWindow(QMainWindow):
         except ValueError:
             dpi = 300
         dpi = max(72, min(1200, dpi))
-        self.view_dir.export_all_images(folder, prefix, dpi=dpi)
+        self.view_dir.export_all_images(folder, prefix, dpi=dpi, modes=modes, fmt=combo_fmt.currentData())
 
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()
         self.view_dir.apply_display_params(params)
+
+    def _offer_save_directivity(self):
+        """Tras Calcular: ofrece guardar el archivo de directividad (elige la ubicación en el diálogo de archivo)."""
+        ma = self.view_dir.get_ma()
+        if ma is None or ma.dir_levels is None:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Directividad calculada")
+        box.setText("¿Querés guardar el archivo de directividad?")
+        box.setInformativeText("Así podés volver a ver los gráficos más adelante sin reprocesar los audios.")
+        btn_save = box.addButton("Guardar…", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Ahora no", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_save)
+        box.exec()
+        if box.clickedButton() is btn_save:
+            self._on_save_polar_npz()
 
     def _on_dir_computed(self, thetas, status: str):
         self.ribbon.set_dir_computed(thetas)
@@ -384,11 +538,11 @@ class MainWindow(QMainWindow):
         # cambiar los defaults (sólo 2D+Esfera visibles) traían "true" para
         # los 4, pisando el default nuevo apenas se disparaba el primer
         # dirDisplayChanged (cambiar de nota, apagar Info, etc.).
-        ui = getattr(self.view_archivo, '_loaded_ui_state', {})
+        ui = self.loader._loaded_ui_state
         if ui:
             ui = {k: v for k, v in ui.items() if not k.startswith('view_')}
             self.ribbon._bridge.state.update(ui)
-            self.view_archivo._loaded_ui_state = {}
+            self.loader._loaded_ui_state = {}
 
         self.ribbon.set_ma_loaded(ma)
         if ma.notes:
@@ -413,6 +567,7 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
+        self.ribbon.add_view_action(self._log_dock.toggleViewAction())
         # altura inicial proporcional a la pantalla (150 px fijos se comían el gráfico en 768p)
         self.resizeDocks([self._log_dock], [max(60, int(self.screen().availableGeometry().height() * 0.12))],
                          Qt.Orientation.Vertical)
@@ -421,15 +576,7 @@ class MainWindow(QMainWindow):
         self._log_dock.dockLocationChanged.connect(self._on_log_dock_location)
         self._log_dock.topLevelChanged.connect(self._on_log_floating)
 
-        # botón toggle en la barra de estado
-        self._btn_log = QToolButton()
-        self._btn_log.setText("Log ▾")
-        self._btn_log.setCheckable(True)
-        self._btn_log.setChecked(True)
-        self._btn_log.setToolTip("Mostrar / ocultar log")
-        self._btn_log.clicked.connect(self._toggle_log)
-        self._log_dock.visibilityChanged.connect(self._on_log_visibility)
-        self.statusBar().addPermanentWidget(self._btn_log)
+        self._log_dock.hide()      # oculto por defecto; se abre desde Ver ▸ Log
 
     def _on_log_dock_location(self, area):
         _MAX = 16_777_215
@@ -447,13 +594,6 @@ class MainWindow(QMainWindow):
         if floating:
             self._log_dock.setMaximumHeight(_MAX)
             self._log_dock.setMaximumWidth(_MAX)
-
-    def _toggle_log(self):
-        self._log_dock.setVisible(not self._log_dock.isVisible())
-
-    def _on_log_visibility(self, visible: bool):
-        self._btn_log.setChecked(visible)
-        self._btn_log.setText("Log ▾" if visible else "Log ▸")
 
     def _append_log(self, text: str):
         self._log.moveCursor(QTextCursor.MoveOperation.End)
