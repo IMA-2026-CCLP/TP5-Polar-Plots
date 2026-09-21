@@ -921,7 +921,7 @@ class _ViewSection(QWidget):
         self.view.set_show_info(show)
 
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
-        self.view.export_image(path, dpi=dpi, fmt=fmt, on_done=on_done)
+        self.view.export_image(path, dpi=dpi, fmt=fmt, on_done=on_done)      # el tamaño sale de Opciones ▸ Imágenes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1466,8 +1466,10 @@ class TabDirectividad(QWidget):
         if fmt == 'svg':
             dpi = 300   # vectorial: el DPI no aplica, pero el parámetro existe igual
         else:
+            from ui.export_utils import get_export_defaults
             dpi, ok = QInputDialog.getInt(
-                self, "Resolución de exportación", "DPI:", 300, 72, 1200, 1
+                self, "Resolución de exportación", "DPI (el tamaño físico es fijo, ver Opciones ▸ Imágenes):",
+                get_export_defaults()[0], 72, 1200, 1
             )
             if not ok:
                 return

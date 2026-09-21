@@ -159,23 +159,11 @@ class SpectrumView(QWidget):
         self._plot.hide()
         self._placeholder.show()
 
-    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
-        import pyqtgraph.exporters as pg_exporters
-        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, size_cm=None):
+        """Tamaño físico fijo (Opciones ▸ Gráficos ▸ Imágenes); el DPI sólo define los píxeles. Ver export_utils."""
+        from ui.export_utils import export_pg_view
         try:
-            if fmt == 'svg':
-                from ui.export_utils import export_pg_svg
-                export_pg_svg(self._plot, path, dpi)
-                if on_done:
-                    on_done(True)
-                return
-            else:
-                exporter = pg_exporters.ImageExporter(self._plot.getPlotItem())
-                # re-renderiza la escena (vectorial) a este ancho: nítido, no es una captura
-                exporter.parameters()['width'] = int(round(EXPORT_BASE_W * dpi / 96))
-            exporter.export(path)
-            if fmt != 'svg':
-                set_png_dpi(path, dpi)
+            export_pg_view(self, path, dpi, fmt, size_cm)
             if on_done:
                 on_done(True)
         except Exception as e:

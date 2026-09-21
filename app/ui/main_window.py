@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
         rb.sig_load_tensor.connect(lambda: self.loader.load_session(self))
         rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
         rb.sig_open_notas.connect(self._open_notas)
+        rb.sig_open_options.connect(self._open_graph_options)
         rb.sig_save_tensor.connect(self._on_save_session)
         rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
         rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
@@ -219,6 +220,15 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
         self._params_stack.setCurrentIndex(idx)
+
+    def _open_graph_options(self, kind: str):
+        """Opciones ▸ Gráficos ▸ …: el mismo modal de Propiedades del gráfico (o el de Imágenes)."""
+        if kind == "images":
+            from ui.options_dialogs import ImageOptionsDialog
+            ImageOptionsDialog(self).exec()
+            return
+        self.ribbon._switch_tab(1)          # Directividad
+        self.view_dir._show_properties_panel(kind)
 
     def _open_notas(self):
         self.notas_win.show()
@@ -458,16 +468,34 @@ class MainWindow(QMainWindow):
         row.addWidget(btn_browse)
         form.addRow("Carpeta:", row)
 
-        le_dpi = QLineEdit("300")
+        from ui import export_utils as _eu
+        w_cm, h_cm = _eu.get_export_size_cm()
+        dpi0, fmt0 = _eu.get_export_defaults()
+        le_dpi = QLineEdit(str(dpi0))
         le_dpi.setFixedWidth(70)
-        le_dpi.setToolTip("Resolución de la imagen. El ancho en píxeles es 720 × DPI / 96 (300 DPI ≈ 2250 px). "
+        le_dpi.setToolTip("Calidad de la imagen (píxeles por pulgada). No cambia el tamaño físico, sólo la nitidez. "
                           "Se guarda también en el archivo. Valor típico: 300.")
         form.addRow("DPI:", le_dpi)
+        lbl_size = QLabel()
+        lbl_size.setObjectName("rb_status")
+        lbl_size.setToolTip("Se cambia en Opciones ▸ Gráficos ▸ Imágenes")
+
+        def _upd_size(*_):
+            try:
+                d = max(72.0, min(1200.0, float(le_dpi.text().replace(',', '.'))))
+            except ValueError:
+                d = float(dpi0)
+            lbl_size.setText(f"Tamaño fijo {w_cm:g} × {h_cm:g} cm = {round(w_cm / 2.54 * d)} × {round(h_cm / 2.54 * d)} px "
+                             "(Opciones ▸ Gráficos ▸ Imágenes)")
+        le_dpi.textChanged.connect(_upd_size)
+        _upd_size()
+        form.addRow(lbl_size)
 
         combo_fmt = QComboBox()
         combo_fmt.addItem("PNG (imagen)", "png")
         combo_fmt.addItem("SVG (vectorial) — solo Polar 2D", "svg")
         combo_fmt.setToolTip("SVG no se pixela al ampliar. Espectro, Superficie 3D y Esfera se exportan siempre en PNG.")
+        combo_fmt.setCurrentIndex(max(0, combo_fmt.findData(fmt0)))
         form.addRow("Formato:", combo_fmt)
 
         btns = QDialogButtonBox(

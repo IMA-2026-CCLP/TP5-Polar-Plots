@@ -64,6 +64,7 @@ class NativeRibbon(QWidget):
     sig_load_audio      = pyqtSignal()
     sig_edit_patterns   = pyqtSignal()
     sig_open_notas      = pyqtSignal()
+    sig_open_options    = pyqtSignal(str)     # 'polar2d' | 'spectrum' | 'sphere' | '3d' | 'images'
     sig_save_tensor     = pyqtSignal()
     sig_load_tensor     = pyqtSignal()
     sig_load_polar_npz  = pyqtSignal()
@@ -376,6 +377,17 @@ class NativeRibbon(QWidget):
         m.addSeparator()
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
+
+        m = mb.addMenu("&Opciones")
+        g = m.addMenu("Gráficos")
+        for key, text in (("polar2d", "Polar 2D…"), ("spectrum", "Espectro…"), ("sphere", "Esfera 3D…"),
+                          ("3d", "Superficie 3D…"), ("images", "Imágenes…")):
+            if key == "images":
+                g.addSeparator()
+            a = g.addAction(text)
+            a.triggered.connect(lambda _=False, k=key: self.sig_open_options.emit(k))
+            a.setToolTip("Tamaño, DPI y formato de las imágenes exportadas" if key == "images"
+                         else "Todas las opciones de este gráfico (escala, ejes, líneas, estilos…)")
 
         m = mb.addMenu("A&yuda")
         m.addAction("Acerca de…", self._about)
