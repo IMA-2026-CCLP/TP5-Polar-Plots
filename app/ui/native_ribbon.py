@@ -609,7 +609,7 @@ class NativeRibbon(QWidget):
                                           self._num('hz_max', 56, "Frecuencia máxima a mostrar (Hz)", disp))),
                 ("Ref. azimut", self._c_ref_az),
                 ("Ref. elevación", self._c_ref_th),
-                (None, self._button("▶ Calcular", "Calcula el patrón de directividad (requiere la calibración aplicada, en Procesamiento ▸ Calibración)",
+                (None, self._button("▶ Calcular", "Calcula el patrón de directividad. Se recomienda haber aplicado la calibración (Procesamiento ▸ Calibración)",
                                     lambda: b.computeDir(), 'compute', primary=True, enabled=False)),
                 (None, self._dir_status)]),
             ("Nota", [(None, self._c_nota)]),
@@ -658,7 +658,7 @@ class NativeRibbon(QWidget):
         is_spl = bool(getattr(ma, '_is_spl', False))
         for n in ('hpf', 'align_takes', 'align_ref', 'detect'):
             self._btn[n].setEnabled(True)
-        self._btn['compute'].setEnabled(is_spl)
+        self._btn['compute'].setEnabled(True)      # sin calibrar se puede calcular, con aviso (ver MainWindow)
         self._act['calibrar'].setEnabled(True)
         self._act['align_takes'].setEnabled(True)
         self._act['align_mics'].setEnabled(True)

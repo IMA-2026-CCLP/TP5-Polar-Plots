@@ -834,6 +834,7 @@ class TabDirectividad(QWidget):
         self._show_info        = True
         self._current_band_idx = 0
         self._npz: dict | None = None   # resultados cargados de un .npz (sin MicArray): {nota: {...}}
+        self._unit = "dB SPL"          # 'dBFS' si se calculó sin calibrar
 
         # Estado de controles del ribbon — actualizados por apply_display_params()
         self._hz_min      = 200.0
@@ -972,6 +973,7 @@ class TabDirectividad(QWidget):
     def _show_results(self, ma):
         if ma.dir_levels is None:
             return
+        self._unit = "dB SPL" if ma._is_spl else "dBFS"
         thetas_num = [t for t in ma.thetas if t != 'ref']
         theta_idx  = [ma.thetas.index(t) for t in thetas_num]
 
@@ -1024,6 +1026,7 @@ class TabDirectividad(QWidget):
             f_ref = None
 
         self.band_selector.set_bands(f_bands)
+        self._sections['spectrum'].view.set_unit(self._unit)
         # Clamp el índice de banda al nuevo tamaño de f_bands
         safe_band = min(self._current_band_idx, max(0, len(f_bands) - 1))
 
@@ -1230,6 +1233,7 @@ class TabDirectividad(QWidget):
             status = (
                 f"Dir. calculada — {self._ma.dir_levels.shape}  |  "
                 f"{self._ma.dir_freqs[0]:.0f}–{self._ma.dir_freqs[-1]:.0f} Hz"
+                + ("" if self._ma._is_spl else "  |  SIN CALIBRAR (dBFS)")
             )
             self.computed.emit(
                 np.array([t for t in self._ma.thetas if t != 'ref'],
@@ -1256,6 +1260,7 @@ class TabDirectividad(QWidget):
         self._full_azimuths = data['azimuths'].astype(np.float32)
         self._full_thetas   = data['thetas'].astype(np.float32)
         self._full_bands    = data['dir_freqs'].astype(np.float32)
+        self._unit = (data.get('metadata') or {}).get('unit', 'dB SPL')
         self._apply_npz_entry("Todo el audio")
         return notes
 

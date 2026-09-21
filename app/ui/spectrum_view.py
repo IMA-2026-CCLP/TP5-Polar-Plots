@@ -105,6 +105,10 @@ class SpectrumView(QWidget):
         self._render()
 
     def set_view_mode(self, mode): pass
+
+    def set_unit(self, unit: str):
+        """'dB SPL' (calibrado) o 'dBFS' (sin calibrar)."""
+        self._plot.setLabel('left', unit, color='#000000', **{'font-size': f'{FONT_SIZE}px'})
     def set_band(self, band_index): pass
     def set_colorscale(self, name): pass
     def set_normalize(self, value): pass

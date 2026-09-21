@@ -379,7 +379,37 @@ class MainWindow(QMainWindow):
     # ── Slots de Directividad ─────────────────────────────────────────────────
 
     def _on_compute_dir(self, bands, hz_min, hz_max, ref_az, ref_th):
+        if not self._confirm_uncalibrated():
+            return
         self.view_dir.compute_all(bands, hz_min, hz_max, ref_az, ref_th)
+
+    def _confirm_uncalibrated(self) -> bool:
+        """Calcular sin calibrar está permitido, pero se advierte de la limitación (True = continuar)."""
+        ma = self.view_dir.get_ma() or self._ma
+        if ma is None or ma._is_spl:
+            return True
+        box = QMessageBox(QMessageBox.Icon.Warning, "Calibración no aplicada", "", parent=self)
+        box.setText("No se aplicó la calibración de los micrófonos.")
+        box.setInformativeText(
+            "En mediciones con múltiples micrófonos, la sensibilidad de cada canal puede diferir "
+            "(del orden de 1 a 3 dB). Sin calibrar, esas diferencias no se corrigen y se confunden "
+            "con directividad real, por lo que los resultados pueden no ser adecuados para un análisis "
+            "cuantitativo.\n\n"
+            "Los niveles se expresarán en dBFS (no en dB SPL) y el patrón quedará relativo a la "
+            "posición de referencia.\n\n"
+            "Si la medición se hizo con un único micrófono, o con canales de sensibilidad equivalente, "
+            "el efecto es despreciable."
+        )
+        btn_go = box.addButton("Calcular sin calibrar", QMessageBox.ButtonRole.AcceptRole)
+        btn_cal = box.addButton("Calibrar…", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_cal)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is btn_cal:
+            self._open_calibracion_dialog()
+            return False
+        return clicked is btn_go
 
     def _on_save_dir_npz(self):
         self._on_save_polar_npz()

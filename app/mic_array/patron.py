@@ -1228,12 +1228,12 @@ class MicArray:
         self.dir_ref_spl        : np.ndarray  absolute SPL at ref pos      (n_bands,)
         self.dir_ref_spl_global : float       broadband SPL at ref pos
         """
-        if not self._is_spl:
-            raise RuntimeError("Run calibrate() + to_spl() first.")
-
+        # Sin calibrar (tensor en unidades de fondo de escala) se calcula igual, con niveles en dBFS
+        # (P_REF = 1). El patrón es relativo, pero no corrige las diferencias de sensibilidad
+        # entre micrófonos: la GUI avisa al usuario (ver MainWindow._confirm_uncalibrated).
         from filterbank import FilterBank
 
-        P_REF   = 20e-6
+        P_REF   = 20e-6 if self._is_spl else 1.0
         fb      = FilterBank(sr=self.sr, bands=bands)
         n_bands = len(fb.center_freqs_nominal)
 

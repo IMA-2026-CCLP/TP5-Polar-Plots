@@ -108,6 +108,7 @@ def save_results(
         "ref_theta_plot": ref_theta_plot,
         "saved_at":       datetime.now().isoformat(timespec='seconds'),
         "notes":          notes_to_save,
+        "unit":           "dB SPL" if ma_global._is_spl else "dBFS",
     }
     if view:
         meta["view"] = view
