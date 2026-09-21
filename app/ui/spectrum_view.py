@@ -43,7 +43,7 @@ class SpectrumView(QWidget):
         self._bands = None
         self._azimuths = None
         self._spec_global = True
-        self._show_info = True
+        self._show_info = False
         self._style = {}
         self._build_ui()
 

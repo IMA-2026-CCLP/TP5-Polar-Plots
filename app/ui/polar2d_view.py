@@ -55,7 +55,7 @@ class Polar2DView(QWidget):
         self._band_index = 0
         self._el_index = None
         self._plane = "XY"
-        self._show_info = True
+        self._show_info = False
         self._compare_bands = None
         self._compare_styles = {}
         self._tick_font_size = FONT_SIZE

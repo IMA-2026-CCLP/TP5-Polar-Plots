@@ -112,7 +112,7 @@ class BalloonView(QWidget):
         self._band_index:   int   = 0
         self._el_index:     int | None = None
         self._plane:        str   = "XY"
-        self._show_info:    bool  = True
+        self._show_info:    bool  = False
         self._compare_bands: list | None = None   # índices de banda a superponer (polar2d)
         self._compare_styles: dict = {}           # {band_index: {'color','width','dash'}}
         self._tick_font_size: float = FONT_SIZE   # tamaño de números de los ejes (polar2d)

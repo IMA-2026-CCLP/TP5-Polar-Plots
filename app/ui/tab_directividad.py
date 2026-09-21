@@ -851,7 +851,7 @@ class TabDirectividad(QWidget):
         self._eq_ref_spl     = None
         self._current_el_idx  = None
         self._plane            = "XY"
-        self._show_info        = True
+        self._show_info        = False
         self._current_band_idx = 0
         self._npz: dict | None = None   # resultados cargados de un .npz (sin MicArray): {nota: {...}}
         self._unit = "dB SPL"          # 'dBFS' si se calculó sin calibrar
@@ -1332,7 +1332,7 @@ class TabDirectividad(QWidget):
         for sec in self._sections.values():
             sec.set_plane(self._plane)
 
-        self._show_info = params.get('show_info', True)
+        self._show_info = params.get('show_info', False)
         for sec in self._sections.values():
             sec.set_show_info(self._show_info)
 

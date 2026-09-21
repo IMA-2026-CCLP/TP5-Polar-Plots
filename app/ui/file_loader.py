@@ -58,15 +58,22 @@ class FileLoader(QObject):
         s = self._settings
         return (str(s.value("array_pattern", _DEF_ARRAY)), str(s.value("ref_pattern", _DEF_REF)))
 
-    def edit_patterns(self, parent=None):
+    def edit_patterns(self, parent=None, title: str | None = None) -> bool:
+        """Modal de patrones; guarda si se acepta. Devuelve True si se aceptó."""
         dlg = _PatternsDialog(*self.patterns(), parent)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._settings.setValue("array_pattern", dlg.edit_array.text().strip() or _DEF_ARRAY)
-            self._settings.setValue("ref_pattern", dlg.edit_ref.text().strip())
+        if title:
+            dlg.setWindowTitle(title)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return False
+        self._settings.setValue("array_pattern", dlg.edit_array.text().strip() or _DEF_ARRAY)
+        self._settings.setValue("ref_pattern", dlg.edit_ref.text().strip())
+        return True
 
     # ── Carga ─────────────────────────────────────────────────────────────
     def load_audio(self, parent=None):
-        """Pide la carpeta y carga con los patrones guardados (sin paso extra de 'procesar')."""
+        """Primero confirma los patrones de nombres de archivo (modal) y recién después pide la carpeta."""
+        if not self.edit_patterns(parent, "Cargar audio — patrones de nombres de archivo"):
+            return
         path = QFileDialog.getExistingDirectory(
             parent, "Carpeta con los audios de la medición", str(self._settings.value("last_audio_dir", "")))
         if not path:

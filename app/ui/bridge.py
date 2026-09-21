@@ -67,6 +67,7 @@ class Bridge(QObject):
             'note_tol':   50.0,   'note_purity': 0.8,
             'note_start': 0.0,    'note_grad':   25.0,
             'note_theta': 'ref',
+            'show_info':  False,   # recuadro de información de los gráficos: apagado por defecto
         }
 
     # ── Slots llamados desde JS ───────────────────────────────────────────────

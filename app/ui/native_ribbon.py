@@ -311,7 +311,7 @@ class NativeRibbon(QWidget):
 
         def load_info():
             info.blockSignals(True)
-            info.setChecked(bool(b.state.get('show_info', True)))
+            info.setChecked(bool(b.state.get('show_info', False)))
             info.blockSignals(False)
 
         info.toggled.connect(lambda on: (b.state.update(show_info=on), b.dirDisplayChanged()))
@@ -719,7 +719,7 @@ class NativeRibbon(QWidget):
             colorscale  = str(s.get('colorscale', 'Plasma')),
             el_index    = s.get('el_idx'),
             plane       = str(s.get('polar_plane', 'XY')),
-            show_info   = bool(s.get('show_info', True)),
+            show_info   = bool(s.get('show_info', False)),
             symmetry    = str(s.get('symmetry', 'none')),
             nota        = str(s.get('nota', 'Todo el audio')),
             spec_data   = int(s.get('spec_data', 0)),
