@@ -18,6 +18,7 @@ from PyQt6.QtGui import QFont, QFontDatabase, QIcon
 # WebEngine debe importarse antes de crear QApplication
 from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 
+from version import __version__, APP_NAME
 from ui.main_window import MainWindow
 from ui.styles import get_qss
 from ui import theme as _theme
@@ -43,8 +44,8 @@ def _load_bundled_fonts():
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Polar Pattern CCLP")
-    app.setApplicationVersion("2.1.0")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("CCLP")
     if os.path.exists(_ICON_PATH):
         app.setWindowIcon(QIcon(_ICON_PATH))

@@ -376,6 +376,9 @@ class NativeRibbon(QWidget):
         m.addSeparator()
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
+
+        m = mb.addMenu("A&yuda")
+        m.addAction("Acerca de…", self._about)
         return mb
 
     def add_view_action(self, action: QAction):
@@ -397,6 +400,14 @@ class NativeRibbon(QWidget):
         m.addSeparator()
         for a in self._ver_extra:
             m.addAction(a)
+
+    def _about(self):
+        from version import __version__, APP_NAME
+        QMessageBox.about(
+            self.window(), "Acerca de",
+            f"<b>{APP_NAME}</b> &nbsp;v{__version__}<br><br>"
+            "Análisis y visualización de la directividad polar de la voz cantada, "
+            "medida con un array semicircular de micrófonos.")
 
     def _make_tabbar(self) -> QHBoxLayout:
         h = QHBoxLayout()

@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont, QTextCursor
 
 from core.worker import Worker, activity
 
+from version                 import __version__, APP_NAME
 from ui.styles               import QSS, get_qss
 from ui.native_ribbon        import NativeRibbon
 from ui                      import theme as _theme
@@ -47,7 +48,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Polar Pattern CCLP")
+        self.setWindowTitle(f"{APP_NAME}  v{__version__}")
         # Mínimos y tamaño inicial acotados a la pantalla disponible (sin taskbar):
         # un mínimo fijo de 1200x750 no entraba en 1366x768.
         avail = self.screen().availableGeometry()
