@@ -565,11 +565,13 @@ class NativeRibbon(QWidget):
     def _page_notas(self):
         b = self._b
         self._c_preset = QComboBox()
-        self._c_preset.setFixedWidth(140)
+        self._c_preset.setFixedWidth(170)
         self._c_preset.setToolTip("Escala musical de referencia para detectar notas")
-        self._c_preset.currentTextChanged.connect(lambda name: b.presetChanged(name) if name else None)
-        from ui.tab_notas import SCALE_PRESETS
-        self._c_preset.addItems(list(SCALE_PRESETS.keys()))
+        from ui.scale_dialog import fill_scale_combo
+        self._fill_scales = fill_scale_combo
+        fill_scale_combo(self._c_preset, "Fa mayor")
+        self._c_preset.currentIndexChanged.connect(
+            lambda _i: b.presetChanged(self._c_preset.currentData()) if self._c_preset.currentData() else None)
 
         self._c_note_th = self._combo('note_theta', 64, "Micrófono usado para detectar notas",
                                       enc=lambda v: str(v), dec=lambda d: d)
@@ -681,6 +683,15 @@ class NativeRibbon(QWidget):
         self._sync()                 # numéricos/checks/pills desde state (p. ej. sesión cargada)
         self._b.emitPlotParams()
         self._b.emitAlignPreview()
+
+    def current_scale_name(self):
+        return self._c_preset.currentData()
+
+    def refresh_scales(self, select: str | None = None):
+        """Vuelve a llenar el combo (después de editar la base propia) y elige `select`, avisando el cambio."""
+        self._fill_scales(self._c_preset, select or self._c_preset.currentData())
+        if self._c_preset.currentData():
+            self._b.presetChanged(self._c_preset.currentData())
 
     def apply_ui_state(self, d: dict):
         """Vuelca valores guardados (p. ej. de un .npz de directividad) a Bridge.state y a los controles."""

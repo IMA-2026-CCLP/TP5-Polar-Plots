@@ -358,9 +358,12 @@ class MainWindow(QMainWindow):
             self.ribbon.btn_save_mask.setEnabled(True)
 
     def _on_edit_scale(self):
-        dlg = ScaleEditorDialog(self.view_notas.get_scale(), self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self.view_notas.set_scale(dlg.get_scale())
+        dlg = ScaleEditorDialog(self.view_notas.get_scale(), self.ribbon.current_scale_name(), self.notas_win)
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        if dlg.db_changed or (accepted and dlg.selected_name):
+            self.ribbon.refresh_scales(dlg.selected_name)      # actualiza el combo (y elige la escala)
+        if accepted:
+            self.view_notas.set_scale(dlg.get_scale())         # pisa con lo que quedó en la tabla (ediciones sin guardar)
 
     def _on_save_mask(self):
         path, _ = QFileDialog.getSaveFileName(

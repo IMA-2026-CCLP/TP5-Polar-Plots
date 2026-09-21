@@ -59,6 +59,10 @@ Tabs pass a shared `MicArray` instance up the chain via `ma_ready`/`ma_updated` 
 - Image export (all four views, `export_image`) re-renders each plot at the requested size — never a screenshot — with final width = `EXPORT_BASE_W` (720) × DPI / 96 px and the on-screen aspect ratio (`ui/export_utils.py`); the DPI is written into the PNG metadata. Plotly views (3D/Esfera) call `Plotly.toImage()` with the real panel `width`/`height` (without them Plotly falls back to 700×450), raise `plotGlPixelRatio` so the WebGL mesh is sharp, and retry once before falling back to `QWebEngineView.grab()`. The result is read back over a chunked `console.log` relay (`EXPORTIMG:<id>:<i>:<n>:<chunk>`) captured by `_SilentPage.javaScriptConsoleMessage`, because `runJavaScript()` does not reliably resolve a Promise here. The pyqtgraph views (Polar 2D/Espectro) use `ImageExporter`; SVG is only offered for Polar 2D (own `QSvgGenerator` writer — pyqtgraph's `SVGExporter` crashes on this Qt, and the Espectro SVG doesn't clip its bars).
 - Right-click context menus on the 3D/Sphere WebGL canvases can't rely on Qt's native `customContextMenuRequested` (Plotly's orbit-camera controls swallow the browser's own `contextmenu` event) — they're relayed through the same console-log channel (`CONTEXTMENU:x,y`).
 
+### Musical scales
+
+`core/scales.py` holds the scale library: built-in scales generated in equal temperament (Mayores, Menores naturales/armónicas, Pentatónicas, Cromática) plus a per-user JSON base (`%APPDATA%/PolarPatternCCLP/scales.json`) with its own categories. Scale names are unique across both. `ui/scale_dialog.py` (`ScaleEditorDialog`, opened from the Notas window) picks a scale, edits its notes and saves/deletes/imports/exports user scales; `fill_scale_combo` builds the category-grouped combo also used by the ribbon's preset selector.
+
 ### Persistence formats
 
 Two distinct on-disk formats, both NPZ under the hood:
