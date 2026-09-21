@@ -18,3 +18,6 @@ Medicion_Juli
 output/
 latex/
 data/
+
+# Instalador generado (Inno Setup) — no subir al repo
+installer_output/

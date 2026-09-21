@@ -26,6 +26,12 @@ build_exe.bat
 ```
 This wraps `pyinstaller polar_analyzer.spec --noconfirm`. `build_exe.bat` manually `rmdir /s /q build dist` before invoking PyInstaller. If a build fails with a file-in-use error on `build/`, just delete `build/` and `dist/` and rerun.
 
+Build the Windows installer (after `build_exe.bat`; needs Inno Setup 6, `winget install JRSoftware.InnoSetup`):
+```bash
+build_installer.bat
+```
+This compiles `installer.iss` into `installer_output/PolarPatternCCLP-Setup-<version>.exe` (per-user install by default, Start-menu entry, uninstaller in Windows Apps). The version comes from `app/version.py`. Keep `.bat` files ASCII with CRLF line endings, otherwise `cmd` misparses them.
+
 There is no test suite, linter, or type checker configured in this repo.
 
 ## Architecture
