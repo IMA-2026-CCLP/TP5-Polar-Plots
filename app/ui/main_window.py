@@ -4,7 +4,7 @@ ui/main_window.py — Ventana principal con Ribbon global + QStackedWidget.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QDockWidget, QTextEdit, QDialog, QDialogButtonBox, QFormLayout,
-    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar, QMessageBox,
+    QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar, QMessageBox, QCheckBox,
 )
 from pathlib import Path
 
@@ -390,8 +390,18 @@ class MainWindow(QMainWindow):
             return
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("Exportar todas las imágenes")
+        dlg.setWindowTitle("Exportar imágenes de directividad")
         form = QFormLayout(dlg)
+
+        checks = {}
+        box = QVBoxLayout()
+        for mode, label in (("polar2d", "Polar 2D"), ("spectrum", "Espectro"),
+                            ("3d", "Superficie 3D"), ("sphere", "Esfera")):
+            cb = QCheckBox(label)
+            cb.setChecked(True)
+            checks[mode] = cb
+            box.addWidget(cb)
+        form.addRow("Gráficos:", box)
 
         le_prefix = QLineEdit("directividad")
         form.addRow("Nombre base:", le_prefix)
@@ -425,6 +435,10 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
+        modes = [m for m, cb in checks.items() if cb.isChecked()]
+        if not modes:
+            self._append_log("[Dir] Exportación cancelada: no se eligió ningún gráfico.")
+            return
         prefix = le_prefix.text().strip() or "directividad"
         folder = le_folder.text().strip()
         if not folder:
@@ -436,7 +450,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             dpi = 300
         dpi = max(72, min(1200, dpi))
-        self.view_dir.export_all_images(folder, prefix, dpi=dpi)
+        self.view_dir.export_all_images(folder, prefix, dpi=dpi, modes=modes)
 
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()

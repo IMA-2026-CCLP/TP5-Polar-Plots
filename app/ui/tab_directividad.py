@@ -1367,12 +1367,14 @@ class TabDirectividad(QWidget):
 
         self._sections[mode].export_image(path, dpi=dpi, fmt=fmt)
 
-    def export_all_images(self, folder: str, prefix: str, dpi: int = 300):
+    def export_all_images(self, folder: str, prefix: str, dpi: int = 300, modes=None):
         """
         Exporta de una sola vez las imágenes de todas las vistas habilitadas
         (pills del ribbon), para todas las bandas del rango actualmente
         analizado (hz_min/hz_max). El espectro no depende de la banda, así
         que se exporta una única vez.
+
+        modes : vistas a exportar (None = las 4).
 
         Nombres: {prefix}_{freq}Hz_{vista}.png  (3D/Esfera/Polar2D)
                  {prefix}_{vista}.png            (Espectro)
@@ -1386,18 +1388,22 @@ class TabDirectividad(QWidget):
             mask = np.ones(len(self._full_bands), dtype=bool)
         band_indices = np.nonzero(mask)[0].tolist()
 
+        modes = set(modes) if modes else {"3d", "sphere", "polar2d", "spectrum"}
+        if self._zoomed:                       # con un gráfico ampliado los otros están ocultos: sin tamaño real
+            self.toggle_zoom(self._zoomed)
+
         tasks: list[tuple[str, int | None, str]] = []
         for mode in ("3d", "sphere", "polar2d"):
-            if not self._view_checks.get(mode, False):
+            if mode not in modes:
                 continue
             for bi in band_indices:
                 freq = int(round(float(self._full_bands[bi])))
                 tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}.png"))
-        if self._view_checks.get("spectrum", False):
+        if "spectrum" in modes:
             tasks.append(("spectrum", None, f"{prefix}_{_MODE_LABELS['spectrum']}.png"))
 
         if not tasks:
-            self.log.emit("[Dir] No hay vistas habilitadas para exportar.")
+            self.log.emit("[Dir] No hay gráficos seleccionados para exportar.")
             return
 
         Path(folder).mkdir(parents=True, exist_ok=True)

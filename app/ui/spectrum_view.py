@@ -143,11 +143,11 @@ class SpectrumView(QWidget):
                 exporter.parameters()['width'] = int(self._plot.width() * scale)
             exporter.export(path)
             if on_done:
-                on_done(True, path)
+                on_done(True)
         except Exception as e:
             self.log.emit(f"[ERROR] Exportando Espectro: {e}")
             if on_done:
-                on_done(False, str(e))
+                on_done(False)
 
     # ── Render ───────────────────────────────────────────────────────────
 

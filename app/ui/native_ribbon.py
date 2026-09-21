@@ -277,8 +277,7 @@ class NativeRibbon(QWidget):
         act('calibrar',    "Calibración…",    "Abre la calibración: al aplicarla, el tensor pasa a dB SPL automáticamente", b.openCalibracion, False)
         act('save_mask',   "Guardar máscara…", "Guarda la segmentación de notas detectadas", b.saveMask, False)
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
-        act('save_dir',    "Exportar NPZ",    "Exporta el patrón de directividad calculado (.npz)", b.saveDirNpz, False)
-        act('export_all',  "Exportar imágenes", "Exporta las imágenes de todas las vistas habilitadas para todas las bandas", b.exportAllImages, False)
+        act('export_all',  "Imágenes de directividad…", "Exporta las imágenes de los gráficos que elijas, para todas las bandas del rango", b.exportAllImages, False)
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
 
     def _make_view_actions(self):
@@ -357,6 +356,8 @@ class NativeRibbon(QWidget):
         for n in ('load_polar', 'save_polar'):
             m.addAction(self._act[n])
         m.addSeparator()
+        m.addMenu("Exportar").addAction(self._act['export_all'])
+        m.addSeparator()
         m.addAction("Salir", lambda: self.window().close())
 
         m = self._menu_ver = mb.addMenu("&Ver")
@@ -374,9 +375,6 @@ class NativeRibbon(QWidget):
             m.addAction(self._act[n])
         m.addSeparator()
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
-            m.addAction(self._act[n])
-        m.addSeparator()
-        for n in ('save_dir', 'export_all'):
             m.addAction(self._act[n])
         return mb
 
@@ -629,9 +627,6 @@ class NativeRibbon(QWidget):
                                       [("Originales", 0), ("Igualados en nivel", 1)], disp)),
                 ("Curvas", self._combo('spec_global', 84, "Global: promedio de todos los ángulos. Por toma: una curva por azimuth",
                                        [("Global", True), ("Por toma", False)], disp))]),
-            ("Exportar", [
-                (None, self._tool('save_dir')),
-                (None, self._tool('export_all'))]),
         ])
 
     # ── API pública idéntica a HtmlRibbon ─────────────────────────────────
@@ -688,7 +683,7 @@ class NativeRibbon(QWidget):
         self._fill(self._c_el, [("Auto (0°)", 0)] + [(f'{round(float(t))}°', i + 1) for i, t in enumerate(thetas)])
         self._c_el.setCurrentIndex(0)
         self._b.state['el_idx'] = None
-        for n in ('save_dir', 'save_polar', 'export_all'):
+        for n in ('save_polar', 'export_all'):
             self._act[n].setEnabled(True)
 
     def set_dir_status(self, text: str):
