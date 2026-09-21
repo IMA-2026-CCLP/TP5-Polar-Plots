@@ -81,7 +81,11 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         self._stack.addWidget(self.view_prepro)     # 0  (home)
         self._stack.addWidget(self.view_dir)        # 1
-        self._stack.setCurrentIndex(0)
+        # La ventana se muestra por primera vez con las vistas web (Directividad) visibles y recién después
+        # vuelve a Procesamiento (ver showEvent): si esas vistas se muestran más tarde, Qt recrea la ventana
+        # y la app parece cerrarse y reabrirse ("pantallazo") al cambiar de pestaña o graficar.
+        self._stack.setCurrentIndex(1)
+        self._first_show = True
 
         # Layout central
         # Menú + pestañas arriba a todo el ancho; parámetros en un dock movible a la izquierda
@@ -606,6 +610,12 @@ class MainWindow(QMainWindow):
         geom = self._settings.value("geometry")
         if geom:
             self.restoreGeometry(geom)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._first_show:
+            self._first_show = False
+            QTimer.singleShot(0, lambda: self._stack.setCurrentIndex(self.ribbon._tabs.currentIndex()))
 
     def closeEvent(self, event):
         self._settings.setValue("geometry", self.saveGeometry())

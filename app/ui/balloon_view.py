@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtCore import pyqtSignal, QUrl, QTimer
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QStackedLayout
 from PyQt6.QtGui import QFont
 
 from plot.balloon import (
@@ -145,9 +145,11 @@ class BalloonView(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        # El QWebEngineView queda SIEMPRE visible y el placeholder se apila encima: mostrarlo recién al
+        # primer render hacía que Qt recreara la ventana principal (la app "se cerraba y volvía a abrir").
+        layout = QStackedLayout(self)
+        layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
 
         self._web  = QWebEngineView()
         self._page = _SilentPage(self._web)
@@ -167,9 +169,9 @@ class BalloonView(QWidget):
         self._apply_theme_styles(_t.LIGHT)
         self._placeholder.setFont(QFont("Segoe UI", 12))
 
-        layout.addWidget(self._placeholder)
         layout.addWidget(self._web)
-        self._web.hide()
+        layout.addWidget(self._placeholder)      # último = arriba
+        self._placeholder.raise_()
 
     def _apply_theme_styles(self, palette: dict):
         # Los gráficos son siempre de fondo blanco, en tema claro y oscuro: se ignora la paleta.
@@ -313,8 +315,8 @@ class BalloonView(QWidget):
         self._web.page().runJavaScript(js)
 
     def show_placeholder(self):
-        self._web.hide()
         self._placeholder.show()
+        self._placeholder.raise_()
 
     _EXPORT_FORMATS = ('png', 'svg', 'jpeg', 'webp')   # soportados por Plotly.toImage() en navegador
 
@@ -586,4 +588,3 @@ class BalloonView(QWidget):
         else:
             self._set_html_safe(html)
             self._placeholder.hide()
-            self._web.show()

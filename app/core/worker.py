@@ -57,6 +57,15 @@ def _mark(label: str, start: bool):
     activity.changed.emit(n, last)
 
 
+def begin(label: str):
+    """Marca el inicio de una tarea de fondo (para hilos que no son Worker)."""
+    _mark(label, True)
+
+
+def end(label: str):
+    _mark(label, False)
+
+
 def report(done: int, total: int):
     """Progreso de la tarea en curso; se llama desde el hilo del Worker."""
     activity.progress.emit(int(done), int(total))

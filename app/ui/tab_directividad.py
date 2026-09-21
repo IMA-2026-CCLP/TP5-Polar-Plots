@@ -18,13 +18,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
-from core.worker import Worker
 from ui.balloon_view import BalloonView
 from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
 from ui.widgets import NumEdit as _NumEdit
 from plot.balloon import COLORSCALES, _COMPARE_COLORS, FONT_SIZE
+from core.worker import Worker, begin as _begin, end as _end, report as _report
 
 # polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView);
 # superficie_3d y esfera siguen en Plotly/QWebEngineView (BalloonView) hasta
@@ -108,11 +108,13 @@ class _ComputeAllWorker(QThread):
                         frac_item = sub_done / sub_total if sub_total else 0.0
                         overall = (worker._item_index + frac_item) / worker._item_total
                         worker.overall_progress.emit(min(overall, 1.0))
+                        _report(int(min(overall, 1.0) * 1000), 1000)      # barra de la barra de estado
                 return len(t)
             def flush(self): pass
 
         old_out = sys.stdout
         sys.stdout = _Cap(self.log)
+        _begin("Calculando directividad…")
         try:
             tasks = [("Todo el audio", self._ma)]
             if self._ma.notes:
@@ -137,6 +139,7 @@ class _ComputeAllWorker(QThread):
             self.error.emit(traceback.format_exc())
         finally:
             sys.stdout = old_out
+            _end("Calculando directividad…")
 
 
 class _ViewSection(QWidget):
@@ -1214,30 +1217,12 @@ class TabDirectividad(QWidget):
         n_notes = len(self._ma.notes) if self._ma.notes else 0
         n_total = 1 + n_notes
 
-        # Escala fina (0–1000) para que la barra avance de forma suave dentro
-        # de cada ítem, en base al progreso por posición que ya reporta
-        # compute_directivity(), en vez de saltar sólo entre ítems completos.
-        _PROGRESS_SCALE = 1000
-        dlg = QProgressDialog("Iniciando…", None, 0, _PROGRESS_SCALE, self.window())
-        dlg.setWindowTitle("Calculando directividad")
-        dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        dlg.setMinimumDuration(0)
-        dlg.setValue(0)
-
+        # El progreso se ve en la barra de estado (sin diálogo modal: una ventana extra que aparece y
+        # desaparece hacía parpadear la aplicación).
         self._worker = _ComputeAllWorker(self._ma, bands, ref_az, ref_th)
         self._worker.log.connect(self.log)
-        self._worker.progress.connect(
-            lambda cur, tot, lbl, _d=dlg: (
-                _d.setLabelText(f"Calculando: {lbl}" if lbl else "Finalizando…"),
-            )
-        )
-        self._worker.overall_progress.connect(
-            lambda frac, _d=dlg: _d.setValue(int(frac * _PROGRESS_SCALE))
-        )
-        self._worker.all_done.connect(lambda _d=dlg: self._on_all_done(_d))
-        self._worker.error.connect(lambda msg, _d=dlg: (
-            _d.close(), self._on_error(msg)
-        ))
+        self._worker.all_done.connect(self._on_all_done)
+        self._worker.error.connect(self._on_error)
 
         self.log.emit(
             f"[Directividad] Iniciando cómputo — "
@@ -1245,9 +1230,7 @@ class TabDirectividad(QWidget):
         )
         self._worker.start()
 
-    def _on_all_done(self, dlg: QProgressDialog):
-        dlg.setValue(dlg.maximum())
-        dlg.close()
+    def _on_all_done(self):
         # Mostrar resultados del audio completo por defecto
         self._nota = "Todo el audio"
         self._show_results(self._ma)
