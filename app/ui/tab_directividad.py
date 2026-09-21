@@ -192,15 +192,29 @@ class _ViewSection(QWidget):
         self._zoomed = on
 
     def _show_context_menu(self, x: int, y: int):
+        import time
+        if getattr(self, '_menu_open', False) or time.monotonic() - getattr(self, '_menu_closed_at', 0) < 0.4:
+            return       # ya hay un menú abierto (o se acaba de cerrar): no encadenar otro
+        self._menu_open = True
+        try:
+            self._show_context_menu_impl(x, y)
+        finally:
+            self._menu_open = False
+            self._menu_closed_at = time.monotonic()
+
+    def _show_context_menu_impl(self, x: int, y: int):
         pos = QPoint(x, y)
         menu = QMenu(self)
 
         act_zoom = menu.addAction("Volver a los 4 gráficos" if self._zoomed else "Ver en grande")
         menu.addSeparator()
 
-        act_top = act_bottom = act_front = act_back = None
+        act_top = act_bottom = act_front = act_back = act_iso = act_default = None
         if self._mode in ("3d", "sphere"):
             view_menu  = menu.addMenu("Vista")
+            act_default = view_menu.addAction("Predeterminada")
+            act_iso    = view_menu.addAction("Isométrica")
+            view_menu.addSeparator()
             act_top    = view_menu.addAction("Arriba")
             act_bottom = view_menu.addAction("Abajo")
             act_front  = view_menu.addAction("Frente")
@@ -230,6 +244,10 @@ class _ViewSection(QWidget):
                 self._reset_scale()
             elif action == act_save:
                 self.save_requested.emit(self._mode)
+            elif action == act_iso:
+                self.view.set_camera_view('iso')
+            elif action == act_default:
+                self.view.set_camera_view('default')
             elif action == act_top:
                 self.view.set_camera_view('top')
             elif action == act_bottom:

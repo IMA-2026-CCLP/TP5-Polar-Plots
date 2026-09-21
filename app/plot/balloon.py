@@ -477,8 +477,18 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
   // cámara y bloquea el contextmenu nativo del navegador — por eso Qt nunca
   // recibe el evento de click derecho sobre el canvas. Se captura acá y se
   // reenvía a Python por consola (mismo mecanismo que el hover).
+  // Se ignora si el botón que se soltó no fue el derecho o si el mouse se arrastró (rotar/panear con
+  // Plotly termina soltando el botón y generaba el menú "solo"), y se descartan eventos seguidos.
+  var _md = null, _lastCm = 0;
+  document.addEventListener('mousedown', function(e) {{
+    _md = {{b: e.button, x: e.clientX, y: e.clientY}};
+  }}, true);
   document.addEventListener('contextmenu', function(e) {{
     e.preventDefault();
+    var now = Date.now();
+    var moved = _md && Math.hypot(e.clientX - _md.x, e.clientY - _md.y) > 4;
+    if (!_md || _md.b !== 2 || moved || now - _lastCm < 500) return;
+    _lastCm = now;
     console.log('CONTEXTMENU:' + e.clientX + ',' + e.clientY);
   }}, false);
 }})();

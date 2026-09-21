@@ -25,7 +25,14 @@ _CAMERA_PRESETS = {
     "bottom": {"eye": {"x": 0.0001, "y": 0.0001, "z": -2.5}, "up": {"x": 0, "y": 1, "z": 0}},
     "front":  {"eye": {"x": 2.5, "y": 0.0001, "z": 0.0001},  "up": {"x": 0, "y": 0, "z": 1}},
     "back":   {"eye": {"x": -2.5, "y": 0.0001, "z": 0.0001}, "up": {"x": 0, "y": 0, "z": 1}},
+    # Isométrica: mirada según (1,1,1) con proyección ortográfica (sin perspectiva)
+    "iso":    {"eye": {"x": 1.6, "y": 1.6, "z": 1.6},        "up": {"x": 0, "y": 0, "z": 1},
+               "projection": {"type": "orthographic"}},
+    # Cámara inicial del programa (perspectiva)
+    "default": {"eye": {"x": 1.6, "y": 1.2, "z": 0.9},       "up": {"x": 0, "y": 0, "z": 1}},
 }
+for _k, _v in _CAMERA_PRESETS.items():        # al salir de la isométrica se vuelve a perspectiva
+    _v.setdefault("projection", {"type": "perspective"})
 
 VIEW_MODES = ("3d", "sphere", "polar2d", "spectrum")
 
