@@ -8,14 +8,28 @@ from typing import Optional
 from core.data_store import freq_label
 
 
+def _cs(colors, reverse: bool = False) -> list:
+    """Lista de colores -> escala explícita [[pos, color], ...]. plotly.js sólo conoce por nombre unas pocas
+    escalas (Viridis, Cividis, Hot...); Plasma, Inferno, Magma o Turbo NO existen ahí y caían en el azul-blanco-rojo
+    por defecto: por eso "sólo Viridis cambiaba". Con listas explícitas funcionan todas."""
+    import plotly.colors as pc
+    cols = list(colors)[::-1] if reverse else list(colors)
+    return [[i / (len(cols) - 1), c] for i, c in enumerate(cols)]
+
+
+def _seq(name):
+    import plotly.colors as pc
+    return _cs(getattr(pc.sequential, name))
+
+
 COLORSCALES = {
-    "Viridis":  "Viridis",
-    "Plasma":   "Plasma",
-    "Inferno":  "Inferno",
+    "Viridis":  _seq("Viridis"),
+    "Plasma":   _seq("Plasma"),
+    "Inferno":  _seq("Inferno"),
+    "Magma":    _seq("Magma"),
+    "Cividis":  _seq("Cividis"),
+    "Turbo":    _seq("Turbo"),
     "Hot":      "Hot",
-    "RdYlBu":   "RdYlBu_r",
-    "Spectral": "Spectral_r",
-    "Turbo":    "Turbo",
 }
 
 # ── Helpers comunes ───────────────────────────────────────────────────────────
@@ -24,6 +38,13 @@ _DARK_BG        = "#1a1d27"
 _GRID_COL       = "#2e3248"
 _TEXT_COL       = "#e0e0e0"
 _FONT_CSS       = "Inter, 'Segoe UI', sans-serif"
+# Tamaño de fuente único (px) para números, etiquetas, leyendas y barras de color de los 4
+# gráficos: así se ven parejos entre paneles y en la imagen exportada.
+FONT_SIZE       = 12
+# plotly.js va incluido en la app (plot/vendor): funciona sin internet. Las páginas se cargan con
+# PLOTLY_BASE_URL como URL base para que el <script src> relativo lo encuentre.
+import os as _os
+PLOTLY_DIR      = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "vendor")
 _SPEC_BG        = "#1e2134"
 _RING_LINE      = "rgba(255,255,255,0.12)"
 _RING_TEXT      = "rgba(200,200,200,0.5)"
@@ -52,7 +73,7 @@ def set_theme(palette: dict) -> None:
     _OVERLAY_BORDER = palette['overlay_border']
 
 
-def _axes_traces(axis_len: float = 1.4, label_size: float = 11,
+def _axes_traces(axis_len: float = 1.4, label_size: float = FONT_SIZE,
                  line_width: float = 3) -> list:
     traces = []
     for vec, label, color in [
@@ -97,12 +118,12 @@ def _scene_layout(uirevision: str = "camera", grid_color: Optional[str] = None,
 def _colorbar(cs_name: str, text_color: Optional[str] = None) -> dict:
     txt = text_color or _TEXT_COL
     return {
-        "colorscale": COLORSCALES.get(cs_name, "Plasma"),
+        "colorscale": COLORSCALES.get(cs_name, COLORSCALES["Plasma"]),
         "colorbar": {
             "title": {"text": "dB", "side": "right"},
             "thickness": 16, "len": 0.6, "x": 0.92,
-            "tickfont": {"color": txt, "size": 11},
-            "titlefont": {"color": txt},
+            "tickfont": {"color": txt, "size": FONT_SIZE},
+            "titlefont": {"color": txt, "size": FONT_SIZE},
         },
     }
 
@@ -351,7 +372,7 @@ def _cap_mesh_trace(ring_X, ring_Y, ring_Z, apex_x, apex_y, apex_z,
         "i": i_tri, "j": j_tri, "k": k_tri,
         "intensity": colors.tolist(),
         "intensitymode": "vertex",
-        "colorscale": COLORSCALES.get(cs_name, "Plasma"),
+        "colorscale": COLORSCALES.get(cs_name, COLORSCALES["Plasma"]),
         "cmin": float(cmin), "cmax": float(cmax),
         "showscale": False,
         "hoverinfo": "skip",
@@ -431,7 +452,7 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
 <body>
 <div id="plot"></div>
 <div id="info-overlay">{info_html}</div>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
+<script src="plotly-2.32.0.min.js" charset="utf-8"></script>
 <script>
 (function() {{
   var traces = {traces_json};
@@ -456,8 +477,18 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
   // cámara y bloquea el contextmenu nativo del navegador — por eso Qt nunca
   // recibe el evento de click derecho sobre el canvas. Se captura acá y se
   // reenvía a Python por consola (mismo mecanismo que el hover).
+  // Se ignora si el botón que se soltó no fue el derecho o si el mouse se arrastró (rotar/panear con
+  // Plotly termina soltando el botón y generaba el menú "solo"), y se descartan eventos seguidos.
+  var _md = null, _lastCm = 0;
+  document.addEventListener('mousedown', function(e) {{
+    _md = {{b: e.button, x: e.clientX, y: e.clientY}};
+  }}, true);
   document.addEventListener('contextmenu', function(e) {{
     e.preventDefault();
+    var now = Date.now();
+    var moved = _md && Math.hypot(e.clientX - _md.x, e.clientY - _md.y) > 4;
+    if (!_md || _md.b !== 2 || moved || now - _lastCm < 500) return;
+    _lastCm = now;
     console.log('CONTEXTMENU:' + e.clientX + ',' + e.clientY);
   }}, false);
 }})();
@@ -564,7 +595,7 @@ def build_balloon_html(
             R_clip[-1], z_color, cmin, cmax, colorscale,
         ))
 
-    traces += _axes_traces(label_size=style.get('axis_label_size', 11),
+    traces += _axes_traces(label_size=style.get('axis_label_size', FONT_SIZE),
                            line_width=style.get('axis_line_width', 3))
     layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width,
                             bg_color=style.get('bg_color'))
@@ -673,21 +704,21 @@ def build_sphere_html(
         "i": i_tri, "j": j_tri, "k": k_tri,
         "intensity":     Cv.tolist(),
         "intensitymode": "vertex",
-        "colorscale":    COLORSCALES.get(colorscale, "Plasma"),
+        "colorscale":    COLORSCALES.get(colorscale, COLORSCALES["Plasma"]),
         "cmin": float(cmin), "cmax": float(cmax),
         "showscale": True,
         "colorbar": {
             "title":     {"text": "dB", "side": "right"},
             "thickness": 16, "len": 0.6, "x": 0.92,
-            "tickfont":  {"color": style.get('text_color') or _TEXT_COL, "size": 11},
-            "titlefont": {"color": style.get('text_color') or _TEXT_COL},
+            "tickfont":  {"color": style.get('text_color') or _TEXT_COL, "size": FONT_SIZE},
+            "titlefont": {"color": style.get('text_color') or _TEXT_COL, "size": FONT_SIZE},
         },
         "lighting":      {"ambient": 0.75, "diffuse": 0.7, "specular": 0.15, "roughness": 0.4},
         "lightposition": {"x": 100, "y": 100, "z": 150},
         "hoverinfo": "skip",
     }
 
-    traces = [mesh_trace] + _axes_traces(label_size=style.get('axis_label_size', 11),
+    traces = [mesh_trace] + _axes_traces(label_size=style.get('axis_label_size', FONT_SIZE),
                                          line_width=style.get('axis_line_width', 3))
     layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width,
                             bg_color=style.get('bg_color'))
@@ -858,7 +889,7 @@ def build_polar2d_html(
     show_info:      bool = True,
     compare_bands:  Optional[list] = None,
     compare_styles: Optional[dict] = None,
-    tick_font_size: float = 11,
+    tick_font_size: float = FONT_SIZE,
     style:          Optional[dict] = None,
     update_only:    bool = False,
 ) -> str:
@@ -952,7 +983,7 @@ def build_polar2d_html(
     # ── Anillos de referencia (cada "step" dB dentro del rango) ──────────────
     rotation       = 90 if plane == "XY" else 0
     ring_color     = style.get('ring_color') or _RING_LINE
-    ring_font_size = style.get('ring_font_size', 9)
+    ring_font_size = style.get('ring_font_size', FONT_SIZE)
     ring_vals    = np.arange(np.ceil(r_floor / step) * step, r_ceil + 0.01, step)
     ring_vals    = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
     ref_db_rings = [float(v) for v in ring_vals]
@@ -1036,7 +1067,7 @@ def build_polar2d_html(
             },
         },
         "legend": {
-            "font":    {"color": style.get('text_color') or _TEXT_COL, "size": style.get('legend_font_size', 12)},
+            "font":    {"color": style.get('text_color') or _TEXT_COL, "size": style.get('legend_font_size', FONT_SIZE)},
             "bgcolor": _LEGEND_BG,
             "x": 1.0, "y": 1.0,
         },
@@ -1165,8 +1196,8 @@ def build_spectrum_html(
         "margin":  {"l": 65, "r": 20, "t": 45, "b": 70},
         "barmode": "overlay",
         "xaxis": {
-            "title":         {"text": "Banda (Hz)", "font": {"color": txt}},
-            "tickfont":      {"color": txt, "size": 9},
+            "title":         {"text": "Frecuencia [Hz]", "font": {"color": txt, "size": FONT_SIZE}},
+            "tickfont":      {"color": txt, "size": FONT_SIZE},
             "gridcolor":     grid_color,
             "linecolor":     "rgba(255,255,255,0.2)",
             "tickangle":     -45,
@@ -1175,14 +1206,14 @@ def build_spectrum_html(
             "categoryarray": x_labels,
         },
         "yaxis": {
-            "title":    {"text": "dB SPL", "font": {"color": txt}},
-            "tickfont": {"color": txt},
+            "title":    {"text": "dB SPL", "font": {"color": txt, "size": FONT_SIZE}},
+            "tickfont": {"color": txt, "size": FONT_SIZE},
             "gridcolor": grid_color,
             "zeroline":  False,
             "range":     [y_min, y_max],
         },
         "legend": {
-            "font":    {"color": txt, "size": 9},
+            "font":    {"color": txt, "size": FONT_SIZE},
             "bgcolor": _LEGEND_BG,
             "x": 1.01, "y": 1,
         },

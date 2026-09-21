@@ -85,7 +85,7 @@ class TabCalibracion(QWidget):
         spl_row.addStretch()
         lay.addLayout(spl_row)
 
-        self.btn_calibrar = QPushButton("Calibrar")
+        self.btn_calibrar = QPushButton("Aplicar calibración")
         self.btn_calibrar.setObjectName("btn_primary")
         self.btn_calibrar.setEnabled(False)
         self.btn_calibrar.clicked.connect(self._on_calibrar)
@@ -116,6 +116,7 @@ class TabCalibracion(QWidget):
         self.btn_calibrar.setEnabled(False)
         self.log.emit("[Calibración] Iniciando calibración…")
         self._worker = Worker(self._run_calibrar)
+        self._worker.label = "Aplicando calibración…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_cal_done)
         self._worker.error.connect(self._on_error)

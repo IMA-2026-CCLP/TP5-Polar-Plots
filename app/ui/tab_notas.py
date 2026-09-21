@@ -16,77 +16,8 @@ from PyQt6.QtGui import QColor
 from core.worker import Worker
 from ui.f0_editor import F0EditorWidget
 
-# Escalas predefinidas
-SCALE_PRESETS = {
-    "Fa mayor": {
-        "Fa4": 349.23, "Sol4": 392.00, "La4": 440.00,
-        "Sib4": 466.16, "Do5": 523.25, "Re5": 587.33,
-        "Mi5": 659.25, "Fa5": 698.46,
-    },
-}
-
-
-class ScaleEditorDialog(QDialog):
-    """Popup para ver y editar la escala activa (notas y frecuencias)."""
-
-    def __init__(self, scale: dict, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Editar escala")
-        self.setMinimumSize(320, 300)
-        self.resize(360, 340)
-
-        lay = QVBoxLayout(self)
-        lay.setSpacing(8)
-
-        self._table = QTableWidget(0, 2)
-        self._table.setHorizontalHeaderLabels(["Nota", "Freq (Hz)"])
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._table.setAlternatingRowColors(True)
-        lay.addWidget(self._table)
-
-        for nota, hz in scale.items():
-            self._add_row(nota, hz)
-
-        btn_row = QHBoxLayout()
-        btn_add = QPushButton("+ Agregar nota")
-        btn_add.clicked.connect(lambda: self._add_row())
-        btn_del = QPushButton("− Eliminar fila")
-        btn_del.clicked.connect(self._del_row)
-        btn_row.addWidget(btn_add)
-        btn_row.addWidget(btn_del)
-        btn_row.addStretch()
-        lay.addLayout(btn_row)
-
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        lay.addWidget(btns)
-
-    def _add_row(self, nota: str = "", hz: float = 440.0):
-        row = self._table.rowCount()
-        self._table.insertRow(row)
-        self._table.setItem(row, 0, QTableWidgetItem(str(nota)))
-        self._table.setItem(row, 1, QTableWidgetItem(str(hz)))
-
-    def _del_row(self):
-        row = self._table.currentRow()
-        if row >= 0:
-            self._table.removeRow(row)
-
-    def get_scale(self) -> dict:
-        scale = {}
-        for i in range(self._table.rowCount()):
-            n = self._table.item(i, 0)
-            f = self._table.item(i, 1)
-            if n and f:
-                try:
-                    scale[n.text().strip()] = float(f.text())
-                except ValueError:
-                    pass
-        return scale
+from ui.scale_dialog import ScaleEditorDialog   # noqa: F401  (MainWindow lo importa desde acá)
+from core import scales as _scales
 
 
 class TabNotas(QWidget):
@@ -104,7 +35,7 @@ class TabNotas(QWidget):
         self._ma      = None
         self._segs    = None
         self._worker: Worker | None = None
-        self._current_scale: dict = dict(list(SCALE_PRESETS.values())[0])
+        self._current_scale: dict = _scales.default_scale()
         self._tolerance_cents: float = 50.0
         self._min_purity: float      = 0.8
         self._start_s: float         = 0.0
@@ -187,8 +118,9 @@ class TabNotas(QWidget):
             self._ma.scale = self._current_scale
 
     def _set_scale_from_preset(self, name: str):
-        if name in SCALE_PRESETS:
-            self._current_scale = dict(SCALE_PRESETS[name])
+        _, sc = _scales.find(name)
+        if sc:
+            self._current_scale = sc
             if self._ma is not None:
                 self._ma.scale = self._current_scale
 
@@ -202,6 +134,7 @@ class TabNotas(QWidget):
             return
         self._ma.scale = self._current_scale
         self._worker = Worker(self._run_detect, self._current_scale)
+        self._worker.label = "Detectando notas…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_detect_done)
         self._worker.error.connect(self._on_error)
@@ -324,6 +257,7 @@ class TabNotas(QWidget):
             return
         self.btn_extract.setEnabled(False)
         self._worker = Worker(self._run_extract)
+        self._worker.label = "Extrayendo notas…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_extract_done)
         self._worker.error.connect(self._on_error)

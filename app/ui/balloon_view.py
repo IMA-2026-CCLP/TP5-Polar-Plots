@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtGui import QFont
 
 from plot.balloon import (
+    FONT_SIZE, PLOTLY_DIR,
     build_balloon_html,
     build_sphere_html,
     build_polar2d_html,
@@ -24,7 +25,14 @@ _CAMERA_PRESETS = {
     "bottom": {"eye": {"x": 0.0001, "y": 0.0001, "z": -2.5}, "up": {"x": 0, "y": 1, "z": 0}},
     "front":  {"eye": {"x": 2.5, "y": 0.0001, "z": 0.0001},  "up": {"x": 0, "y": 0, "z": 1}},
     "back":   {"eye": {"x": -2.5, "y": 0.0001, "z": 0.0001}, "up": {"x": 0, "y": 0, "z": 1}},
+    # Isométrica: mirada según (1,1,1) con proyección ortográfica (sin perspectiva)
+    "iso":    {"eye": {"x": 1.6, "y": 1.6, "z": 1.6},        "up": {"x": 0, "y": 0, "z": 1},
+               "projection": {"type": "orthographic"}},
+    # Cámara inicial del programa (perspectiva)
+    "default": {"eye": {"x": 1.6, "y": 1.2, "z": 0.9},       "up": {"x": 0, "y": 0, "z": 1}},
 }
+for _k, _v in _CAMERA_PRESETS.items():        # al salir de la isométrica se vuelve a perspectiva
+    _v.setdefault("projection", {"type": "perspective"})
 
 VIEW_MODES = ("3d", "sphere", "polar2d", "spectrum")
 
@@ -107,7 +115,7 @@ class BalloonView(QWidget):
         self._show_info:    bool  = True
         self._compare_bands: list | None = None   # índices de banda a superponer (polar2d)
         self._compare_styles: dict = {}           # {band_index: {'color','width','dash'}}
-        self._tick_font_size: float = 11          # tamaño de números de los ejes (polar2d)
+        self._tick_font_size: float = FONT_SIZE   # tamaño de números de los ejes (polar2d)
         self._axis_color:    str | None = None    # color de la grilla 3D (3d/sphere), None = tema
         self._axis_width:    float = 1            # grosor de la grilla 3D
         self._style:         dict = {}            # overrides genéricos (bg_color, etc. — ver "Propiedades…")
@@ -156,7 +164,7 @@ class BalloonView(QWidget):
         )
 
         from ui import theme as _t
-        self._apply_theme_styles(_t.current())
+        self._apply_theme_styles(_t.LIGHT)
         self._placeholder.setFont(QFont("Segoe UI", 12))
 
         layout.addWidget(self._placeholder)
@@ -164,16 +172,13 @@ class BalloonView(QWidget):
         self._web.hide()
 
     def _apply_theme_styles(self, palette: dict):
-        bg = palette['plot_bg']
-        self._web.setStyleSheet(f"background:{bg};")
-        self._placeholder.setStyleSheet(
-            f"color: {palette['text_muted']}; font-size: 13pt; background: {bg};"
-            f" border: 2px dashed {palette['border']}; border-radius: 16px; padding: 40px;"
-        )
+        # Los gráficos son siempre de fondo blanco, en tema claro y oscuro: se ignora la paleta.
+        self._web.setStyleSheet("background:#ffffff;")
+        self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
 
     def _set_html_safe(self, html: str):
         self._html_loaded = False
-        self._web.setHtml(html)
+        self._web.setHtml(html, QUrl.fromLocalFile(PLOTLY_DIR + '/'))
 
     def _on_load_finished(self, ok: bool):
         self._html_loaded = ok
@@ -313,7 +318,7 @@ class BalloonView(QWidget):
 
     _EXPORT_FORMATS = ('png', 'svg', 'jpeg', 'webp')   # soportados por Plotly.toImage() en navegador
 
-    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, _retry: bool = True):
         """
         Exporta el gráfico real vía Plotly.toImage() (calidad de render de
         Plotly, no una captura de pantalla), usando exactamente el mismo
@@ -339,7 +344,11 @@ class BalloonView(QWidget):
                   export_all_images en TabDirectividad).
         """
         fmt = fmt if fmt in self._EXPORT_FORMATS else 'png'
-        scale = max(1, round(dpi / 96.0))
+        # Se re-renderiza en vectorial/WebGL a mayor resolución (no es una captura): mismo aspecto y
+        # proporción de texto que en pantalla, con ancho final = EXPORT_BASE_W * DPI / 96 píxeles.
+        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
+        target_w = dpi / 96.0 * EXPORT_BASE_W      # ancho final en píxeles
+        scale = round(target_w / max(1, self._web.width()), 4)   # sólo para el log
 
         import uuid
         exp_id = uuid.uuid4().hex
@@ -367,6 +376,8 @@ class BalloonView(QWidget):
             try:
                 with open(path, 'wb') as f:
                     f.write(base64.b64decode(data_url.split(',', 1)[1]))
+                if fmt == 'png':
+                    set_png_dpi(path, dpi)
                 self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, escala {scale}×, {fmt})")
                 if on_done:
                     on_done(True)
@@ -378,21 +389,31 @@ class BalloonView(QWidget):
             if rid != exp_id:
                 return
             _cleanup()
+            if _retry:      # un fallo aislado (p. ej. WebGL ocupado): reintenta antes de caer a la captura
+                self.export_image(path, dpi, fmt, on_done, _retry=False)
+                return
             self.log.emit(f"[Dir] Plotly.toImage falló ({err}) — se usa captura de pantalla como respaldo.")
             self._export_via_grab(path, on_done)
 
         def _on_timeout():
             _cleanup()
+            self.log.emit("[Dir] Plotly.toImage no respondió a tiempo — se usa captura de pantalla como respaldo.")
             self._export_via_grab(path, on_done)
 
         page.export_ready.connect(_on_ready)
         page.export_failed.connect(_on_failed)
         timeout_timer.timeout.connect(_on_timeout)
-        timeout_timer.start(10000)
+        timeout_timer.start(60000)   # a alta resolución el WebGL por software puede tardar varios segundos
 
         js = (
             "(function(){"
-            f"Plotly.toImage(document.getElementById('plot'), {{format:'{fmt}', scale:{scale}}})"
+            "var el=document.getElementById('plot');"
+            # Sin width/height explícitos Plotly usa 700×450 (no el tamaño del panel): se pasan los reales.
+            "var W=(el._fullLayout&&el._fullLayout.width)||el.offsetWidth, H=(el._fullLayout&&el._fullLayout.height)||el.offsetHeight;"
+            # La malla WebGL se rasteriza con plotGlPixelRatio (por defecto 2): se sube a la escala pedida
+            # para que la superficie también salga nítida al ampliar (con tope por límites de la GPU).
+            f"if(el._context) el._context.plotGlPixelRatio=Math.min(8, Math.max(2, {target_w}/Math.max(1,W)));"
+            f"Plotly.toImage(el, {{format:'{fmt}', width:W, height:H, scale:{target_w}/Math.max(1,W)}})"
             ".then(function(url){"
             "  var CHUNK=400000;"
             "  var n=Math.max(1, Math.ceil(url.length/CHUNK));"
@@ -550,7 +571,7 @@ class BalloonView(QWidget):
                 )
             else:
                 from ui import theme as _t
-                _p = _t.current()
+                _p = _t.LIGHT
                 html = (
                     f"<html><body style='background:{_p['plot_bg']};color:{_p['text_muted']};"
                     "display:flex;align-items:center;justify-content:center;height:100%;'>"

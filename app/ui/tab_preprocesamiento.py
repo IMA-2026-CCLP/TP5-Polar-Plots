@@ -56,6 +56,7 @@ class TabPreprocesamiento(QWidget):
             return
         self.log.emit(f"[Procesamiento] Aplicando HPF {hz:.0f} Hz…")
         self._worker = Worker(lambda: self._run_hpf(hz))
+        self._worker.label = "Aplicando filtro pasa-altos…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_op_done)
         self._worker.error.connect(self._on_error)
@@ -66,6 +67,7 @@ class TabPreprocesamiento(QWidget):
             return
         self.log.emit(f"[Procesamiento] Alineando tomas (onset={onset}s, θ={theta}, ventana={window_ms:.0f}ms)…")
         self._worker = Worker(lambda: self._run_align_takes(onset, thresh, theta, window_ms))
+        self._worker.label = "Alineando tomas…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_op_done)
         self._worker.error.connect(self._on_error)
@@ -77,6 +79,7 @@ class TabPreprocesamiento(QWidget):
         thr_str = f"{gcc_thresh} dBFS" if gcc_thresh is not None else "sin umbral"
         self.log.emit(f"[Procesamiento] Alineando a referencia (GCC-PHAT, {thr_str})…")
         self._worker = Worker(lambda: self._run_align_ref(gcc_thresh))
+        self._worker.label = "Alineando micrófonos…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_op_done)
         self._worker.error.connect(self._on_error)

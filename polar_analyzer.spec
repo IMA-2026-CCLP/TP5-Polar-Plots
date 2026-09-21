@@ -8,9 +8,9 @@ from PyInstaller.utils.hooks import collect_all
 block_cipher = None
 
 datas = [
-    ('app/ui/shell.html', 'ui'),
     ('app/ui/icons', 'ui/icons'),
     ('app/ui/fonts', 'ui/fonts'),
+    ('app/plot/vendor', 'plot/vendor'),      # plotly.js local (sin internet)
 ]
 binaries = []
 hiddenimports = [

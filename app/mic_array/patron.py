@@ -7,6 +7,14 @@ import plotly.graph_objects as go
 from pathlib import Path
 from scipy.signal import hilbert
 
+# Callback opcional (hecho, total) que la GUI asigna para mostrar una barra de progreso.
+progress_callback = None
+
+
+def _progress(done, total):
+    if progress_callback:
+        progress_callback(done, total)
+
 
 class MicArray:
     """
@@ -183,8 +191,7 @@ class MicArray:
         max_len = 0
         for f in path.glob("*.wav"):
             if arr_regex.search(f.name) or (ref_regex and ref_regex.search(f.name)):
-                sig, _ = sf.read(f)
-                max_len = max(max_len, len(sig))
+                max_len = max(max_len, sf.info(f).frames)   # sólo el encabezado: no hace falta leer el audio
 
         print(f"  Max length : {max_len} samples  ({max_len / sr:.2f} s)")
 
@@ -192,7 +199,9 @@ class MicArray:
         data = np.zeros((len(azimuths), len(thetas), max_len), dtype=np.float32)
 
         print(f"\n  Building tensor {data.shape} ...")
-        for f in sorted(path.glob("*.wav")):
+        wavs = sorted(path.glob("*.wav"))
+        for k, f in enumerate(wavs):
+            _progress(k, len(wavs))
             m = arr_regex.search(f.name)
             if m:
                 i_az = azimuths.index(int(m.group('H')))
@@ -428,7 +437,9 @@ class MicArray:
 
         calibration = np.full(self.n_thetas, np.nan)
 
-        for f in sorted(path.glob('*.wav')):
+        wavs = sorted(path.glob('*.wav'))
+        for k, f in enumerate(wavs):
+            _progress(k, len(wavs))
             m = arr_regex.search(f.name)
             if m:
                 v  = int(m.group(v_key))
@@ -525,6 +536,7 @@ class MicArray:
               f"  |  window = {window_ms:.0f} ms\n")
 
         for i_az in range(self.n_angles):
+            _progress(i_az, self.n_angles)
             signal = self.tensor[i_az, i_th, :].astype(np.float64)
             onset  = _detect_onset(signal, self.sr, window_ms=window_ms, threshold_dB=threshold_dB)
             shift  = target_samples - onset  # >0 → retrasa  |  <0 → adelanta
@@ -571,6 +583,7 @@ class MicArray:
         print(f"  Aligning {len(other_ix)} thetas to '{theta}'  |  umbral energía GCC: {thr_str}\n")
 
         for i_az in range(self.n_angles):
+            _progress(i_az, self.n_angles)
             ref_sig = self.tensor[i_az, i_ref, :].astype(np.float64)
 
             tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_e, :].astype(np.float64),
@@ -658,6 +671,7 @@ class MicArray:
         sos = butter(4, cutoff_hz, btype='high', fs=self.sr, output='sos')
 
         for i_az in range(self.n_angles):
+            _progress(i_az, self.n_angles)
             for i_th in range(self.n_thetas):
                 self.tensor[i_az, i_th, :] = sosfilt(
                     sos, self.tensor[i_az, i_th, :]
@@ -730,6 +744,7 @@ class MicArray:
         segmentos = []
 
         for i_az in range(self.n_angles):
+            _progress(i_az, self.n_angles)
             signal = self.tensor[i_az, i_th, start_sample:].astype(np.float32)
 
             f0, _, _ = librosa.pyin(
@@ -1213,12 +1228,12 @@ class MicArray:
         self.dir_ref_spl        : np.ndarray  absolute SPL at ref pos      (n_bands,)
         self.dir_ref_spl_global : float       broadband SPL at ref pos
         """
-        if not self._is_spl:
-            raise RuntimeError("Run calibrate() + to_spl() first.")
-
+        # Sin calibrar (tensor en unidades de fondo de escala) se calcula igual, con niveles en dBFS
+        # (P_REF = 1). El patrón es relativo, pero no corrige las diferencias de sensibilidad
+        # entre micrófonos: la GUI avisa al usuario (ver MainWindow._confirm_uncalibrated).
         from filterbank import FilterBank
 
-        P_REF   = 20e-6
+        P_REF   = 20e-6 if self._is_spl else 1.0
         fb      = FilterBank(sr=self.sr, bands=bands)
         n_bands = len(fb.center_freqs_nominal)
 

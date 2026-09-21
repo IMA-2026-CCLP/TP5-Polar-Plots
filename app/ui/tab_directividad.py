@@ -11,9 +11,9 @@ from pathlib import Path
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QCheckBox, QScrollArea,
-    QMainWindow, QDockWidget, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
+    QGridLayout, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
     QMenu, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
-    QColorDialog, QInputDialog, QSplitter,
+    QColorDialog, QInputDialog, QSplitter, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
@@ -24,7 +24,7 @@ from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
 from ui.widgets import NumEdit as _NumEdit
-from plot.balloon import COLORSCALES, _COMPARE_COLORS
+from plot.balloon import COLORSCALES, _COMPARE_COLORS, FONT_SIZE
 
 # polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView);
 # superficie_3d y esfera siguen en Plotly/QWebEngineView (BalloonView) hasta
@@ -50,28 +50,26 @@ _DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
 # acompaña al bg_color para que las etiquetas no queden claras sobre
 # fondo blanco si la app está en tema oscuro.
 _DEFAULT_STYLE_BY_MODE = {
-    "3d":       {"bg_color": "#ffffff", "text_color": "#1a1a1a"},
-    "sphere":   {"bg_color": "#ffffff", "text_color": "#1a1a1a"},
+    "3d":       {"bg_color": "#ffffff", "text_color": "#000000"},
+    "sphere":   {"bg_color": "#ffffff", "text_color": "#000000"},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
         "ring_color":       "#000000",
-        "ring_font_size":   16,
+        "ring_font_size":   FONT_SIZE,
         "ring_step":        5.0,
-        "ring_label_angle": 60.0,
-        "legend_font_size": 20,
+        "ring_label_angle": 45.0,
+        "legend_font_size": FONT_SIZE,
         "line_width":       2.5,
-        "show_radial_grid": False,
         "smoothing_method": "savgol",
         "smoothing_window": 3,
         "interp_kind":      "cubic",
         "interp_deg":       2.0,
     },
-    "spectrum": {"bg_color": "#ffffff", "text_color": "#1a1a1a"},
+    "spectrum": {"bg_color": "#ffffff", "text_color": "#000000", "bar_color": "#146B64"},
 }
 _DEFAULT_MIN_DB_BY_MODE = {"polar2d": -20.0}
 _DEFAULT_MAX_DB_BY_MODE = {"polar2d": 10.0}
-_DEFAULT_TICK_FONT_SIZE_BY_MODE = {"polar2d": 16.0}
 
 
 # ── Worker para cómputo batch (todo el audio + todas las notas) ───────────────
@@ -153,15 +151,17 @@ class _ViewSection(QWidget):
     save_requested       = pyqtSignal(str)   # emite el modo ("3d", "sphere", etc.)
     properties_requested = pyqtSignal()      # pide abrir/actualizar el panel de Propiedades
     properties_applied   = pyqtSignal()      # se aplicó un cambio de Propiedades (para Ctrl+Z)
+    zoom_requested       = pyqtSignal(str)   # 'Ver en grande' / volver (emite el modo)
 
     def __init__(self, title: str, mode: str, parent=None):
         super().__init__(parent)
         self._mode   = mode
+        self._zoomed = False
         self._min_db: float | None = _DEFAULT_MIN_DB_BY_MODE.get(mode)
         self._max_db: float | None = _DEFAULT_MAX_DB_BY_MODE.get(mode)
         self._compare_indices: list | None = None   # sólo relevante para polar2d
         self._compare_styles: dict = {}             # {band_index: {'color','width','dash'}}
-        self._tick_font_size: float = _DEFAULT_TICK_FONT_SIZE_BY_MODE.get(mode, 11)
+        self._tick_font_size: float = FONT_SIZE
         self._axis_color: str | None = None         # color de grilla 3D (3d/sphere), None = tema
         self._axis_width: float = 1                 # grosor de grilla 3D
         self._style: dict = dict(_DEFAULT_STYLE_BY_MODE.get(mode, {}))   # overrides (bg_color, etc.)
@@ -188,13 +188,33 @@ class _ViewSection(QWidget):
 
         self.setMinimumHeight(80)
 
+    def set_zoomed(self, on: bool):
+        self._zoomed = on
+
     def _show_context_menu(self, x: int, y: int):
+        import time
+        if getattr(self, '_menu_open', False) or time.monotonic() - getattr(self, '_menu_closed_at', 0) < 0.4:
+            return       # ya hay un menú abierto (o se acaba de cerrar): no encadenar otro
+        self._menu_open = True
+        try:
+            self._show_context_menu_impl(x, y)
+        finally:
+            self._menu_open = False
+            self._menu_closed_at = time.monotonic()
+
+    def _show_context_menu_impl(self, x: int, y: int):
         pos = QPoint(x, y)
         menu = QMenu(self)
 
-        act_top = act_bottom = act_front = act_back = None
+        act_zoom = menu.addAction("Volver a los 4 gráficos" if self._zoomed else "Ver en grande")
+        menu.addSeparator()
+
+        act_top = act_bottom = act_front = act_back = act_iso = act_default = None
         if self._mode in ("3d", "sphere"):
             view_menu  = menu.addMenu("Vista")
+            act_default = view_menu.addAction("Predeterminada")
+            act_iso    = view_menu.addAction("Isométrica")
+            view_menu.addSeparator()
             act_top    = view_menu.addAction("Arriba")
             act_bottom = view_menu.addAction("Abajo")
             act_front  = view_menu.addAction("Frente")
@@ -216,12 +236,18 @@ class _ViewSection(QWidget):
 
         action = menu.exec(self.view.mapToGlobal(pos))
         try:
-            if action == act_properties:
+            if action == act_zoom:
+                self.zoom_requested.emit(self._mode)
+            elif action == act_properties:
                 self.properties_requested.emit()
             elif action == act_auto:
                 self._reset_scale()
             elif action == act_save:
                 self.save_requested.emit(self._mode)
+            elif action == act_iso:
+                self.view.set_camera_view('iso')
+            elif action == act_default:
+                self.view.set_camera_view('default')
             elif action == act_top:
                 self.view.set_camera_view('top')
             elif action == act_bottom:
@@ -265,6 +291,7 @@ class _ViewSection(QWidget):
         en su atributo .color_hex — reutilizado en todas las secciones del
         diálogo de Propiedades."""
         btn = QPushButton()
+        btn.setAutoDefault(False)     # Enter en un campo del diálogo no debe 'apretar' el botón de color
         btn.setFixedSize(28, 20)
         btn.color_hex = self._to_qcolor(initial_color).name()
         btn.setStyleSheet(f"background:{btn.color_hex};border:1px solid #555;")
@@ -274,15 +301,16 @@ class _ViewSection(QWidget):
             if c.isValid():
                 _btn.color_hex = c.name()
                 _btn.setStyleSheet(f"background:{_btn.color_hex};border:1px solid #555;")
+                if getattr(_btn, 'on_change', None):
+                    _btn.on_change()
         btn.clicked.connect(_pick)
         return btn
 
     def build_properties_widget(self, close_cb) -> QWidget:
         """
-        Contenido del panel de Propiedades del gráfico — vive en un
-        panel no modal al costado derecho (ver TabDirectividad._show_properties_panel),
-        para poder seguir viendo/ajustando el gráfico mientras se cambian
-        valores. Las secciones que aplican dependen del tipo de vista
+        Contenido de Propiedades del gráfico (dentro del modal de
+        TabDirectividad._show_properties_panel). Cada cambio se aplica solo,
+        con un pequeño retardo, sin botón "Aplicar". Las secciones que aplican dependen del tipo de vista
         (self._mode): escala, fondo, ejes/grilla (3D/Esfera), ejes/traza
         (Polar 2D) o barras/grilla (Espectro).
 
@@ -291,8 +319,19 @@ class _ViewSection(QWidget):
         """
         from plot import balloon as _balloon_mod
 
-        dlg = QWidget()   # contenedor de los campos; nombre histórico, ya no es un QDialog
-        outer = QVBoxLayout(dlg)
+        # Una pestaña por sección (Escala, Ejes…): así todo entra sin deslizar.
+        dlg = tabs = QTabWidget()
+        tabs.tabBar().setUsesScrollButtons(False)
+
+        class _Tabs:                       # cada group box que se "agrega" pasa a ser una pestaña
+            def addWidget(self, box):
+                tabs.addTab(box, box.title())
+                box.setTitle("")
+                box.setObjectName("prop_page")
+            def addStretch(self, *_):
+                pass
+
+        outer = _Tabs()
         fields: dict = {}
 
         if self._mode != "spectrum":
@@ -311,15 +350,6 @@ class _ViewSection(QWidget):
             fields['min_db'], fields['max_db'] = le_min, le_max
             outer.addWidget(box)
 
-        box_bg = QGroupBox("Fondo")
-        form_bg = QFormLayout(box_bg)
-        default_bg = self._style.get('bg_color') or _balloon_mod._DARK_BG
-        btn_bg = self._make_color_button(dlg, default_bg)
-        btn_bg.setToolTip("Color de fondo del gráfico. Click para elegir. El color del tema (oscuro/claro) ya viene puesto por defecto.")
-        form_bg.addRow("Color de fondo:", btn_bg)
-        fields['bg_color'] = btn_bg
-        outer.addWidget(box_bg)
-
         if self._mode in ("3d", "sphere"):
             box_ax = QGroupBox("Ejes / grilla")
             form_ax = QFormLayout(box_ax)
@@ -333,8 +363,8 @@ class _ViewSection(QWidget):
             form_ax.addRow("Grosor de grilla:", spin_grid_w)
             spin_label = _NumEdit()
             spin_label.setRange(6, 24); spin_label.setSingleStep(1)
-            spin_label.setValue(self._style.get('axis_label_size', 11))
-            spin_label.setToolTip("Tamaño de las letras X/Y/Z. Valor típico: 10 a 14. Por defecto: 11.")
+            spin_label.setValue(self._style.get('axis_label_size', FONT_SIZE))
+            spin_label.setToolTip("Tamaño de las letras X/Y/Z. Valor típico: 10 a 14. Por defecto: 12.")
             form_ax.addRow("Tamaño etiquetas X/Y/Z:", spin_label)
             spin_axis_w = _NumEdit()
             spin_axis_w.setRange(0.5, 8.0); spin_axis_w.setSingleStep(0.5)
@@ -347,7 +377,7 @@ class _ViewSection(QWidget):
             fields['axis_line_width'] = spin_axis_w
             outer.addWidget(box_ax)
 
-            box_interp = QGroupBox("Interpolación / suavizado")
+            box_interp = QGroupBox("Suavizado")
             form_interp = QFormLayout(box_interp)
             spin_interp_deg = _NumEdit()
             spin_interp_deg.setRange(0.5, 10.0); spin_interp_deg.setSingleStep(0.5)
@@ -407,11 +437,11 @@ class _ViewSection(QWidget):
             spin_tick = _NumEdit()
             spin_tick.setRange(6, 30); spin_tick.setSingleStep(1)
             spin_tick.setValue(self._tick_font_size)
-            spin_tick.setToolTip("Tamaño de los números de ángulo (0°, 45°, 90°...). Valor típico: 10 a 14. Por defecto: 11.")
+            spin_tick.setToolTip("Tamaño de los números de ángulo (0°, 45°, 90°...). Valor típico: 10 a 14. Por defecto: 12.")
             form_ax.addRow("Tamaño de números (grados):", spin_tick)
             spin_ring_font = _NumEdit()
             spin_ring_font.setRange(6, 30); spin_ring_font.setSingleStep(1)
-            spin_ring_font.setValue(self._style.get('ring_font_size', 9))
+            spin_ring_font.setValue(self._style.get('ring_font_size', FONT_SIZE))
             spin_ring_font.setToolTip("Tamaño de los números de dB de los anillos (-10, -5, 0...). Valor típico: 8 a 12. Por defecto: 9.")
             form_ax.addRow("Tamaño de números (dB):", spin_ring_font)
             spin_ring_step = _NumEdit()
@@ -440,12 +470,8 @@ class _ViewSection(QWidget):
             )
             form_ax.addRow("Posición de etiquetas de dB:", combo_ring_pos)
             btn_ring = self._make_color_button(dlg, self._style.get('ring_color') or _balloon_mod._RING_LINE)
-            btn_ring.setToolTip("Color de los anillos punteados y del eje angular. Click para elegir.")
-            form_ax.addRow("Color de anillos/eje:", btn_ring)
-            chk_grid = QCheckBox("Mostrar grilla radial")
-            chk_grid.setChecked(self._style.get('show_radial_grid', False))
-            chk_grid.setToolTip("Grilla radial extra de Plotly, además de los anillos de dB. Normalmente no hace falta, dejar destildado.")
-            form_ax.addRow(chk_grid)
+            btn_ring.setToolTip("Color de los anillos punteados y de las líneas radiales (cada 30°). No cambia el color de los números. Click para elegir.")
+            form_ax.addRow("Color de anillos y radios:", btn_ring)
             spin_line_w = _NumEdit()
             spin_line_w.setRange(0.5, 8.0); spin_line_w.setSingleStep(0.5)
             spin_line_w.setValue(self._style.get('line_width', 2.5))
@@ -453,7 +479,7 @@ class _ViewSection(QWidget):
             form_ax.addRow("Grosor de traza (banda única):", spin_line_w)
             spin_legend = _NumEdit()
             spin_legend.setRange(6, 30); spin_legend.setSingleStep(1)
-            spin_legend.setValue(self._style.get('legend_font_size', 12))
+            spin_legend.setValue(self._style.get('legend_font_size', FONT_SIZE))
             spin_legend.setToolTip("Tamaño de la leyenda cuando comparás varias bandas superpuestas. Valor típico: 11 a 14. Por defecto: 12.")
             form_ax.addRow("Tamaño de leyenda (multibanda):", spin_legend)
             fields['tick_font_size']    = spin_tick
@@ -462,12 +488,11 @@ class _ViewSection(QWidget):
             fields['ring_label_angle']  = spin_ring_angle
             fields['ring_label_pos']    = combo_ring_pos
             fields['ring_color']        = btn_ring
-            fields['show_radial_grid']  = chk_grid
             fields['line_width']        = spin_line_w
             fields['legend_font_size']  = spin_legend
             outer.addWidget(box_ax)
 
-            box_interp = QGroupBox("Interpolación / suavizado")
+            box_interp = QGroupBox("Suavizado")
             form_interp = QFormLayout(box_interp)
             combo_smooth_method = QComboBox()
             combo_smooth_method.setMaximumWidth(120)
@@ -528,7 +553,7 @@ class _ViewSection(QWidget):
         elif self._mode == "spectrum":
             box_sp = QGroupBox("Barras / grilla")
             form_sp = QFormLayout(box_sp)
-            btn_bar = self._make_color_button(dlg, self._style.get('bar_color') or "#5865f2")
+            btn_bar = self._make_color_button(dlg, self._style.get('bar_color') or "#146B64")
             btn_bar.setToolTip("Color de las barras cuando el modo de vista está en 'Global'. No aplica al modo 'Por toma' (usa un color distinto por azimuth).")
             form_sp.addRow("Color de barras (modo Global):", btn_bar)
             btn_grid_sp = self._make_color_button(dlg, self._style.get('grid_color') or _balloon_mod._GRID_COL)
@@ -539,8 +564,6 @@ class _ViewSection(QWidget):
             outer.addWidget(box_sp)
 
         def _apply():
-            self._push_undo_snapshot()
-
             if self._mode != "spectrum":
                 try:
                     self._min_db = float(fields['min_db'].text()) if fields['min_db'].text().strip() else None
@@ -549,7 +572,6 @@ class _ViewSection(QWidget):
                     pass
 
             new_style = dict(self._style)
-            new_style['bg_color'] = fields['bg_color'].color_hex
 
             if self._mode in ("3d", "sphere"):
                 self._axis_color = fields['grid_color'].color_hex
@@ -567,7 +589,6 @@ class _ViewSection(QWidget):
                 new_style['ring_label_angle']  = fields['ring_label_angle'].value()
                 new_style['ring_label_pos']    = fields['ring_label_pos'].currentText()
                 new_style['ring_color']        = fields['ring_color'].color_hex
-                new_style['show_radial_grid']  = fields['show_radial_grid'].isChecked()
                 new_style['line_width']        = fields['line_width'].value()
                 new_style['legend_font_size']  = fields['legend_font_size'].value()
                 new_style['smoothing_method']  = fields['smoothing_method'].currentText()
@@ -587,20 +608,49 @@ class _ViewSection(QWidget):
             self.view.set_style(self._style)
             self.properties_applied.emit()
 
-        btn_row   = QHBoxLayout()
-        btn_apply = QPushButton("Aplicar")
-        btn_close = QPushButton("Cerrar")
-        btn_apply.clicked.connect(_apply)
-        btn_close.clicked.connect(close_cb)
-        btn_row.addWidget(btn_apply)
-        btn_row.addWidget(btn_close)
-        outer.addLayout(btn_row)
         outer.addStretch(1)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(dlg)
-        return scroll
+        # Edición en vivo: cualquier cambio dispara _apply con un retardo (evita re-renderizar por cada tecla)
+        timer = QTimer(dlg)
+        timer.setSingleShot(True)
+        timer.setInterval(400)
+
+        def _safe_apply():
+            try:
+                _apply()
+            except Exception:       # texto a medio escribir, etc.
+                pass
+
+        timer.timeout.connect(_safe_apply)
+        sched = lambda *_: timer.start()
+        for w in fields.values():
+            if isinstance(w, QComboBox):
+                w.currentTextChanged.connect(sched)
+            elif isinstance(w, QCheckBox):
+                w.toggled.connect(sched)
+            elif isinstance(w, QLineEdit):      # incluye _NumEdit
+                w.textChanged.connect(sched)
+            else:                               # botón de color
+                w.on_change = sched
+
+        tabs.flush = lambda: timer.isActive() and (timer.stop(), _safe_apply())   # al cerrar, no perder el último cambio
+        return tabs
+
+    def restore_defaults(self):
+        """Vuelve el gráfico a la configuración estándar del programa (ver _DEFAULT_*)."""
+        self._style          = dict(_DEFAULT_STYLE_BY_MODE.get(self._mode, {}))
+        self._min_db         = _DEFAULT_MIN_DB_BY_MODE.get(self._mode)
+        self._max_db         = _DEFAULT_MAX_DB_BY_MODE.get(self._mode)
+        self._tick_font_size = FONT_SIZE
+        self._axis_color     = None
+        self._axis_width     = 1
+        self.view.set_db_range(self._min_db, self._max_db)
+        if self._mode in ("3d", "sphere"):
+            self.view.set_axis_style(self._axis_color, self._axis_width)
+        elif self._mode == "polar2d":
+            self.view.set_tick_font_size(self._tick_font_size)
+        self.view.set_style(self._style)
+        self.properties_applied.emit()
 
     def _prompt_compare_bands(self):
         bands = self.view._bands
@@ -660,6 +710,7 @@ class _ViewSection(QWidget):
             row.setContentsMargins(0, 0, 0, 0)
 
             btn_color = QPushButton()
+            btn_color.setAutoDefault(False)
             btn_color.setFixedSize(28, 20)
             btn_color.color_hex = style.get('color', default_color)
             btn_color.setStyleSheet(f"background:{btn_color.color_hex};border:1px solid #555;")
@@ -727,8 +778,11 @@ class _ViewSection(QWidget):
         Devuelve False si no hay nada para deshacer."""
         if not self._props_undo_stack:
             return False
-        snap = self._props_undo_stack.pop()
-        self._style          = snap['style']
+        self._apply_snapshot(self._props_undo_stack.pop())
+        return True
+
+    def _apply_snapshot(self, snap: dict):
+        self._style          = dict(snap['style'])
         self._min_db         = snap['min_db']
         self._max_db         = snap['max_db']
         self._tick_font_size = snap['tick_font_size']
@@ -741,7 +795,20 @@ class _ViewSection(QWidget):
         elif self._mode == "polar2d":
             self.view.set_tick_font_size(self._tick_font_size)
         self.view.set_style(self._style)
-        return True
+
+    def get_config(self) -> dict:
+        """Propiedades del gráfico en forma serializable (para guardar junto con los datos)."""
+        c = self._snapshot_properties()
+        c['compare_indices'] = [int(i) for i in self._compare_indices] if self._compare_indices else None
+        c['compare_styles'] = {str(k): v for k, v in self._compare_styles.items()}
+        return c
+
+    def apply_config(self, c: dict):
+        self._apply_snapshot(c)
+        self._compare_indices = c.get('compare_indices')
+        self._compare_styles = {int(k): v for k, v in (c.get('compare_styles') or {}).items()}
+        self.view.set_compare_bands(self._compare_indices)
+        self.view.set_compare_styles(self._compare_styles)
 
     def set_data(self, **kwargs):
         self.view.set_data(**kwargs)
@@ -770,6 +837,7 @@ class _ViewSection(QWidget):
 class TabDirectividad(QWidget):
     log      = pyqtSignal(str)
     computed = pyqtSignal(object, str)  # (thetas_np, status_text)
+    compute_finished = pyqtSignal()     # terminó un cálculo pedido con 'Calcular' (no al cargar datos)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -785,6 +853,8 @@ class TabDirectividad(QWidget):
         self._plane            = "XY"
         self._show_info        = True
         self._current_band_idx = 0
+        self._npz: dict | None = None   # resultados cargados de un .npz (sin MicArray): {nota: {...}}
+        self._unit = "dB SPL"          # 'dBFS' si se calculó sin calibrar
 
         # Estado de controles del ribbon — actualizados por apply_display_params()
         self._hz_min      = 200.0
@@ -794,7 +864,7 @@ class TabDirectividad(QWidget):
         self._spec_data   = 0       # 0=raw, 1=eq
         self._spec_global = True
         self._view_checks = {
-            "3d": False, "sphere": True, "polar2d": True, "spectrum": False
+            "3d": True, "sphere": True, "polar2d": True, "spectrum": True
         }
 
         self._build_ui()
@@ -810,8 +880,8 @@ class TabDirectividad(QWidget):
     def _make_right_panel(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(4, 4, 4, 4)
-        lay.setSpacing(4)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(2)
 
         self._sections: dict[str, _ViewSection] = {
             "3d":       _ViewSection("Superficie 3D", "3d"),
@@ -827,6 +897,7 @@ class TabDirectividad(QWidget):
         for mode, sec in self._sections.items():
             sec.log.connect(self.log)
             sec.save_requested.connect(self._save_section)
+            sec.zoom_requested.connect(self.toggle_zoom)
             sec.properties_requested.connect(
                 lambda m=mode: self._show_properties_panel(m))
             sec.properties_applied.connect(
@@ -835,85 +906,57 @@ class TabDirectividad(QWidget):
         # Ctrl+Z deshace el último "Aplicar" de Propiedades (cualquier gráfico).
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_properties)
 
-        # Grilla 2×2 de paneles arrastrables — QMainWindow anidado con
-        # QDockWidgets, igual mecanismo que usa el dock del Log: se pueden
-        # mover, reacomodar o flotar arrastrándolos con el mouse.
-        self._dock_host = QMainWindow()
-        self._dock_host.setWindowFlags(Qt.WindowType.Widget)
-        # Por default Qt no permite anidar/reacomodar libremente los docks al
-        # arrastrar (dockNestingEnabled=False) — eso es lo que hacía fallar
-        # el "ponelo al costado / arriba" a veces. Con esto habilitado, el
-        # área de destino se puede volver a partir en cualquier dirección.
-        self._dock_host.setDockNestingEnabled(True)
-        self._dock_host.setDockOptions(
-            QMainWindow.DockOption.AnimatedDocks |
-            QMainWindow.DockOption.AllowNestedDocks |
-            QMainWindow.DockOption.AllowTabbedDocks
-        )
+        # Grilla 2×2 fija (como VituixCAD): los 4 gráficos siempre visibles, mismas proporciones.
+        # Con click derecho ▸ "Ver en grande" uno ocupa toda el área (ver toggle_zoom).
+        self._grid_host = QWidget()
+        grid = self._grid = QGridLayout(self._grid_host)
+        self._cell_pos = {}
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        self._cells: dict[str, QWidget] = {}
+        self._zoomed: str | None = None
+        for mode, row, col in (("polar2d", 0, 0), ("spectrum", 0, 1), ("3d", 1, 0), ("sphere", 1, 1)):
+            cell = QWidget()
+            cv = QVBoxLayout(cell)
+            cv.setContentsMargins(0, 0, 0, 0)
+            cv.setSpacing(0)
+            hdr = QLabel(self._section_titles[mode])
+            hdr.setObjectName("plot_title")
+            hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cv.addWidget(hdr)
+            cv.addWidget(self._sections[mode], 1)
+            grid.addWidget(cell, row, col)
+            self._cell_pos[mode] = (row, col)
+            self._cells[mode] = cell
+        for k in (0, 1):
+            grid.setRowStretch(k, 1)
+            grid.setColumnStretch(k, 1)
 
-        self._docks: dict[str, QDockWidget] = {}
-        for mode, sec in self._sections.items():
-            dock = QDockWidget(self._section_titles[mode], self._dock_host)
-            dock.setWidget(sec)
-            dock.setFeatures(
-                QDockWidget.DockWidgetFeature.DockWidgetMovable |
-                QDockWidget.DockWidgetFeature.DockWidgetFloatable
-            )
-            dock.setVisible(self._view_checks.get(mode, True))
-            self._docks[mode] = dock
-
-        dock_host_area = Qt.DockWidgetArea.TopDockWidgetArea
-        self._dock_host.addDockWidget(dock_host_area, self._docks["3d"])
-        self._dock_host.splitDockWidget(
-            self._docks["3d"], self._docks["sphere"], Qt.Orientation.Horizontal)
-        self._dock_host.splitDockWidget(
-            self._docks["3d"], self._docks["polar2d"], Qt.Orientation.Vertical)
-        self._dock_host.splitDockWidget(
-            self._docks["sphere"], self._docks["spectrum"], Qt.Orientation.Vertical)
-
-        # Panel de Propiedades compartido — no modal, siempre al costado
-        # derecho de la grilla 2×2 (en vez de un diálogo bloqueante),
-        # reutilizado y repoblado según cuál gráfico lo pidió (ver
-        # _show_properties_panel). Se usa un QSplitter en vez de acoplarlo
-        # como un QDockWidget más dentro de _dock_host porque los 4 gráficos
-        # ya ocupan las 4 "esquinas" de ese QMainWindow anidado (todos bajo
-        # TopDockWidgetArea) — agregar un dock ahí con RightDockWidgetArea
-        # termina cayendo debajo de la grilla en vez de al costado, ya que
-        # Top/Bottom tienen prioridad sobre las esquinas por default en Qt.
-        self._props_panel = QWidget()
-        self._props_panel.setMinimumWidth(260)
-        self._props_panel.setMaximumWidth(340)
-        props_lay = QVBoxLayout(self._props_panel)
-        props_lay.setContentsMargins(4, 4, 4, 4)
-
-        title_row = QHBoxLayout()
-        self._props_title = QLabel("Propiedades")
-        self._props_title.setStyleSheet("font-weight:600;")
-        btn_props_close = QPushButton("✕")
-        btn_props_close.setFixedSize(22, 22)
-        btn_props_close.setToolTip("Cerrar panel de Propiedades")
-        btn_props_close.clicked.connect(lambda: self._props_panel.hide())
-        title_row.addWidget(self._props_title, 1)
-        title_row.addWidget(btn_props_close)
-        props_lay.addLayout(title_row)
-
-        self._props_content_holder = QVBoxLayout()
-        props_lay.addLayout(self._props_content_holder, 1)
-        self._props_panel.hide()
-
-        self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._main_splitter.addWidget(self._dock_host)
-        self._main_splitter.addWidget(self._props_panel)
-        self._main_splitter.setStretchFactor(0, 1)
-        self._main_splitter.setStretchFactor(1, 0)
-
-        lay.addWidget(self._main_splitter, 1)
+        lay.addWidget(self._grid_host, 1)
 
         self.band_selector = BandSelectorWidget()
         self.band_selector.band_changed.connect(self._on_band_changed)
         lay.addWidget(self.band_selector)
 
         return w
+
+    def toggle_zoom(self, mode: str):
+        """'Ver en grande': el gráfico elegido ocupa toda el área; repetir para volver a los 4.
+        Los tamaños de fuente son px literales, así que no cambian al agrandar."""
+        z = None if self._zoomed == mode else mode
+        self._zoomed = z
+        for m, cell in self._cells.items():
+            cell.setVisible(z is None or m == z)
+        r, c = self._cell_pos.get(z, (None, None))
+        for k in (0, 1):                # sólo la fila/columna del gráfico ampliado se estira
+            self._grid.setRowStretch(k, 1 if z is None or k == r else 0)
+            self._grid.setColumnStretch(k, 1 if z is None or k == c else 0)
+        for m, sec in self._sections.items():
+            sec.set_zoomed(m == z)
+        self.band_selector.setVisible(z != "spectrum")
+        if z is None:                      # los ocultos no siguieron los cambios de banda
+            for sec in self._sections.values():
+                sec.set_band(self._current_band_idx)
 
     # ── Slots internos ────────────────────────────────────────────────────
 
@@ -950,6 +993,7 @@ class TabDirectividad(QWidget):
     def _show_results(self, ma):
         if ma.dir_levels is None:
             return
+        self._unit = "dB SPL" if ma._is_spl else "dBFS"
         thetas_num = [t for t in ma.thetas if t != 'ref']
         theta_idx  = [ma.thetas.index(t) for t in thetas_num]
 
@@ -1002,6 +1046,7 @@ class TabDirectividad(QWidget):
             f_ref = None
 
         self.band_selector.set_bands(f_bands)
+        self._sections['spectrum'].view.set_unit(self._unit)
         # Clamp el índice de banda al nuevo tamaño de f_bands
         safe_band = min(self._current_band_idx, max(0, len(f_bands) - 1))
 
@@ -1069,42 +1114,48 @@ class TabDirectividad(QWidget):
             return
         if self._sections[mode].undo_properties():
             self.log.emit(f"[Directividad] Deshecho último cambio de Propiedades ({self._section_titles[mode]}).")
-            if self._props_panel.isVisible():
-                self._show_properties_panel(mode)
 
     def _show_properties_panel(self, mode: str):
-        """Repuebla el panel de Propiedades compartido con los campos del
-        gráfico indicado y lo muestra (no modal, siempre al costado
-        derecho de la grilla de gráficos, ver QSplitter en _make_right_panel)."""
+        """Propiedades del gráfico en un modal: los cambios se ven en vivo (sin 'Aplicar') y hay
+        'Restaurar por defecto'. Se ubica a la derecha para dejar a la vista los gráficos."""
         sec = self._sections[mode]
+        sec._push_undo_snapshot()          # Ctrl+Z vuelve al estado previo a esta edición
+        win = self.window()
+        dlg = QDialog(win)
+        dlg.setWindowTitle(f"Propiedades — {self._section_titles[mode]}")
+        dlg.setMinimumWidth(430)
 
-        while self._props_content_holder.count():
-            item = self._props_content_holder.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        lay = QVBoxLayout(dlg)
+        holder = QVBoxLayout()
+        lay.addLayout(holder, 1)
+        current = {}
 
-        widget = sec.build_properties_widget(self._props_panel.hide)
-        self._props_content_holder.addWidget(widget)
-        self._props_title.setText(f"Propiedades — {self._section_titles[mode]}")
-        self._props_panel.show()
-        if self._main_splitter.sizes()[1] < 10:
-            total = sum(self._main_splitter.sizes()) or self.width() or 1000
-            props_w = max(260, min(340, int(total * 0.18)))
-            self._main_splitter.setSizes([max(total - props_w, 100), props_w])
+        def build():
+            while holder.count():
+                item = holder.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            current['w'] = sec.build_properties_widget(dlg.close)
+            holder.addWidget(current['w'])
 
-    def _apply_view_checks(self, view_checks: dict):
-        for mode, checked in view_checks.items():
-            if mode in self._docks:
-                self._docks[mode].setVisible(checked)
-                self._view_checks[mode] = checked
-        self._update_band_selector_visibility()
-
-    def _update_band_selector_visibility(self):
-        any_non_spectrum = any(
-            self._view_checks[mode]
-            for mode in ("3d", "sphere", "polar2d")
-        )
-        self.band_selector.setVisible(any_non_spectrum)
+        build()
+        row = QHBoxLayout()
+        btn_reset = QPushButton("Restaurar por defecto")
+        btn_reset.setAutoDefault(False)
+        btn_reset.setToolTip("Vuelve este gráfico a la configuración estándar del programa")
+        btn_reset.clicked.connect(lambda: (sec.restore_defaults(), build()))
+        btn_close = QPushButton("Cerrar")
+        btn_close.setAutoDefault(False)     # Enter mientras se escribe no cierra el diálogo
+        btn_close.clicked.connect(dlg.accept)
+        row.addWidget(btn_reset)
+        row.addStretch(1)
+        row.addWidget(btn_close)
+        lay.addLayout(row)
+        dlg.finished.connect(lambda _=0: current['w'].flush())
+        dlg.adjustSize()
+        g = win.geometry()
+        dlg.move(g.right() - dlg.width() - 24, g.top() + 60)
+        dlg.exec()
 
     def _get_current_ma(self):
         if self._nota != "Todo el audio" and self._ma and self._ma.notes:
@@ -1124,6 +1175,7 @@ class TabDirectividad(QWidget):
 
     def set_ma(self, ma):
         self._ma = ma
+        self._npz = None
         if ma.dir_levels is not None:
             self._show_results(ma)
             status = (
@@ -1145,6 +1197,7 @@ class TabDirectividad(QWidget):
         self._worker = Worker(
             lambda: self._run_compute(bands, ref_az, ref_th)
         )
+        self._worker.label = "Calculando directividad…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_compute_done)
         self._worker.error.connect(self._on_error)
@@ -1202,6 +1255,7 @@ class TabDirectividad(QWidget):
             status = (
                 f"Dir. calculada — {self._ma.dir_levels.shape}  |  "
                 f"{self._ma.dir_freqs[0]:.0f}–{self._ma.dir_freqs[-1]:.0f} Hz"
+                + ("" if self._ma._is_spl else "  |  SIN CALIBRAR (dBFS)")
             )
             self.computed.emit(
                 np.array([t for t in self._ma.thetas if t != 'ref'],
@@ -1209,21 +1263,48 @@ class TabDirectividad(QWidget):
                 status,
             )
         self.log.emit("[Directividad] Todas las configuraciones calculadas.")
+        self.compute_finished.emit()
 
-    def load_from_npz(self, data: dict):
-        """Carga resultados desde el dict devuelto por data_store.load_results()."""
-        self._full_levels   = data['dir_levels'].astype(np.float32)
+    def load_from_npz(self, data: dict) -> list:
+        """Carga resultados desde el dict devuelto por data_store.load_results().
+        Guarda también los datos por nota para poder cambiar de nota sin MicArray.
+        Devuelve los nombres de nota disponibles."""
+        f32 = lambda k: data[k].astype(np.float32) if k in data else None
+        self._npz = {"Todo el audio": dict(levels=f32('dir_levels'), spl_ref=f32('spl_ref'),
+                                            spl_ref_az=f32('spl_ref_per_az'))}
+        notes = []
+        for key in data:
+            if key.startswith('note_') and key.endswith('_dir_levels'):
+                name = key[len('note_'):-len('_dir_levels')]
+                notes.append(name)
+                self._npz[name] = dict(levels=f32(key), spl_ref=f32(f'note_{name}_spl_ref'),
+                                       spl_ref_az=f32(f'note_{name}_spl_ref_per_az'))
         self._full_azimuths = data['azimuths'].astype(np.float32)
         self._full_thetas   = data['thetas'].astype(np.float32)
         self._full_bands    = data['dir_freqs'].astype(np.float32)
+        self._unit = (data.get('metadata') or {}).get('unit', 'dB SPL')
+        self._apply_npz_entry("Todo el audio")
+        return notes
 
-        self._eq_ref_spl = data['spl_ref'].astype(np.float32)
-        if 'spl_ref_per_az' in data:
-            self._raw_ref_spl = data['spl_ref_per_az'].astype(np.float32)
-        else:
-            self._raw_ref_spl = None   # NPZ antiguo, guardado sin el espectro por toma
-
+    def _apply_npz_entry(self, name: str):
+        e = self._npz[name]
+        self._full_levels = e['levels']
+        self._eq_ref_spl  = e['spl_ref']
+        self._raw_ref_spl = e['spl_ref_az']   # None en NPZ antiguos (sin espectro por toma)
         self._refresh_display()
+
+    def get_view_config(self) -> dict:
+        """Propiedades de los 4 gráficos + banda activa (se guardan junto con el .npz de directividad)."""
+        return {'sections': {m: s.get_config() for m, s in self._sections.items()},
+                'band_index': int(self._current_band_idx)}
+
+    def apply_view_config(self, cfg: dict):
+        for m, c in (cfg.get('sections') or {}).items():
+            if m in self._sections:
+                self._sections[m].apply_config(c)
+        self._current_band_idx = int(cfg.get('band_index', 0))
+        self._refresh_display()
+        self.band_selector.set_index(self._current_band_idx)
 
     def apply_display_params(self, params: dict):
         """
@@ -1255,12 +1336,11 @@ class TabDirectividad(QWidget):
         for sec in self._sections.values():
             sec.set_show_info(self._show_info)
 
-        view_checks = params.get('view_checks', {})
-        if view_checks:
-            self._apply_view_checks(view_checks)
-
         # Si cambió la nota, recargar datos desde el MA correspondiente
         if self._nota != old_nota:
+            if self._npz is not None and self._nota in self._npz:
+                self._apply_npz_entry(self._nota)
+                return
             current_ma = self._get_current_ma()
             if current_ma is not None and current_ma.dir_levels is not None:
                 self._show_results(current_ma)
@@ -1286,7 +1366,9 @@ class TabDirectividad(QWidget):
         else:
             suggested = f"dir_{mode_label}_{nota}.png"
 
-        filters = "PNG (*.png);;SVG vectorial (*.svg);;JPEG (*.jpg);;WEBP (*.webp)"
+        # El SVG del Espectro no es fiel (las barras no se recortan al eje): sólo PNG/JPEG/WEBP
+        filters = ("PNG (*.png);;JPEG (*.jpg);;WEBP (*.webp)" if mode == "spectrum"
+                   else "PNG (*.png);;SVG vectorial (*.svg);;JPEG (*.jpg);;WEBP (*.webp)")
         path, selected_filter = QFileDialog.getSaveFileName(
             self, "Guardar imagen", suggested, filters
         )
@@ -1314,12 +1396,15 @@ class TabDirectividad(QWidget):
 
         self._sections[mode].export_image(path, dpi=dpi, fmt=fmt)
 
-    def export_all_images(self, folder: str, prefix: str, dpi: int = 300):
+    def export_all_images(self, folder: str, prefix: str, dpi: int = 300, modes=None, fmt: str = 'png'):
         """
         Exporta de una sola vez las imágenes de todas las vistas habilitadas
         (pills del ribbon), para todas las bandas del rango actualmente
         analizado (hz_min/hz_max). El espectro no depende de la banda, así
         que se exporta una única vez.
+
+        modes : vistas a exportar (None = las 4).
+        fmt   : 'png' o 'svg'; el SVG (vectorial) sólo aplica a Polar 2D; el resto sale en PNG.
 
         Nombres: {prefix}_{freq}Hz_{vista}.png  (3D/Esfera/Polar2D)
                  {prefix}_{vista}.png            (Espectro)
@@ -1333,18 +1418,23 @@ class TabDirectividad(QWidget):
             mask = np.ones(len(self._full_bands), dtype=bool)
         band_indices = np.nonzero(mask)[0].tolist()
 
+        modes = set(modes) if modes else {"3d", "sphere", "polar2d", "spectrum"}
+        if self._zoomed:                       # con un gráfico ampliado los otros están ocultos: sin tamaño real
+            self.toggle_zoom(self._zoomed)
+
         tasks: list[tuple[str, int | None, str]] = []
         for mode in ("3d", "sphere", "polar2d"):
-            if not self._view_checks.get(mode, False):
+            if mode not in modes:
                 continue
             for bi in band_indices:
                 freq = int(round(float(self._full_bands[bi])))
-                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}.png"))
-        if self._view_checks.get("spectrum", False):
+                ext = "svg" if (fmt == "svg" and mode == "polar2d") else "png"
+                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}.{ext}"))
+        if "spectrum" in modes:
             tasks.append(("spectrum", None, f"{prefix}_{_MODE_LABELS['spectrum']}.png"))
 
         if not tasks:
-            self.log.emit("[Dir] No hay vistas habilitadas para exportar.")
+            self.log.emit("[Dir] No hay gráficos seleccionados para exportar.")
             return
 
         Path(folder).mkdir(parents=True, exist_ok=True)
@@ -1384,6 +1474,7 @@ class TabDirectividad(QWidget):
         sec  = self._sections[mode]
         path = str(Path(self._export_folder) / filename)
         self._export_dlg.setLabelText(f"Exportando: {filename}")
+        file_fmt = 'svg' if filename.endswith('.svg') else 'png'
 
         def _after_export(ok):
             self._export_done += 1
@@ -1398,9 +1489,9 @@ class TabDirectividad(QWidget):
             # loadFinished al que engancharse. Un margen fijo alcanza porque
             # Plotly.react() es casi instantáneo comparado a una recarga completa.
             QTimer.singleShot(250, lambda: sec.export_image(
-                path, dpi=self._export_dpi, on_done=_after_export))
+                path, dpi=self._export_dpi, fmt=file_fmt, on_done=_after_export))
         else:
-            sec.export_image(path, dpi=self._export_dpi, on_done=_after_export)
+            sec.export_image(path, dpi=self._export_dpi, fmt=file_fmt, on_done=_after_export)
 
     def apply_theme(self, palette: dict):
         """Propaga el cambio de tema a todas las secciones de visualización."""

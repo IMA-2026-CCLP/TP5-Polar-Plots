@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 from core.data_store import freq_label
+from plot.balloon import FONT_SIZE
 
 pg.setConfigOptions(antialias=True)
 
@@ -53,18 +54,26 @@ class SpectrumView(QWidget):
 
         self._placeholder = QLabel("Calculá la directividad\npara ver el espectro aquí.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setFont(QFont("IBM Plex Sans", 12))
+        self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
 
         self._plot = pg.PlotWidget()
         self._plot.setBackground('#ffffff')   # fondo fijo, ver tab_directividad.py
         self._plot.showGrid(x=False, y=True, alpha=0.15)
-        self._plot.setLabel('left', 'dB SPL')
+        self._plot.setLabel('left', 'dB SPL', color='#000000', **{'font-size': f'{FONT_SIZE}px'})
+        self._plot.setLabel('bottom', 'Frecuencia [Hz]', color='#000000', **{'font-size': f'{FONT_SIZE}px'})
+        tick_font = QFont("Segoe UI")
+        tick_font.setPixelSize(FONT_SIZE)
+        for ax in ('left', 'bottom'):          # ejes negros sobre el fondo blanco fijo
+            axis = self._plot.getAxis(ax)
+            axis.setPen('#000000')
+            axis.setTextPen('#000000')
+            axis.setStyle(tickFont=tick_font)
         self._plot.getPlotItem().setMenuEnabled(False)
         self._legend = None
 
         self._info_label = QLabel(self._plot)
         self._info_label.setStyleSheet(
-            "background: rgba(255,255,255,.9); color: #1a1a1a; "
+            "background: rgba(255,255,255,.9); color: #000000; "
             "border-radius: 6px; padding: 6px 10px; font-size: 9pt;"
         )
         self._info_label.move(8, 8)
@@ -96,6 +105,10 @@ class SpectrumView(QWidget):
         self._render()
 
     def set_view_mode(self, mode): pass
+
+    def set_unit(self, unit: str):
+        """'dB SPL' (calibrado) o 'dBFS' (sin calibrar)."""
+        self._plot.setLabel('left', unit, color='#000000', **{'font-size': f'{FONT_SIZE}px'})
     def set_band(self, band_index): pass
     def set_colorscale(self, name): pass
     def set_normalize(self, value): pass
@@ -125,20 +138,27 @@ class SpectrumView(QWidget):
 
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
         import pyqtgraph.exporters as pg_exporters
+        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
         try:
             if fmt == 'svg':
-                exporter = pg_exporters.SVGExporter(self._plot.getPlotItem())
+                from ui.export_utils import export_pg_svg
+                export_pg_svg(self._plot, path, dpi)
+                if on_done:
+                    on_done(True)
+                return
             else:
                 exporter = pg_exporters.ImageExporter(self._plot.getPlotItem())
-                scale = max(1, round(dpi / 96))
-                exporter.parameters()['width'] = int(self._plot.width() * scale)
+                # re-renderiza la escena (vectorial) a este ancho: nítido, no es una captura
+                exporter.parameters()['width'] = int(round(EXPORT_BASE_W * dpi / 96))
             exporter.export(path)
+            if fmt != 'svg':
+                set_png_dpi(path, dpi)
             if on_done:
-                on_done(True, path)
+                on_done(True)
         except Exception as e:
             self.log.emit(f"[ERROR] Exportando Espectro: {e}")
             if on_done:
-                on_done(False, str(e))
+                on_done(False)
 
     # ── Render ───────────────────────────────────────────────────────────
 

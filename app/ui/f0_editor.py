@@ -172,6 +172,7 @@ class F0EditorWidget(QWidget):
         self._lbl_status.setText(f"Calculando {az}°…")
 
         self._worker = Worker(self._run_f0, self._az_idx, self._theta)
+        self._worker.label = "Calculando F0…"
         self._worker.log.connect(self.log)
         self._worker.finished.connect(self._on_f0_done)
         self._worker.error.connect(self._on_f0_error)

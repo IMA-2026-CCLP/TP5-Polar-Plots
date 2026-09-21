@@ -1,8 +1,8 @@
 """
-ui/bridge.py — QObject expuesto al JS via QWebChannel.
+ui/bridge.py — Estado de los controles de la barra superior + slots que arman los parámetros de cada acción.
 
-El HTML llama a los slots de este objeto para notificar acciones del usuario.
-HtmlRibbon escucha las señales de este objeto y las reenvía a MainWindow.
+NativeRibbon guarda acá el valor de cada control (`state`), llama a estos slots al actuar
+el usuario y reenvía las señales resultantes a MainWindow.
 """
 import json
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -10,7 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 class Bridge(QObject):
 
-    # ── Python → JS (JS se subscribe con bridge.<sig>.connect(fn)) ───────────
+    # ── (heredado del ribbon HTML; NativeRibbon no los usa) ───────────────────
     statusUpdated    = pyqtSignal(str, bool)   # text, ok
     maLoaded         = pyqtSignal(str)          # JSON: {thetas, angles, is_spl}
     themeChanged     = pyqtSignal(str)          # JSON: paleta completa de theme.py
@@ -20,9 +20,11 @@ class Bridge(QObject):
     dirStatusChanged = pyqtSignal(str)          # status text
     enableBtn        = pyqtSignal(str, bool)    # html element id, enabled
 
-    # ── JS → Python (HtmlRibbon conecta a estas) ──────────────────────────────
+    # ── Acción del usuario → NativeRibbon reenvía a MainWindow ────────────────
     sig_tab_changed        = pyqtSignal(int)
+    sig_height             = pyqtSignal(int)
     sig_load_audio         = pyqtSignal()
+    sig_edit_patterns      = pyqtSignal()
     sig_save_tensor        = pyqtSignal()
     sig_load_tensor        = pyqtSignal()
     sig_load_polar_npz     = pyqtSignal()
@@ -32,7 +34,6 @@ class Bridge(QObject):
     sig_align_ref          = pyqtSignal(object)
     sig_align_preview      = pyqtSignal(float, float, object)
     sig_open_calibracion   = pyqtSignal()
-    sig_to_spl             = pyqtSignal()
     sig_plot_params        = pyqtSignal(object, object, bool, bool, object, float)
     sig_detect_notes       = pyqtSignal(float, float, float, float, object)
     sig_edit_scale         = pyqtSignal()
@@ -49,9 +50,9 @@ class Bridge(QObject):
         super().__init__(parent)
         # Estado actual de los controles del ribbon
         self.state = {
-            'tab':        3,
+            'tab':        0,
             'theta':      'ref',  'az':        'Todos',
-            'envelope':   True,   'db':         False,
+            'envelope':   True,   'db':         True,
             'smooth':     20.0,   'ymin':       None,   'ymax': None,
             'hpf_hz':     200.0,
             'onset':      1.0,    'thresh':    -40.0,   'window_ms': 50.0,
@@ -61,14 +62,18 @@ class Bridge(QObject):
             'colorscale': 'Plasma','el_idx':    None,
             'symmetry':   'none', 'nota':       'Todo el audio',
             'spec_data':  0,      'spec_global': True,
-            'view_3d':    False,  'view_sphere': True,
-            'view_polar2d': True, 'view_spectrum': False,
+            'view_3d':    True,   'view_sphere': True,
+            'view_polar2d': True, 'view_spectrum': True,
             'note_tol':   50.0,   'note_purity': 0.8,
             'note_start': 0.0,    'note_grad':   25.0,
             'note_theta': 'ref',
         }
 
     # ── Slots llamados desde JS ───────────────────────────────────────────────
+
+    @pyqtSlot(int)
+    def ribbonHeight(self, h):
+        self.sig_height.emit(h)
 
     @pyqtSlot(int)
     def tabClicked(self, idx):
@@ -78,6 +83,10 @@ class Bridge(QObject):
     @pyqtSlot()
     def loadAudio(self):
         self.sig_load_audio.emit()
+
+    @pyqtSlot()
+    def editPatterns(self):
+        self.sig_edit_patterns.emit()
 
     @pyqtSlot()
     def saveTensor(self):
@@ -146,10 +155,6 @@ class Bridge(QObject):
     @pyqtSlot()
     def openCalibracion(self):
         self.sig_open_calibracion.emit()
-
-    @pyqtSlot()
-    def toSpl(self):
-        self.sig_to_spl.emit()
 
     @pyqtSlot()
     def detectNotes(self):

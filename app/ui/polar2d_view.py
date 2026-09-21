@@ -19,7 +19,7 @@ from PyQt6.QtGui import QCursor, QFont
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QToolTip
 
 from core.symmetry_utils import apply_symmetry
-from plot.balloon import compute_polar2d_ring, _COMPARE_COLORS
+from plot.balloon import compute_polar2d_ring, _COMPARE_COLORS, FONT_SIZE
 
 pg.setConfigOptions(antialias=True)
 
@@ -30,6 +30,13 @@ _DASH_QT = {
     "dashdot": Qt.PenStyle.DashDotLine,
     "longdash": Qt.PenStyle.DashLine,
 }
+
+
+def _px_font(size) -> QFont:
+    """Fuente en PÍXELES (no puntos): así 12 se ve igual que en los otros gráficos (12 pt serían 16 px)."""
+    f = QFont("Segoe UI")
+    f.setPixelSize(int(size))
+    return f
 
 
 class Polar2DView(QWidget):
@@ -51,7 +58,7 @@ class Polar2DView(QWidget):
         self._show_info = True
         self._compare_bands = None
         self._compare_styles = {}
-        self._tick_font_size = 11
+        self._tick_font_size = FONT_SIZE
         self._style = {}
         self._min_db = None
         self._max_db = None
@@ -69,7 +76,7 @@ class Polar2DView(QWidget):
 
         self._placeholder = QLabel("Calculá la directividad\npara ver el patrón polar aquí.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setFont(QFont("IBM Plex Sans", 12))
+        self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
 
         self._plot = pg.PlotWidget()
         self._plot.setBackground('#ffffff')   # fondo fijo, ver tab_directividad.py
@@ -192,20 +199,27 @@ class Polar2DView(QWidget):
 
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
         import pyqtgraph.exporters as pg_exporters
+        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
         try:
             if fmt == 'svg':
-                exporter = pg_exporters.SVGExporter(self._plot.getPlotItem())
+                from ui.export_utils import export_pg_svg
+                export_pg_svg(self._plot, path, dpi)
+                if on_done:
+                    on_done(True)
+                return
             else:
                 exporter = pg_exporters.ImageExporter(self._plot.getPlotItem())
-                scale = max(1, round(dpi / 96))
-                exporter.parameters()['width'] = int(self._plot.width() * scale)
+                # re-renderiza la escena (vectorial) a este ancho: nítido, no es una captura
+                exporter.parameters()['width'] = int(round(EXPORT_BASE_W * dpi / 96))
             exporter.export(path)
+            if fmt != 'svg':
+                set_png_dpi(path, dpi)
             if on_done:
-                on_done(True, path)
+                on_done(True)
         except Exception as e:
             self.log.emit(f"[ERROR] Exportando Polar 2D: {e}")
             if on_done:
-                on_done(False, str(e))
+                on_done(False)
 
     # ── Render ───────────────────────────────────────────────────────────
 
@@ -253,7 +267,9 @@ class Polar2DView(QWidget):
 
         self._plot.clear()
         if self._legend is not None:
-            self._legend.scene().removeItem(self._legend)
+            scene = self._legend.scene()
+            if scene is not None:              # puede haber salido ya de la escena (plot.clear())
+                scene.removeItem(self._legend)
             self._legend = None
 
         ring_color = self._style.get('ring_color') or '#000000'
@@ -268,15 +284,17 @@ class Polar2DView(QWidget):
             self._plot.addItem(circle)
             label_ang = self._style.get('ring_label_angle', 92)
             lx, ly = to_xy(label_ang, r_ring)
-            txt = pg.TextItem(f"{db:g}", color=self._style.get('text_color') or '#5B6570', anchor=(0.5, 0.5))
-            txt.setFont(QFont("IBM Plex Mono", int(ring_font)))
+            # 'left'/'right': el número queda a un costado del punto del anillo (no encima de la línea)
+            anchor = {'left': (1.0, 0.5), 'right': (0.0, 0.5)}.get(self._style.get('ring_label_pos'), (0.5, 0.5))
+            txt = pg.TextItem(f"{db:g}", color=self._style.get('text_color') or '#000000', anchor=anchor)
+            txt.setFont(_px_font(ring_font))
             txt.setPos(lx, ly)
             self._plot.addItem(txt)
 
         for a in range(0, 360, 30):
             ax, ay = to_xy(a, 1.06)
-            txt = pg.TextItem(f"{a}°", color='#1B1F24', anchor=(0.5, 0.5))
-            txt.setFont(QFont("IBM Plex Mono", int(self._tick_font_size)))
+            txt = pg.TextItem(f"{a}°", color='#000000', anchor=(0.5, 0.5))
+            txt.setFont(_px_font(self._tick_font_size))
             txt.setPos(ax, ay)
             self._plot.addItem(txt)
             sx, sy = to_xy(a, 1.0)
