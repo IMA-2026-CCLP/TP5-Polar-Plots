@@ -8,14 +8,28 @@ from typing import Optional
 from core.data_store import freq_label
 
 
+def _cs(colors, reverse: bool = False) -> list:
+    """Lista de colores -> escala explícita [[pos, color], ...]. plotly.js sólo conoce por nombre unas pocas
+    escalas (Viridis, Cividis, Hot...); Plasma, Inferno, Magma o Turbo NO existen ahí y caían en el azul-blanco-rojo
+    por defecto: por eso "sólo Viridis cambiaba". Con listas explícitas funcionan todas."""
+    import plotly.colors as pc
+    cols = list(colors)[::-1] if reverse else list(colors)
+    return [[i / (len(cols) - 1), c] for i, c in enumerate(cols)]
+
+
+def _seq(name):
+    import plotly.colors as pc
+    return _cs(getattr(pc.sequential, name))
+
+
 COLORSCALES = {
-    "Viridis":  "Viridis",
-    "Plasma":   "Plasma",
-    "Inferno":  "Inferno",
+    "Viridis":  _seq("Viridis"),
+    "Plasma":   _seq("Plasma"),
+    "Inferno":  _seq("Inferno"),
+    "Magma":    _seq("Magma"),
+    "Cividis":  _seq("Cividis"),
+    "Turbo":    _seq("Turbo"),
     "Hot":      "Hot",
-    "RdYlBu":   "RdYlBu_r",
-    "Spectral": "Spectral_r",
-    "Turbo":    "Turbo",
 }
 
 # ── Helpers comunes ───────────────────────────────────────────────────────────
@@ -104,7 +118,7 @@ def _scene_layout(uirevision: str = "camera", grid_color: Optional[str] = None,
 def _colorbar(cs_name: str, text_color: Optional[str] = None) -> dict:
     txt = text_color or _TEXT_COL
     return {
-        "colorscale": COLORSCALES.get(cs_name, "Plasma"),
+        "colorscale": COLORSCALES.get(cs_name, COLORSCALES["Plasma"]),
         "colorbar": {
             "title": {"text": "dB", "side": "right"},
             "thickness": 16, "len": 0.6, "x": 0.92,
@@ -358,7 +372,7 @@ def _cap_mesh_trace(ring_X, ring_Y, ring_Z, apex_x, apex_y, apex_z,
         "i": i_tri, "j": j_tri, "k": k_tri,
         "intensity": colors.tolist(),
         "intensitymode": "vertex",
-        "colorscale": COLORSCALES.get(cs_name, "Plasma"),
+        "colorscale": COLORSCALES.get(cs_name, COLORSCALES["Plasma"]),
         "cmin": float(cmin), "cmax": float(cmax),
         "showscale": False,
         "hoverinfo": "skip",
@@ -680,7 +694,7 @@ def build_sphere_html(
         "i": i_tri, "j": j_tri, "k": k_tri,
         "intensity":     Cv.tolist(),
         "intensitymode": "vertex",
-        "colorscale":    COLORSCALES.get(colorscale, "Plasma"),
+        "colorscale":    COLORSCALES.get(colorscale, COLORSCALES["Plasma"]),
         "cmin": float(cmin), "cmax": float(cmax),
         "showscale": True,
         "colorbar": {
