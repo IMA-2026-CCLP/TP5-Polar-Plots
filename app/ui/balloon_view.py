@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtGui import QFont
 
 from plot.balloon import (
-    FONT_SIZE,
+    FONT_SIZE, PLOTLY_DIR,
     build_balloon_html,
     build_sphere_html,
     build_polar2d_html,
@@ -171,7 +171,7 @@ class BalloonView(QWidget):
 
     def _set_html_safe(self, html: str):
         self._html_loaded = False
-        self._web.setHtml(html)
+        self._web.setHtml(html, QUrl.fromLocalFile(PLOTLY_DIR + '/'))
 
     def _on_load_finished(self, ok: bool):
         self._html_loaded = ok
@@ -390,15 +390,13 @@ class BalloonView(QWidget):
 
         def _on_timeout():
             _cleanup()
-            if _retry:
-                self.export_image(path, dpi, fmt, on_done, _retry=False)
-                return
+            self.log.emit("[Dir] Plotly.toImage no respondió a tiempo — se usa captura de pantalla como respaldo.")
             self._export_via_grab(path, on_done)
 
         page.export_ready.connect(_on_ready)
         page.export_failed.connect(_on_failed)
         timeout_timer.timeout.connect(_on_timeout)
-        timeout_timer.start(10000)
+        timeout_timer.start(60000)   # a alta resolución el WebGL por software puede tardar varios segundos
 
         js = (
             "(function(){"

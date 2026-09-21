@@ -27,6 +27,10 @@ _FONT_CSS       = "Inter, 'Segoe UI', sans-serif"
 # Tamaño de fuente único (px) para números, etiquetas, leyendas y barras de color de los 4
 # gráficos: así se ven parejos entre paneles y en la imagen exportada.
 FONT_SIZE       = 12
+# plotly.js va incluido en la app (plot/vendor): funciona sin internet. Las páginas se cargan con
+# PLOTLY_BASE_URL como URL base para que el <script src> relativo lo encuentre.
+import os as _os
+PLOTLY_DIR      = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "vendor")
 _SPEC_BG        = "#1e2134"
 _RING_LINE      = "rgba(255,255,255,0.12)"
 _RING_TEXT      = "rgba(200,200,200,0.5)"
@@ -434,7 +438,7 @@ def _wrap_html(traces_json: str, layout_json: str, info_html: str,
 <body>
 <div id="plot"></div>
 <div id="info-overlay">{info_html}</div>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
+<script src="plotly-2.32.0.min.js" charset="utf-8"></script>
 <script>
 (function() {{
   var traces = {traces_json};
