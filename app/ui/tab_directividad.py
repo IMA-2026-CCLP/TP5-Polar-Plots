@@ -273,6 +273,7 @@ class _ViewSection(QWidget):
         en su atributo .color_hex — reutilizado en todas las secciones del
         diálogo de Propiedades."""
         btn = QPushButton()
+        btn.setAutoDefault(False)     # Enter en un campo del diálogo no debe 'apretar' el botón de color
         btn.setFixedSize(28, 20)
         btn.color_hex = self._to_qcolor(initial_color).name()
         btn.setStyleSheet(f"background:{btn.color_hex};border:1px solid #555;")
@@ -691,6 +692,7 @@ class _ViewSection(QWidget):
             row.setContentsMargins(0, 0, 0, 0)
 
             btn_color = QPushButton()
+            btn_color.setAutoDefault(False)
             btn_color.setFixedSize(28, 20)
             btn_color.color_hex = style.get('color', default_color)
             btn_color.setStyleSheet(f"background:{btn_color.color_hex};border:1px solid #555;")
@@ -1121,9 +1123,11 @@ class TabDirectividad(QWidget):
         build()
         row = QHBoxLayout()
         btn_reset = QPushButton("Restaurar por defecto")
+        btn_reset.setAutoDefault(False)
         btn_reset.setToolTip("Vuelve este gráfico a la configuración estándar del programa")
         btn_reset.clicked.connect(lambda: (sec.restore_defaults(), build()))
         btn_close = QPushButton("Cerrar")
+        btn_close.setAutoDefault(False)     # Enter mientras se escribe no cierra el diálogo
         btn_close.clicked.connect(dlg.accept)
         row.addWidget(btn_reset)
         row.addStretch(1)
