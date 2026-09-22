@@ -25,7 +25,8 @@ class Bridge(QObject):
     sig_height             = pyqtSignal(int)
     sig_load_audio         = pyqtSignal()
     sig_edit_patterns      = pyqtSignal()
-    sig_save_session       = pyqtSignal()       # sesión .cclp (sin audio)
+    sig_save_session       = pyqtSignal()       # sesión .cclp (sin audio) — sobrescribe si ya hay archivo
+    sig_save_session_as    = pyqtSignal()       # ídem, siempre pregunta la ruta
     sig_load_session       = pyqtSignal()
     sig_apply_hpf          = pyqtSignal(float)
     sig_align_takes        = pyqtSignal(float, float, object, float)
@@ -89,6 +90,10 @@ class Bridge(QObject):
     @pyqtSlot()
     def saveSession(self):
         self.sig_save_session.emit()
+
+    @pyqtSlot()
+    def saveSessionAs(self):
+        self.sig_save_session_as.emit()
 
     @pyqtSlot()
     def loadSession(self):

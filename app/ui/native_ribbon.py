@@ -66,6 +66,7 @@ class NativeRibbon(QWidget):
     sig_open_notas      = pyqtSignal()
     sig_open_options    = pyqtSignal(str)     # 'polar2d' | 'spectrum' | 'sphere' | '3d' | 'images'
     sig_save_session    = pyqtSignal()
+    sig_save_session_as = pyqtSignal()
     sig_load_session    = pyqtSignal()
     sig_apply_hpf        = pyqtSignal(float)
     sig_align_takes      = pyqtSignal(float, float, object, float)
@@ -124,7 +125,7 @@ class NativeRibbon(QWidget):
         b = self._b
         for name in (
             'tab_changed', 'sig_load_audio', 'sig_edit_patterns',
-            'sig_save_session', 'sig_load_session',
+            'sig_save_session', 'sig_save_session_as', 'sig_load_session',
             'sig_apply_hpf', 'sig_align_takes',
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
@@ -266,8 +267,9 @@ class NativeRibbon(QWidget):
         act('patterns',    "Patrones de archivos…", "Cómo se llaman los archivos de audio ({MIC} = micrófono, {H} = azimut)", b.editPatterns)
         self._make_view_actions()
         act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
-        act('load_session', "Cargar sesión (.cclp)…",  "Abre una sesión guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
-        act('save_session', "Guardar sesión (.cclp)…", "Guarda los gráficos ya calculados (global y por nota) y toda la interfaz, sin los audios", b.saveSession, False)
+        act('load_session', "Cargar…",  "Abre una sesión (.cclp) guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
+        act('save_session', "Guardar", "Guarda en el mismo archivo .cclp cargado o guardado antes; si todavía no hay ninguno, pregunta dónde (como 'Guardar como…')", b.saveSession, False)
+        act('save_session_as', "Guardar como…", "Guarda los gráficos ya calculados (global y por nota) y toda la interfaz, sin los audios, eligiendo el archivo .cclp", b.saveSessionAs, False)
         # "Cargar/Guardar directividad (.npz)…" se sacó del menú: la sesión .cclp ya cubre el mismo caso
         # (mismo contenido, sin audio) y guarda además toda la interfaz, no sólo Directividad.
         act('align_takes', "Alinear entre tomas (onset)…", "Opcional: alinea el inicio de cada toma para superponerlas en la vista de Procesamiento", lambda: self._dlg_takes.exec(), False)
@@ -351,7 +353,7 @@ class NativeRibbon(QWidget):
         for n in ('load_audio', 'patterns'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('load_session', 'save_session'):
+        for n in ('load_session', 'save_session', 'save_session_as'):
             m.addAction(self._act[n])
         m.addSeparator()
         m.addMenu("Exportar").addAction(self._act['export_all'])
@@ -716,7 +718,7 @@ class NativeRibbon(QWidget):
         self._fill(self._c_el, [("Auto (0°)", 0)] + [(f'{round(float(t))}°', i + 1) for i, t in enumerate(thetas)])
         self._c_el.setCurrentIndex(0)
         self._b.state['el_idx'] = None
-        for n in ('save_session', 'export_all'):
+        for n in ('save_session', 'save_session_as', 'export_all'):
             self._act[n].setEnabled(True)
 
     def set_dir_status(self, text: str):

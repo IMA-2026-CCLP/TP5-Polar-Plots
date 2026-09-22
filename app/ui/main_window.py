@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(QSS)
 
         self._ma       = None
+        self._session_path: str | None = None   # último .cclp guardado/cargado — "Guardar" reusa esto
         self._settings = QSettings("AcousticTools", "PolarAnalyzerV2")
         import plot.balloon as _balloon
         _balloon.set_theme(_theme.LIGHT)   # gráficos siempre en claro (fondo blanco), aunque la app esté en oscuro
@@ -133,6 +134,7 @@ class MainWindow(QMainWindow):
         rb.sig_open_notas.connect(self._open_notas)
         rb.sig_open_options.connect(self._open_graph_options)
         rb.sig_save_session.connect(self._on_save_session)
+        rb.sig_save_session_as.connect(self._on_save_session_as)
         rb.sig_load_session.connect(self._on_load_session)
 
         # ── Procesamiento
@@ -236,6 +238,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Cargar sesión", "", "Sesión CCLP (*.cclp)")
         if path:
             self._load_polar_npz_file(path)
+            self._session_path = path
 
     def _load_polar_npz_file(self, path: str):
         try:
@@ -260,6 +263,27 @@ class MainWindow(QMainWindow):
             self._append_log(f"[ERROR] Al cargar sesión: {e}")
 
     def _on_save_session(self):
+        """Guardar: si ya se guardó/cargó un .cclp en esta sesión de trabajo, sobrescribe ese mismo
+        archivo sin preguntar (como Ctrl+S en cualquier editor). Si no, se comporta como 'Guardar como…'."""
+        if self._session_path is None:
+            self._on_save_session_as()
+            return
+        ma = self._get_ma_for_session()
+        if ma is not None:
+            self._save_polar_npz_file(self._session_path, ma)
+
+    def _on_save_session_as(self):
+        ma = self._get_ma_for_session()
+        if ma is None:
+            return
+        start = self._session_path or (str(self._settings.value("last_polar_dir", "")) + "/sesion.cclp")
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar sesión como", start, "Sesión CCLP (*.cclp)")
+        if path:
+            self._settings.setValue("last_polar_dir", str(Path(path).parent))
+            self._save_polar_npz_file(path, ma)
+            self._session_path = path
+
+    def _get_ma_for_session(self):
         # OJO: self._ma sólo se actualiza al cargar/preprocesar/calibrar
         # audio (_on_ma_ready) — la directividad (global y por nota) se
         # calcula adentro de TabDirectividad, que mantiene su propia
@@ -274,12 +298,8 @@ class MainWindow(QMainWindow):
         if not has_global and not has_notes:
             self._append_log("[Sesión] Nada calculado todavía: no hay datos de gráficos para guardar "
                               "(usar Calcular en Directividad primero).")
-            return
-        start = str(self._settings.value("last_polar_dir", "")) + "/sesion.cclp"
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar sesión", start, "Sesión CCLP (*.cclp)")
-        if path:
-            self._settings.setValue("last_polar_dir", str(Path(path).parent))
-            self._save_polar_npz_file(path, ma)
+            return None
+        return ma
 
     def _save_polar_npz_file(self, path: str, ma):
         try:
