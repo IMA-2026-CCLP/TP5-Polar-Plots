@@ -74,7 +74,7 @@ class FileLoader(QObject):
     # ── Carga ─────────────────────────────────────────────────────────────
     def load_audio(self, parent=None):
         """Primero confirma los patrones de nombres de archivo (modal) y recién después pide la carpeta."""
-        if not self.edit_patterns(parent, "Cargar audio — patrones de nombres de archivo", "Ok, Cargar…"):
+        if not self.edit_patterns(parent, "Cargar audio — patrones de nombres de archivo", "Cargar…"):
             return
         path = QFileDialog.getExistingDirectory(
             parent, "Carpeta con los audios de la medición", str(self._settings.value("last_audio_dir", "")))
