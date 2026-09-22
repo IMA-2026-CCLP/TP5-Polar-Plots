@@ -5,8 +5,6 @@
     </clipPath>
   </defs>
 
-  <rect x="0" y="0" width="256" height="256" fill="#ffffff"/>
-
   <g clip-path="url(#hx2)">
     <path d="M128,58
              C174,58 210,90 210,130
