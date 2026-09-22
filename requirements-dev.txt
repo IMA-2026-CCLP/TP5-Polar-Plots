@@ -1,0 +1,4 @@
+# Para compilar el .exe y usar el notebook (pip install -r requirements-dev.txt)
+-r requirements.txt
+pyinstaller>=6.0
+ipython

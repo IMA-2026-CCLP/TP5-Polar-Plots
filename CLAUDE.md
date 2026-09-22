@@ -18,6 +18,7 @@ cd app && python main.py
 Install dependencies:
 ```bash
 pip install -r requirements.txt
+# (requirements-dev.txt adds pyinstaller/ipython; requirements-lock.txt is the exact frozen env)
 ```
 
 Build the Windows `.exe`:
