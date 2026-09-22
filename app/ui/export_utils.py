@@ -68,7 +68,7 @@ def set_png_dpi(path: str, dpi: float) -> None:
     dpm = int(round(dpi / 0.0254))
     img.setDotsPerMeterX(dpm)
     img.setDotsPerMeterY(dpm)
-    img.save(path, "PNG")
+    img.save(path)                 # formato por extensión (png/jpg/webp)
 
 
 def export_pg_svg(plot_widget, path: str, w: int, h: int) -> None:
@@ -96,7 +96,6 @@ def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) 
 
     Se re-renderiza en una COPIA fuera de pantalla con el tamaño del lienzo (no en el panel visible, que tiene el
     tamaño que le dé la ventana): así el resultado no depende de la ventana y no hay que tocar el layout."""
-    import pyqtgraph.exporters as pg_exporters
     from PyQt6.QtWidgets import QApplication
 
     w_cm, h_cm = size_cm or get_export_size_cm()
@@ -116,9 +115,19 @@ def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) 
         if fmt == 'svg':
             export_pg_svg(clone._plot, path, W, H)
         else:
-            exporter = pg_exporters.ImageExporter(clone._plot.getPlotItem())
-            exporter.parameters()['width'] = int(round(W * dpi / 96))
-            exporter.export(path)
+            # Píxeles EXACTOS = tamaño fijo × DPI/96 (el ImageExporter usa la proporción del PlotItem, no la del lienzo)
+            from PyQt6.QtCore import QRectF
+            from PyQt6.QtGui import QColor, QPainter
+            k = dpi / 96.0
+            img = QImage(int(round(W * k)), int(round(H * k)), QImage.Format.Format_ARGB32)
+            img.fill(QColor("#ffffff"))
+            p = QPainter(img)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+            clone._plot.scene().render(p, QRectF(0, 0, img.width(), img.height()),
+                                       clone._plot.getPlotItem().sceneBoundingRect())
+            p.end()
+            img.save(path)
             set_png_dpi(path, dpi)
     finally:
         clone.hide()

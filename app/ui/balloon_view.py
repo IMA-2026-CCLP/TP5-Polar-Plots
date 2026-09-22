@@ -379,7 +379,7 @@ class BalloonView(QWidget):
             try:
                 with open(path, 'wb') as f:
                     f.write(base64.b64decode(data_url.split(',', 1)[1]))
-                if fmt == 'png':
+                if fmt != 'svg':
                     set_png_dpi(path, dpi)
                 self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, escala {scale}×, {fmt})")
                 if on_done:

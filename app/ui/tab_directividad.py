@@ -1424,6 +1424,9 @@ class TabDirectividad(QWidget):
         if mode != "spectrum":
             bi   = min(self._current_band_idx, len(self._full_bands) - 1)
             freq = int(round(float(self._full_bands[bi])))
+            cmp_idx = [i for i in (self._sections[mode]._compare_indices or []) if i < len(self._full_bands)]
+            if mode == "polar2d" and len(cmp_idx) >= 2:      # comparación: todas las bandas superpuestas
+                freq = "-".join(str(int(round(float(self._full_bands[i])))) for i in sorted(cmp_idx))
             suggested = f"dir_{mode_label}_{freq}Hz_{nota}.png"
         else:
             suggested = f"dir_{mode_label}_{nota}.png"
