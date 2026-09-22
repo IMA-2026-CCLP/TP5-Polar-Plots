@@ -91,7 +91,7 @@ def export_pg_svg(plot_widget, path: str, w: int, h: int) -> None:
     p.end()
 
 
-_WIDTH_KEYS = ('line_width', 'ring_width', 'spoke_width', 'axis_line_width', 'err_width')
+_WIDTH_DEFAULTS = {'line_width': 2.5, 'ring_width': 1, 'spoke_width': 1, 'axis_line_width': 3, 'err_width': 2}
 
 
 def _scaled_style(style: dict, k: float) -> dict:
@@ -99,13 +99,14 @@ def _scaled_style(style: dict, k: float) -> dict:
 
     Las plumas de pyqtgraph son "cosméticas" (ancho fijo en píxeles del dispositivo): al agrandar el
     lienzo para más DPI no acompañan solas, y las líneas se ven cada vez más finas. Compensamos subiendo
-    el ancho en la misma proporción que los píxeles, para que el grosor físico (en cm) no cambie."""
+    el ancho en la misma proporción que los píxeles, para que el grosor físico (en cm) no cambie.
+    Se fija siempre (con el mismo valor por defecto que usa el pincel) porque la mayoría de estas claves
+    no están en `style` salvo que el usuario las haya tocado en Propiedades."""
     if k == 1:
         return style
     out = dict(style)
-    for key in _WIDTH_KEYS:
-        if key in out:
-            out[key] = float(out[key]) * k
+    for key, default in _WIDTH_DEFAULTS.items():
+        out[key] = float(out.get(key, default)) * k
     return out
 
 
