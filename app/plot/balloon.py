@@ -104,8 +104,10 @@ def _scene_layout(uirevision: str = "camera", grid_color: Optional[str] = None,
                   grid_width: float = 1, bg_color: Optional[str] = None) -> dict:
     color = grid_color or _GRID_COL
     bg    = bg_color or _DARK_BG
+    # title vacío: si no, Plotly rotula sus propios ejes "x", "y", "z" (en negrita y en las aristas del cubo, que
+    # no coinciden con los ejes del programa: X = frente 0°, Y = 90°, Z = cénit). Sólo se dibujan nuestros ejes.
     axis = {"showgrid": True, "gridcolor": color, "gridwidth": grid_width,
-            "zeroline": False, "showticklabels": False, "showspikes": False}
+            "zeroline": False, "showticklabels": False, "showspikes": False, "title": {"text": ""}}
     return {
         "paper_bgcolor": bg,
         "plot_bgcolor":  bg,
