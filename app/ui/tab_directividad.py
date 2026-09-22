@@ -1477,8 +1477,8 @@ class TabDirectividad(QWidget):
         modes : vistas a exportar (None = las 4).
         fmt   : 'png' o 'svg'; el SVG (vectorial) sólo aplica a Polar 2D; el resto sale en PNG.
 
-        Nombres: {prefix}_{freq}Hz_{vista}.png  (3D/Esfera/Polar2D)
-                 {prefix}_{vista}.png            (Espectro)
+        Nombres: {prefix}_{freq}Hz_{vista}_{dpi}dpi.png  (3D/Esfera/Polar2D)
+                 {prefix}_{vista}_{dpi}dpi.png            (Espectro)
         """
         if self._full_bands is None:
             self.log.emit("[Dir] Sin datos para exportar.")
@@ -1500,9 +1500,10 @@ class TabDirectividad(QWidget):
             for bi in band_indices:
                 freq = int(round(float(self._full_bands[bi])))
                 ext = "svg" if (fmt == "svg" and mode == "polar2d") else "png"
-                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}.{ext}"))
+                dpi_tag = "" if ext == "svg" else f"_{dpi}dpi"   # vectorial: el DPI no aplica
+                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}{dpi_tag}.{ext}"))
         if "spectrum" in modes:
-            tasks.append(("spectrum", None, f"{prefix}_{_MODE_LABELS['spectrum']}.png"))
+            tasks.append(("spectrum", None, f"{prefix}_{_MODE_LABELS['spectrum']}_{dpi}dpi.png"))
 
         if not tasks:
             self.log.emit("[Dir] No hay gráficos seleccionados para exportar.")
