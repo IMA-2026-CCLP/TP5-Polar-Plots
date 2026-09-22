@@ -91,6 +91,24 @@ def export_pg_svg(plot_widget, path: str, w: int, h: int) -> None:
     p.end()
 
 
+_WIDTH_KEYS = ('line_width', 'ring_width', 'spoke_width', 'axis_line_width', 'err_width')
+
+
+def _scaled_style(style: dict, k: float) -> dict:
+    """Copia de style con los *_width (y el 'width' de cada banda comparada) multiplicados por k.
+
+    Las plumas de pyqtgraph son "cosméticas" (ancho fijo en píxeles del dispositivo): al agrandar el
+    lienzo para más DPI no acompañan solas, y las líneas se ven cada vez más finas. Compensamos subiendo
+    el ancho en la misma proporción que los píxeles, para que el grosor físico (en cm) no cambie."""
+    if k == 1:
+        return style
+    out = dict(style)
+    for key in _WIDTH_KEYS:
+        if key in out:
+            out[key] = float(out[key]) * k
+    return out
+
+
 def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) -> None:
     """Exporta una vista pyqtgraph (Polar 2D / Espectro) a un tamaño físico fijo.
 
@@ -100,17 +118,21 @@ def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) 
 
     w_cm, h_cm = size_cm or get_export_size_cm()
     W, H = logical_px(w_cm), logical_px(h_cm)
+    k = dpi / 96.0
 
     clone = type(view)()
-    for k, v in view.__dict__.items():          # estado de datos/estilo (no los widgets)
+    for key, v in view.__dict__.items():          # estado de datos/estilo (no los widgets)
         if not isinstance(v, QObject):
-            setattr(clone, k, v)
+            setattr(clone, key, v)
     clone.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     clone.resize(W, H)
     clone.show()
+    if k != 1 and getattr(clone, '_compare_styles', None):   # Polar 2D: bandas comparadas, mismo motivo
+        clone._compare_styles = {b: {**st, 'width': float(st.get('width', 2.5)) * k}
+                                  for b, st in clone._compare_styles.items()}
     try:
         QApplication.processEvents()
-        clone.set_style(view._style)             # también aplica estilo de ejes/grilla y vuelve a dibujar
+        clone.set_style(_scaled_style(view._style, k))   # también aplica estilo de ejes/grilla y vuelve a dibujar
         QApplication.processEvents()
         if fmt == 'svg':
             export_pg_svg(clone._plot, path, W, H)
@@ -118,7 +140,6 @@ def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) 
             # Píxeles EXACTOS = tamaño fijo × DPI/96 (el ImageExporter usa la proporción del PlotItem, no la del lienzo)
             from PyQt6.QtCore import QRectF
             from PyQt6.QtGui import QColor, QPainter
-            k = dpi / 96.0
             img = QImage(int(round(W * k)), int(round(H * k)), QImage.Format.Format_ARGB32)
             img.fill(QColor("#ffffff"))
             p = QPainter(img)
