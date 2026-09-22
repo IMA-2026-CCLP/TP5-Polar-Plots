@@ -17,7 +17,7 @@ _DEF_REF   = "mic_ref_ang_forte_{H}.wav"
 
 
 class _PatternsDialog(QDialog):
-    def __init__(self, array_pattern: str, ref_pattern: str, parent=None):
+    def __init__(self, array_pattern: str, ref_pattern: str, parent=None, accept_text: str = "Aceptar"):
         super().__init__(parent)
         self.setWindowTitle("Patrones de nombres de archivo")
         self.setMinimumWidth(460)
@@ -36,6 +36,8 @@ class _PatternsDialog(QDialog):
         form.addRow("Referencia (opcional):", self.edit_ref)
         lay.addLayout(form)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText(accept_text)
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
@@ -58,9 +60,9 @@ class FileLoader(QObject):
         s = self._settings
         return (str(s.value("array_pattern", _DEF_ARRAY)), str(s.value("ref_pattern", _DEF_REF)))
 
-    def edit_patterns(self, parent=None, title: str | None = None) -> bool:
+    def edit_patterns(self, parent=None, title: str | None = None, accept_text: str = "Aceptar") -> bool:
         """Modal de patrones; guarda si se acepta. Devuelve True si se aceptó."""
-        dlg = _PatternsDialog(*self.patterns(), parent)
+        dlg = _PatternsDialog(*self.patterns(), parent, accept_text)
         if title:
             dlg.setWindowTitle(title)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -72,7 +74,7 @@ class FileLoader(QObject):
     # ── Carga ─────────────────────────────────────────────────────────────
     def load_audio(self, parent=None):
         """Primero confirma los patrones de nombres de archivo (modal) y recién después pide la carpeta."""
-        if not self.edit_patterns(parent, "Cargar audio — patrones de nombres de archivo"):
+        if not self.edit_patterns(parent, "Cargar audio — patrones de nombres de archivo", "Ok, Cargar…"):
             return
         path = QFileDialog.getExistingDirectory(
             parent, "Carpeta con los audios de la medición", str(self._settings.value("last_audio_dir", "")))
