@@ -1,4 +1,4 @@
-# Dependencias de la app (python app/main.py). Versiones minimas probadas; requirements-lock.txt tiene el entorno exacto.
+# Dependencias (pip install -r requirements.txt). Para compilar el .exe ademas: pip install pyinstaller
 PyQt6>=6.6
 PyQt6-WebEngine>=6.6
 numpy>=1.26
