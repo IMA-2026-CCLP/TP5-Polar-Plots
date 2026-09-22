@@ -415,8 +415,9 @@ class NativeRibbon(QWidget):
         QMessageBox.about(
             self.window(), "Acerca de",
             f"<b>{APP_NAME}</b> &nbsp;v{__version__}<br><br>"
-            "Análisis y visualización de la directividad polar de la voz cantada, "
-            "medida con un array semicircular de micrófonos.")
+            "GUI realizada para mediciones de patrón polar.<br><br>"
+            "Dudas, bugs o recomendaciones: "
+            "<a href=\"mailto:abellamasm@gmail.com\">abellamasm@gmail.com</a>")
 
     def _make_tabbar(self) -> QHBoxLayout:
         h = QHBoxLayout()
