@@ -135,10 +135,12 @@ class MainWindow(QMainWindow):
         # ── Archivo
         rb.sig_load_audio.connect(lambda: self.loader.load_audio(self))
         rb.sig_load_tensor.connect(lambda: self.loader.load_session(self))
+        rb.sig_save_tensor.connect(lambda: self.loader.save_session(self))
         rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
         rb.sig_open_notas.connect(self._open_notas)
         rb.sig_open_options.connect(self._open_graph_options)
-        rb.sig_save_tensor.connect(self._on_save_session)
+        rb.sig_save_session.connect(self._on_save_session)
+        rb.sig_load_session.connect(self._on_load_session)
         rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
         rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
 
@@ -237,8 +239,18 @@ class MainWindow(QMainWindow):
 
     # ── Slots de Archivo ──────────────────────────────────────────────────────
 
+    # Sesión (.cclp) y directividad (.npz) comparten el mismo contenido y las mismas funciones de
+    # guardado/carga (core/data_store.py) — la sesión se diferencia sólo en que además restaura el
+    # estado COMPLETO de la interfaz (full_ui=True), no sólo los controles de Directividad. Ninguna
+    # de las dos incluye audio: ver core/session.py.
+
     def _on_save_session(self):
-        self.loader.save_session(self, ui_state=self.ribbon._bridge.state.copy())
+        self._on_save_polar_npz(kind='session')
+
+    def _on_load_session(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Cargar sesión", "", "Sesión CCLP (*.cclp)")
+        if path:
+            self._load_polar_npz_file(path, full_ui=True)
 
     def _on_load_polar_npz(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -247,7 +259,7 @@ class MainWindow(QMainWindow):
         if path:
             self._load_polar_npz_file(path)
 
-    def _load_polar_npz_file(self, path: str):
+    def _load_polar_npz_file(self, path: str, full_ui: bool = False):
         try:
             data = load_results(path)
             view = data['metadata'].get('view') or {}
@@ -257,19 +269,22 @@ class MainWindow(QMainWindow):
             notes = self.view_dir.load_from_npz(data)
             self.ribbon.set_dir_computed(data['thetas'])
             self.ribbon.set_notes_loaded(notes)
-            if view.get('ui'):                       # controles como estaban al guardar
-                self.ribbon.apply_ui_state(view['ui'])
+            # session_ui (.cclp): todo el estado de la interfaz. Si no está (.npz viejo o de
+            # directividad "sin audios"), se cae a 'ui' (sólo los controles de Directividad).
+            ui_state = view.get('session_ui') if full_ui else None
+            if ui_state or view.get('ui'):
+                self.ribbon.apply_ui_state(ui_state or view['ui'])
             if view.get('view_dir'):                 # propiedades de cada gráfico
                 self.view_dir.apply_view_config(view['view_dir'])
             self.view_dir.apply_display_params(self.ribbon.get_dir_display_params())
             self.ribbon.set_dir_status(
                 f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
-            self._append_log(f"[Directividad] Cargado desde {path}")
+            self._append_log(f"[{'Sesión' if full_ui else 'Directividad'}] Cargado desde {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al cargar directividad: {e}")
+            self._append_log(f"[ERROR] Al cargar {'sesión' if full_ui else 'directividad'}: {e}")
 
-    def _on_save_polar_npz(self):
+    def _on_save_polar_npz(self, kind: str = 'npz'):
         # OJO: self._ma sólo se actualiza al cargar/preprocesar/calibrar
         # audio (_on_ma_ready) — la directividad (global y por nota) se
         # calcula adentro de TabDirectividad, que mantiene su propia
@@ -282,14 +297,18 @@ class MainWindow(QMainWindow):
         has_notes  = ma is not None and ma.notes and any(
             n.dir_levels is not None for n in ma.notes.values())
         if not has_global and not has_notes:
+            self._append_log("[Sesión] Nada calculado todavía: no hay datos de gráficos para guardar "
+                              "(usar Calcular en Directividad primero).")
             return
-        start = str(self._settings.value("last_polar_dir", "")) + "/directividad.npz"
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar directividad", start, "NPZ (*.npz)")
+        full_ui = kind == 'session'
+        ext, label, filt = ('cclp', "sesión", "Sesión CCLP (*.cclp)") if full_ui else ('npz', "directividad", "NPZ (*.npz)")
+        start = str(self._settings.value("last_polar_dir", "")) + f"/{label}.{ext}"
+        path, _ = QFileDialog.getSaveFileName(self, f"Guardar {label}", start, filt)
         if path:
             self._settings.setValue("last_polar_dir", str(Path(path).parent))
-            self._save_polar_npz_file(path, ma)
+            self._save_polar_npz_file(path, ma, full_ui=full_ui)
 
-    def _save_polar_npz_file(self, path: str, ma):
+    def _save_polar_npz_file(self, path: str, ma, full_ui: bool = False):
         try:
             rb = self.ribbon
             st = rb._bridge.state
@@ -297,6 +316,8 @@ class MainWindow(QMainWindow):
                 'ui': {k: st[k] for k in _DIR_UI_KEYS if k in st},
                 'view_dir': self.view_dir.get_view_config(),
             }
+            if full_ui:
+                view['session_ui'] = st.copy()   # sesión: todo el estado de la interfaz, no sólo Directividad
             save_results(
                 filepath       = path,
                 ma             = ma,
@@ -305,9 +326,9 @@ class MainWindow(QMainWindow):
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
                 view           = view,
             )
-            self._append_log(f"[Directividad] Guardado → {path}")
+            self._append_log(f"[{'Sesión' if full_ui else 'Directividad'}] Guardado → {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al guardar NPZ polar: {e}")
+            self._append_log(f"[ERROR] Al guardar {'sesión' if full_ui else 'NPZ polar'}: {e}")
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
 

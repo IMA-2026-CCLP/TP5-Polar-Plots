@@ -90,22 +90,20 @@ class FileLoader(QObject):
         self._start(_run, f"[Carga] Audios de {path}", "Cargando audios…")
 
     def load_session(self, parent=None):
+        """Carga un tensor de audio ya preprocesado (.npz, ver save_session) — sigue teniendo
+        audio y se puede reprocesar. Para la sesión liviana sin audio (.cclp) ver
+        MainWindow._on_load_session / core/session.py."""
         path, _ = QFileDialog.getOpenFileName(
-            parent, "Cargar sesión", "", "Sesión CCLP (*.cclp);;NPZ tensor (*.npz)")
+            parent, "Cargar audio procesado", "", "NPZ tensor (*.npz)")
         if not path:
             return
 
         def _run():
             from mic_array.patron import MicArray
-            from core.session import load_cclp
-            if path.endswith('.cclp'):
-                ma, ui_state = load_cclp(path)
-                self._loaded_ui_state = ui_state
-                return ma
             self._loaded_ui_state = {}
             return MicArray.from_tensor(path)
 
-        self._start(_run, f"[Carga] Sesión {path}", "Cargando sesión…")
+        self._start(_run, f"[Carga] Audio procesado {path}", "Cargando audio…")
 
     def _start(self, fn, msg: str, label: str):
         if self._worker and self._worker.isRunning():
@@ -124,20 +122,17 @@ class FileLoader(QObject):
         self.ma_ready.emit(ma)
 
     # ── Guardado ──────────────────────────────────────────────────────────
-    def save_session(self, parent=None, ui_state: dict | None = None):
+    def save_session(self, parent=None):
+        """Guarda el tensor de audio actual (con calibración) para resumir el preprocesamiento
+        más tarde sin los WAV originales. Para la sesión liviana sin audio (.cclp) ver
+        MainWindow._on_save_session / core/session.py."""
         if self._ma is None:
             return
-        path, selected_filter = QFileDialog.getSaveFileName(
-            parent, "Guardar sesión", "", "Sesión CCLP (*.cclp);;NPZ tensor (*.npz)")
+        path, _ = QFileDialog.getSaveFileName(
+            parent, "Guardar audio procesado", "", "NPZ tensor (*.npz)")
         if not path:
             return
-        # El diálogo nativo no siempre agrega la extensión del filtro elegido
-        # → si no la tipeó, se infiere del filtro, con .cclp como default.
-        if not path.lower().endswith(('.cclp', '.npz')):
-            path += '.npz' if 'npz' in selected_filter.lower() else '.cclp'
-        if path.lower().endswith('.cclp'):
-            from core.session import save_cclp
-            save_cclp(path, self._ma, ui_state or {})
-        else:
-            self._ma.save(path)
-        self.log.emit(f"[Carga] Sesión guardada → {path}")
+        if not path.lower().endswith('.npz'):
+            path += '.npz'
+        self._ma.save(path)
+        self.log.emit(f"[Carga] Audio procesado guardado → {path}")

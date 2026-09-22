@@ -27,6 +27,8 @@ class Bridge(QObject):
     sig_edit_patterns      = pyqtSignal()
     sig_save_tensor        = pyqtSignal()
     sig_load_tensor        = pyqtSignal()
+    sig_save_session       = pyqtSignal()       # sesión .cclp (sin audio)
+    sig_load_session       = pyqtSignal()
     sig_load_polar_npz     = pyqtSignal()
     sig_save_polar_npz     = pyqtSignal()
     sig_apply_hpf          = pyqtSignal(float)
@@ -96,6 +98,14 @@ class Bridge(QObject):
     @pyqtSlot()
     def loadTensor(self):
         self.sig_load_tensor.emit()
+
+    @pyqtSlot()
+    def saveSession(self):
+        self.sig_save_session.emit()
+
+    @pyqtSlot()
+    def loadSession(self):
+        self.sig_load_session.emit()
 
     @pyqtSlot()
     def loadPolarNpz(self):
