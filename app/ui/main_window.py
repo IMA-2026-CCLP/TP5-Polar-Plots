@@ -453,12 +453,13 @@ class MainWindow(QMainWindow):
         le_prefix = QLineEdit("directividad")
         form.addRow("Nombre base:", le_prefix)
 
-        le_folder = QLineEdit()
+        from ui.export_utils import get_last_export_dir, set_last_export_dir
+        le_folder = QLineEdit(get_last_export_dir())
         le_folder.setReadOnly(True)
         btn_browse = QPushButton("Examinar…")
 
         def _browse():
-            d = QFileDialog.getExistingDirectory(dlg, "Carpeta de destino")
+            d = QFileDialog.getExistingDirectory(dlg, "Carpeta de destino", le_folder.text())
             if d:
                 le_folder.setText(d)
         btn_browse.clicked.connect(_browse)
@@ -516,6 +517,7 @@ class MainWindow(QMainWindow):
         if not folder:
             self._append_log("[Dir] Exportación cancelada: no se eligió carpeta.")
             return
+        set_last_export_dir(folder)
 
         try:
             dpi = int(float(le_dpi.text().strip().replace(',', '.') or 300))

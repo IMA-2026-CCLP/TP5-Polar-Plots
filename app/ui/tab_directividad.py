@@ -1434,11 +1434,14 @@ class TabDirectividad(QWidget):
         # El SVG del Espectro no es fiel (las barras no se recortan al eje): sólo PNG/JPEG/WEBP
         filters = ("PNG (*.png);;JPEG (*.jpg);;WEBP (*.webp)" if mode == "spectrum"
                    else "PNG (*.png);;SVG vectorial (*.svg);;JPEG (*.jpg);;WEBP (*.webp)")
+        from ui.export_utils import get_last_export_dir, set_last_export_dir
+        start = str(Path(get_last_export_dir()) / suggested)
         path, selected_filter = QFileDialog.getSaveFileName(
-            self, "Guardar imagen", suggested, filters
+            self, "Guardar imagen", start, filters
         )
         if not path:
             return
+        set_last_export_dir(str(Path(path).parent))
 
         fmt_by_filter = {
             "PNG (*.png)": ("png", ".png"),

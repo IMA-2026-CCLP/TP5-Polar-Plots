@@ -4,7 +4,9 @@ Modelo: cada imagen tiene un TAMAÑO FÍSICO fijo (ancho × alto en cm, configur
 y el DPI sólo define cuántos píxeles tiene (calidad): píxeles = cm / 2,54 × DPI. Por defecto 16 × 10 cm, la
 misma proporción que tiene cada gráfico en la grilla de 4, y con las fuentes de 12 px (≈ 9 pt impresos).
 """
-from PyQt6.QtCore import QObject, QSettings, Qt
+from pathlib import Path
+
+from PyQt6.QtCore import QObject, QSettings, QStandardPaths, Qt
 from PyQt6.QtGui import QImage
 
 DEFAULT_SIZE_CM = (16.0, 10.0)
@@ -36,6 +38,27 @@ def set_export_size_cm(w: float, h: float) -> None:
     s = _settings()
     s.setValue("export/width_cm", float(w))
     s.setValue("export/height_cm", float(h))
+
+
+def get_last_export_dir() -> str:
+    """Última carpeta usada para guardar imágenes (persiste entre sesiones vía QSettings).
+
+    La primera vez (sin nada guardado todavía) usa Documentos, o Escritorio/home si no hay
+    Documentos en el sistema — nunca la carpeta del programa."""
+    saved = str(_settings().value("export/last_dir", ""))
+    if saved and Path(saved).is_dir():
+        return saved
+    for loc in (QStandardPaths.StandardLocation.DocumentsLocation,
+                QStandardPaths.StandardLocation.DesktopLocation,
+                QStandardPaths.StandardLocation.HomeLocation):
+        d = QStandardPaths.writableLocation(loc)
+        if d:
+            return d
+    return ""
+
+
+def set_last_export_dir(folder: str) -> None:
+    _settings().setValue("export/last_dir", folder)
 
 
 def get_export_defaults() -> tuple[int, str]:
