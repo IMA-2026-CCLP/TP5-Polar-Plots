@@ -308,9 +308,14 @@ class BalloonView(QWidget):
         preset = _CAMERA_PRESETS.get(view)
         if preset is None or self._view_mode not in ("3d", "sphere"):
             return
+        # Plotly.relayout() solo no alcanza cuando cambia el tipo de proyección (perspectiva ⇄
+        # ortográfica, como en "iso"): el canvas WebGL queda con el render roto hasta el próximo
+        # redibujado completo (por eso antes se "arreglaba solo" al cambiar de banda). Un
+        # Plotly.Plots.resize() después del relayout fuerza ese redibujado.
         js = (
             "Plotly.relayout(document.getElementById('plot'), "
             f"{{'scene.camera': {json.dumps(preset)}}})"
+            ".then(function(){ Plotly.Plots.resize(document.getElementById('plot')); });"
         )
         self._web.page().runJavaScript(js)
 
@@ -416,7 +421,16 @@ class BalloonView(QWidget):
             # La malla WebGL se rasteriza con plotGlPixelRatio (por defecto 2): se sube a la escala pedida
             # para que la superficie también salga nítida al ampliar (con tope por límites de la GPU).
             f"if(el._context) el._context.plotGlPixelRatio=Math.min(8, Math.max(2, {scale}));"
-            f"Plotly.toImage(el, {{format:'{fmt}', width:W, height:H, scale:{scale}}})"
+            # toImage() con width/height distintos re-renderiza el gráfico desde cero: si la cámara
+            # (zoom/rotación del mouse) sólo vive en el estado interno (_fullLayout) y no en el layout
+            # "oficial", ese re-render la ignora y siempre sale con el encuadre por defecto. Se la fija
+            # explícitamente antes de exportar para que la imagen muestre lo mismo que se ve en pantalla.
+            "var scene=el._fullLayout && el._fullLayout.scene;"
+            "var cam=scene && scene.camera;"
+            "var pre=cam ? Plotly.relayout(el, {'scene.camera': cam}) : Promise.resolve();"
+            "pre.then(function(){ return "
+            f"Plotly.toImage(el, {{format:'{fmt}', width:W, height:H, scale:{scale}}});"
+            "})"
             ".then(function(url){"
             "  var CHUNK=400000;"
             "  var n=Math.max(1, Math.ceil(url.length/CHUNK));"

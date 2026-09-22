@@ -381,14 +381,16 @@ class MainWindow(QMainWindow):
 
     def _on_save_mask(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar máscara de segmentos", "", "Máscara (*.json)"
+            self, "Guardar máscara de segmentos", "", "Máscara (*.msk)"
         )
         if path:
+            if not path.lower().endswith('.msk'):
+                path += '.msk'
             self.view_notas.save_mask(path)
 
     def _on_load_mask(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Cargar máscara de segmentos", "", "Máscara (*.json)"
+            self, "Cargar máscara de segmentos", "", "Máscara (*.msk);;JSON antiguo (*.json)"
         )
         if path:
             self.view_notas.load_mask(path)
