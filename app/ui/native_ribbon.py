@@ -67,9 +67,6 @@ class NativeRibbon(QWidget):
     sig_open_options    = pyqtSignal(str)     # 'polar2d' | 'spectrum' | 'sphere' | '3d' | 'images'
     sig_save_session    = pyqtSignal()
     sig_load_session    = pyqtSignal()
-    sig_load_polar_npz  = pyqtSignal()
-    sig_save_polar_npz  = pyqtSignal()
-
     sig_apply_hpf        = pyqtSignal(float)
     sig_align_takes      = pyqtSignal(float, float, object, float)
     sig_align_preview    = pyqtSignal(float, float, object)
@@ -84,7 +81,6 @@ class NativeRibbon(QWidget):
     sig_load_mask        = pyqtSignal()
 
     sig_compute_dir         = pyqtSignal(str, float, float, int, int)
-    sig_save_dir_npz        = pyqtSignal()
     sig_export_all_images   = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
 
@@ -129,10 +125,10 @@ class NativeRibbon(QWidget):
         for name in (
             'tab_changed', 'sig_load_audio', 'sig_edit_patterns',
             'sig_save_session', 'sig_load_session',
-            'sig_load_polar_npz', 'sig_save_polar_npz', 'sig_apply_hpf', 'sig_align_takes',
+            'sig_apply_hpf', 'sig_align_takes',
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
-            'sig_save_mask', 'sig_load_mask', 'sig_compute_dir', 'sig_save_dir_npz',
+            'sig_save_mask', 'sig_load_mask', 'sig_compute_dir',
             'sig_export_all_images', 'sig_dir_display_changed', 'sig_theme_toggled',
         ):
             src = 'sig_tab_changed' if name == 'tab_changed' else name
@@ -272,8 +268,8 @@ class NativeRibbon(QWidget):
         act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
         act('load_session', "Cargar sesión (.cclp)…",  "Abre una sesión guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
         act('save_session', "Guardar sesión (.cclp)…", "Guarda los gráficos ya calculados (global y por nota) y toda la interfaz, sin los audios", b.saveSession, False)
-        act('load_polar',  "Cargar directividad (sin audios)…", "Abre un .npz de directividad: los gráficos y su configuración, sin necesidad de los audios", b.loadPolarNpz)
-        act('save_polar',  "Guardar directividad (sin audios)…", "Guarda los resultados calculados y la configuración de los gráficos en un .npz (sin los audios)", b.savePolarNpz, False)
+        # "Cargar/Guardar directividad (.npz)…" se sacó del menú: la sesión .cclp ya cubre el mismo caso
+        # (mismo contenido, sin audio) y guarda además toda la interfaz, no sólo Directividad.
         act('align_takes', "Alinear entre tomas (onset)…", "Opcional: alinea el inicio de cada toma para superponerlas en la vista de Procesamiento", lambda: self._dlg_takes.exec(), False)
         act('align_mics',  "Alinear entre micrófonos (retardo)…", "Opcional: corrige el retardo de cada micrófono respecto al de referencia (GCC-PHAT)", lambda: self._dlg_mics.exec(), False)
         act('calibrar',    "Calibración…",    "Abre la calibración: al aplicarla, el tensor pasa a dB SPL automáticamente", b.openCalibracion, False)
@@ -355,7 +351,7 @@ class NativeRibbon(QWidget):
         for n in ('load_audio', 'patterns'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('load_session', 'save_session', 'load_polar', 'save_polar'):
+        for n in ('load_session', 'save_session'):
             m.addAction(self._act[n])
         m.addSeparator()
         m.addMenu("Exportar").addAction(self._act['export_all'])
@@ -719,7 +715,7 @@ class NativeRibbon(QWidget):
         self._fill(self._c_el, [("Auto (0°)", 0)] + [(f'{round(float(t))}°', i + 1) for i, t in enumerate(thetas)])
         self._c_el.setCurrentIndex(0)
         self._b.state['el_idx'] = None
-        for n in ('save_polar', 'save_session', 'export_all'):
+        for n in ('save_session', 'export_all'):
             self._act[n].setEnabled(True)
 
     def set_dir_status(self, text: str):

@@ -25,11 +25,6 @@ from ui.tab_directividad     import TabDirectividad
 from core.data_store         import load_results, save_results
 
 
-# Controles de Directividad que se guardan con el .npz para reabrir los gráficos igual
-_DIR_UI_KEYS = ('bands', 'hz_min', 'hz_max', 'ref_az', 'ref_th', 'colorscale', 'el_idx', 'polar_plane',
-                'show_info', 'symmetry', 'nota', 'spec_data', 'spec_global')
-
-
 class _NotasWindow(QWidget):
     """Ventana no modal de Notas: parámetros de detección arriba y la vista de segmentos/F0 abajo."""
     def __init__(self, params: QWidget, view: QWidget, parent=None):
@@ -139,8 +134,6 @@ class MainWindow(QMainWindow):
         rb.sig_open_options.connect(self._open_graph_options)
         rb.sig_save_session.connect(self._on_save_session)
         rb.sig_load_session.connect(self._on_load_session)
-        rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
-        rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
 
         # ── Procesamiento
         rb.sig_plot_params.connect(self._on_plot_params)
@@ -159,7 +152,6 @@ class MainWindow(QMainWindow):
 
         # ── Directividad
         rb.sig_compute_dir.connect(self._on_compute_dir)
-        rb.sig_save_dir_npz.connect(self._on_save_dir_npz)
         rb.sig_export_all_images.connect(self._on_export_all_images)
         rb.sig_dir_display_changed.connect(self._on_dir_display_changed)
 
@@ -237,27 +229,15 @@ class MainWindow(QMainWindow):
 
     # ── Slots de Archivo ──────────────────────────────────────────────────────
 
-    # Sesión (.cclp) y directividad (.npz) comparten el mismo contenido y las mismas funciones de
-    # guardado/carga (core/data_store.py) — la sesión se diferencia sólo en que además restaura el
-    # estado COMPLETO de la interfaz (full_ui=True), no sólo los controles de Directividad. Ninguna
-    # de las dos incluye audio: ver core/session.py.
-
-    def _on_save_session(self):
-        self._on_save_polar_npz(kind='session')
+    # Sesión .cclp: mismo contenido que la directividad .npz (core/data_store.py), sin audio, más
+    # el estado COMPLETO de la interfaz (no sólo los controles de Directividad). Ver core/session.py.
 
     def _on_load_session(self):
         path, _ = QFileDialog.getOpenFileName(self, "Cargar sesión", "", "Sesión CCLP (*.cclp)")
         if path:
-            self._load_polar_npz_file(path, full_ui=True)
-
-    def _on_load_polar_npz(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Cargar directividad", "", "NPZ (*.npz)"
-        )
-        if path:
             self._load_polar_npz_file(path)
 
-    def _load_polar_npz_file(self, path: str, full_ui: bool = False):
+    def _load_polar_npz_file(self, path: str):
         try:
             data = load_results(path)
             view = data['metadata'].get('view') or {}
@@ -267,22 +247,19 @@ class MainWindow(QMainWindow):
             notes = self.view_dir.load_from_npz(data)
             self.ribbon.set_dir_computed(data['thetas'])
             self.ribbon.set_notes_loaded(notes)
-            # session_ui (.cclp): todo el estado de la interfaz. Si no está (.npz viejo o de
-            # directividad "sin audios"), se cae a 'ui' (sólo los controles de Directividad).
-            ui_state = view.get('session_ui') if full_ui else None
-            if ui_state or view.get('ui'):
-                self.ribbon.apply_ui_state(ui_state or view['ui'])
-            if view.get('view_dir'):                 # propiedades de cada gráfico
+            if view.get('session_ui'):                # todo el estado de la interfaz
+                self.ribbon.apply_ui_state(view['session_ui'])
+            if view.get('view_dir'):                   # propiedades de cada gráfico
                 self.view_dir.apply_view_config(view['view_dir'])
             self.view_dir.apply_display_params(self.ribbon.get_dir_display_params())
             self.ribbon.set_dir_status(
                 f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
-            self._append_log(f"[{'Sesión' if full_ui else 'Directividad'}] Cargado desde {path}")
+            self._append_log(f"[Sesión] Cargado desde {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al cargar {'sesión' if full_ui else 'directividad'}: {e}")
+            self._append_log(f"[ERROR] Al cargar sesión: {e}")
 
-    def _on_save_polar_npz(self, kind: str = 'npz'):
+    def _on_save_session(self):
         # OJO: self._ma sólo se actualiza al cargar/preprocesar/calibrar
         # audio (_on_ma_ready) — la directividad (global y por nota) se
         # calcula adentro de TabDirectividad, que mantiene su propia
@@ -298,24 +275,20 @@ class MainWindow(QMainWindow):
             self._append_log("[Sesión] Nada calculado todavía: no hay datos de gráficos para guardar "
                               "(usar Calcular en Directividad primero).")
             return
-        full_ui = kind == 'session'
-        ext, label, filt = ('cclp', "sesión", "Sesión CCLP (*.cclp)") if full_ui else ('npz', "directividad", "NPZ (*.npz)")
-        start = str(self._settings.value("last_polar_dir", "")) + f"/{label}.{ext}"
-        path, _ = QFileDialog.getSaveFileName(self, f"Guardar {label}", start, filt)
+        start = str(self._settings.value("last_polar_dir", "")) + "/sesion.cclp"
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar sesión", start, "Sesión CCLP (*.cclp)")
         if path:
             self._settings.setValue("last_polar_dir", str(Path(path).parent))
-            self._save_polar_npz_file(path, ma, full_ui=full_ui)
+            self._save_polar_npz_file(path, ma)
 
-    def _save_polar_npz_file(self, path: str, ma, full_ui: bool = False):
+    def _save_polar_npz_file(self, path: str, ma):
         try:
             rb = self.ribbon
             st = rb._bridge.state
             view = {
-                'ui': {k: st[k] for k in _DIR_UI_KEYS if k in st},
-                'view_dir': self.view_dir.get_view_config(),
+                'view_dir':   self.view_dir.get_view_config(),
+                'session_ui': st.copy(),    # todo el estado de la interfaz, no sólo Directividad
             }
-            if full_ui:
-                view['session_ui'] = st.copy()   # sesión: todo el estado de la interfaz, no sólo Directividad
             save_results(
                 filepath       = path,
                 ma             = ma,
@@ -324,9 +297,9 @@ class MainWindow(QMainWindow):
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
                 view           = view,
             )
-            self._append_log(f"[{'Sesión' if full_ui else 'Directividad'}] Guardado → {path}")
+            self._append_log(f"[Sesión] Guardado → {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al guardar {'sesión' if full_ui else 'NPZ polar'}: {e}")
+            self._append_log(f"[ERROR] Al guardar sesión: {e}")
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
 
@@ -449,9 +422,6 @@ class MainWindow(QMainWindow):
             return False
         return clicked is btn_go
 
-    def _on_save_dir_npz(self):
-        self._on_save_polar_npz()
-
     def _on_export_all_images(self):
         if self.view_dir._full_bands is None:
             self._append_log("[Dir] Sin datos para exportar.")
@@ -558,14 +528,14 @@ class MainWindow(QMainWindow):
             return
         box = QMessageBox(self)
         box.setWindowTitle("Directividad calculada")
-        box.setText("¿Querés guardar el archivo de directividad?")
+        box.setText("¿Querés guardar la sesión?")
         box.setInformativeText("Así podés volver a ver los gráficos más adelante sin reprocesar los audios.")
         btn_save = box.addButton("Guardar…", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Ahora no", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(btn_save)
         box.exec()
         if box.clickedButton() is btn_save:
-            self._on_save_polar_npz()
+            self._on_save_session()
 
     def _on_dir_computed(self, thetas, status: str):
         self.ribbon.set_dir_computed(thetas)

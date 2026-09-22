@@ -27,8 +27,6 @@ class Bridge(QObject):
     sig_edit_patterns      = pyqtSignal()
     sig_save_session       = pyqtSignal()       # sesión .cclp (sin audio)
     sig_load_session       = pyqtSignal()
-    sig_load_polar_npz     = pyqtSignal()
-    sig_save_polar_npz     = pyqtSignal()
     sig_apply_hpf          = pyqtSignal(float)
     sig_align_takes        = pyqtSignal(float, float, object, float)
     sig_align_ref          = pyqtSignal(object)
@@ -41,7 +39,6 @@ class Bridge(QObject):
     sig_save_mask          = pyqtSignal()
     sig_load_mask          = pyqtSignal()
     sig_compute_dir        = pyqtSignal(str, float, float, int, int)
-    sig_save_dir_npz       = pyqtSignal()
     sig_export_all_images  = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
     sig_theme_toggled      = pyqtSignal()
@@ -96,14 +93,6 @@ class Bridge(QObject):
     @pyqtSlot()
     def loadSession(self):
         self.sig_load_session.emit()
-
-    @pyqtSlot()
-    def loadPolarNpz(self):
-        self.sig_load_polar_npz.emit()
-
-    @pyqtSlot()
-    def savePolarNpz(self):
-        self.sig_save_polar_npz.emit()
 
     @pyqtSlot(str)
     def updateState(self, json_str: str):
@@ -193,10 +182,6 @@ class Bridge(QObject):
             int(self.state.get('ref_az', 0)),
             int(self.state.get('ref_th', 0)),
         )
-
-    @pyqtSlot()
-    def saveDirNpz(self):
-        self.sig_save_dir_npz.emit()
 
     @pyqtSlot()
     def exportAllImages(self):
