@@ -669,9 +669,5 @@ class _CalibracionDialog(QDialog):
         self._cal_widget.ma_updated.connect(self.ma_updated)
         self._cal_widget.log.connect(self.log)
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        btns.rejected.connect(self.reject)
-
         lay = QVBoxLayout(self)
         lay.addWidget(self._cal_widget, 1)
-        lay.addWidget(btns)
