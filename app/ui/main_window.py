@@ -134,8 +134,6 @@ class MainWindow(QMainWindow):
         rb.tab_changed.connect(self._on_tab_changed)
         # ── Archivo
         rb.sig_load_audio.connect(lambda: self.loader.load_audio(self))
-        rb.sig_load_tensor.connect(lambda: self.loader.load_session(self))
-        rb.sig_save_tensor.connect(lambda: self.loader.save_session(self))
         rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
         rb.sig_open_notas.connect(self._open_notas)
         rb.sig_open_options.connect(self._open_graph_options)
@@ -588,18 +586,6 @@ class MainWindow(QMainWindow):
         self.view_prepro.set_ma(ma)
         self.view_notas.set_ma(ma)
         self.view_dir.set_ma(ma)
-
-        # Restaurar ui_state si viene de un .cclp — se excluyen los toggles
-        # view_3d/view_sphere/view_polar2d/view_spectrum: son preferencia de
-        # panel, no dato de sesión, y sesiones viejas guardadas antes de
-        # cambiar los defaults (sólo 2D+Esfera visibles) traían "true" para
-        # los 4, pisando el default nuevo apenas se disparaba el primer
-        # dirDisplayChanged (cambiar de nota, apagar Info, etc.).
-        ui = self.loader._loaded_ui_state
-        if ui:
-            ui = {k: v for k, v in ui.items() if not k.startswith('view_')}
-            self.ribbon._bridge.state.update(ui)
-            self.loader._loaded_ui_state = {}
 
         self.ribbon.set_ma_loaded(ma)
         if ma.notes:

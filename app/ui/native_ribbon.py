@@ -65,8 +65,6 @@ class NativeRibbon(QWidget):
     sig_edit_patterns   = pyqtSignal()
     sig_open_notas      = pyqtSignal()
     sig_open_options    = pyqtSignal(str)     # 'polar2d' | 'spectrum' | 'sphere' | '3d' | 'images'
-    sig_save_tensor     = pyqtSignal()
-    sig_load_tensor     = pyqtSignal()
     sig_save_session    = pyqtSignal()
     sig_load_session    = pyqtSignal()
     sig_load_polar_npz  = pyqtSignal()
@@ -129,7 +127,7 @@ class NativeRibbon(QWidget):
     def _wire(self):
         b = self._b
         for name in (
-            'tab_changed', 'sig_load_audio', 'sig_edit_patterns', 'sig_save_tensor', 'sig_load_tensor',
+            'tab_changed', 'sig_load_audio', 'sig_edit_patterns',
             'sig_save_session', 'sig_load_session',
             'sig_load_polar_npz', 'sig_save_polar_npz', 'sig_apply_hpf', 'sig_align_takes',
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
@@ -274,8 +272,6 @@ class NativeRibbon(QWidget):
         act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
         act('load_session', "Cargar sesión (.cclp)…",  "Abre una sesión guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
         act('save_session', "Guardar sesión (.cclp)…", "Guarda los gráficos ya calculados (global y por nota) y toda la interfaz, sin los audios", b.saveSession, False)
-        act('load_tensor', "Cargar audio procesado (.npz)…",  "Carga un tensor de audio ya preprocesado, guardado antes con 'Guardar audio procesado'", b.loadTensor)
-        act('save_tensor', "Guardar audio procesado (.npz)…", "Guarda el audio (con calibración) para resumir el preprocesamiento más tarde sin los WAV originales", b.saveTensor, False)
         act('load_polar',  "Cargar directividad (sin audios)…", "Abre un .npz de directividad: los gráficos y su configuración, sin necesidad de los audios", b.loadPolarNpz)
         act('save_polar',  "Guardar directividad (sin audios)…", "Guarda los resultados calculados y la configuración de los gráficos en un .npz (sin los audios)", b.savePolarNpz, False)
         act('align_takes', "Alinear entre tomas (onset)…", "Opcional: alinea el inicio de cada toma para superponerlas en la vista de Procesamiento", lambda: self._dlg_takes.exec(), False)
@@ -356,7 +352,7 @@ class NativeRibbon(QWidget):
     def _make_menubar(self) -> QMenuBar:
         mb = QMenuBar()
         m = mb.addMenu("&Archivo")
-        for n in ('load_audio', 'patterns', 'load_tensor', 'save_tensor'):
+        for n in ('load_audio', 'patterns'):
             m.addAction(self._act[n])
         m.addSeparator()
         for n in ('load_session', 'save_session', 'load_polar', 'save_polar'):
@@ -694,7 +690,6 @@ class NativeRibbon(QWidget):
         self._act['calibrar'].setEnabled(True)
         self._act['align_takes'].setEnabled(True)
         self._act['align_mics'].setEnabled(True)
-        self._act['save_tensor'].setEnabled(True)
 
         sr = getattr(ma, 'sr', 0) // 1000
         self._chip_last = (f"{len(angles)} × {len(thetas)} · {sr} kHz" + (' · SPL ✓' if is_spl else ''), True)

@@ -53,7 +53,6 @@ class FileLoader(QObject):
         self._settings = settings
         self._worker: Worker | None = None
         self._ma = None
-        self._loaded_ui_state: dict = {}
 
     # ── Patrones ──────────────────────────────────────────────────────────
     def patterns(self) -> tuple[str, str]:
@@ -89,22 +88,6 @@ class FileLoader(QObject):
 
         self._start(_run, f"[Carga] Audios de {path}", "Cargando audios…")
 
-    def load_session(self, parent=None):
-        """Carga un tensor de audio ya preprocesado (.npz, ver save_session) — sigue teniendo
-        audio y se puede reprocesar. Para la sesión liviana sin audio (.cclp) ver
-        MainWindow._on_load_session / core/session.py."""
-        path, _ = QFileDialog.getOpenFileName(
-            parent, "Cargar audio procesado", "", "NPZ tensor (*.npz)")
-        if not path:
-            return
-
-        def _run():
-            from mic_array.patron import MicArray
-            self._loaded_ui_state = {}
-            return MicArray.from_tensor(path)
-
-        self._start(_run, f"[Carga] Audio procesado {path}", "Cargando audio…")
-
     def _start(self, fn, msg: str, label: str):
         if self._worker and self._worker.isRunning():
             return
@@ -121,18 +104,3 @@ class FileLoader(QObject):
         self.log.emit(f"[Carga] Tensor listo — {ma.tensor.shape}")
         self.ma_ready.emit(ma)
 
-    # ── Guardado ──────────────────────────────────────────────────────────
-    def save_session(self, parent=None):
-        """Guarda el tensor de audio actual (con calibración) para resumir el preprocesamiento
-        más tarde sin los WAV originales. Para la sesión liviana sin audio (.cclp) ver
-        MainWindow._on_save_session / core/session.py."""
-        if self._ma is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            parent, "Guardar audio procesado", "", "NPZ tensor (*.npz)")
-        if not path:
-            return
-        if not path.lower().endswith('.npz'):
-            path += '.npz'
-        self._ma.save(path)
-        self.log.emit(f"[Carga] Audio procesado guardado → {path}")
