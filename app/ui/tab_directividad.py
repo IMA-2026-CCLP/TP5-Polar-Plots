@@ -23,7 +23,8 @@ from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
 from ui.widgets import NumEdit as _NumEdit
-from plot.balloon import COLORSCALES, _COMPARE_COLORS, FONT_SIZE
+from plot.balloon import (COLORSCALES, _COMPARE_COLORS, FONT_SIZE, DEFAULT_SMOOTH_METHOD, DEFAULT_SMOOTH_WINDOW,
+                          DEFAULT_INTERP_KIND, DEFAULT_INTERP_DEG)
 from core.data_store import freq_label
 from core.worker import Worker, begin as _begin, end as _end, report as _report
 
@@ -51,8 +52,10 @@ _DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
 # acompaña al bg_color para que las etiquetas no queden claras sobre
 # fondo blanco si la app está en tema oscuro.
 _DEFAULT_STYLE_BY_MODE = {
-    "3d":       {"bg_color": "#ffffff", "text_color": "#000000"},
-    "sphere":   {"bg_color": "#ffffff", "text_color": "#000000"},
+    "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
+    "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -62,10 +65,10 @@ _DEFAULT_STYLE_BY_MODE = {
         "ring_label_angle": 45.0,
         "legend_font_size": FONT_SIZE,
         "line_width":       2.5,
-        "smoothing_method": "savgol",
-        "smoothing_window": 3,
-        "interp_kind":      "cubic",
-        "interp_deg":       2.0,
+        "smoothing_method": DEFAULT_SMOOTH_METHOD,
+        "smoothing_window": DEFAULT_SMOOTH_WINDOW,
+        "interp_kind":      DEFAULT_INTERP_KIND,
+        "interp_deg":       DEFAULT_INTERP_DEG,
     },
     "spectrum": {"bg_color": "#ffffff", "text_color": "#000000", "bar_color": "#146B64"},
 }
@@ -144,8 +147,8 @@ class _ComputeAllWorker(QThread):
 
 
 class _CompareEditor(QGroupBox):
-    """Pestaña "Comparación" del Polar 2D: qué bandas superponer, color/grosor/tipo de cada curva y la leyenda.
-    Todo dentro de Propiedades; los cambios se avisan por on_change (edición en vivo)."""
+    """Pestaña "Comparación" del Polar 2D: lista en 2 columnas, una fila por banda con [activar] [color] [grosor]
+    [tipo de línea], más la leyenda. Sin deslizables. Los cambios se avisan por on_change (edición en vivo)."""
 
     _POS = [("Arriba a la derecha", "top-right"), ("Arriba a la izquierda", "top-left"),
             ("Abajo a la derecha", "bottom-right"), ("Abajo a la izquierda", "bottom-left")]
@@ -153,35 +156,48 @@ class _CompareEditor(QGroupBox):
     def __init__(self, sec, dlg, parent=None):
         super().__init__("Comparación", parent)
         self.on_change = None
-        self._sec, self._dlg = sec, dlg
-        self._styles = {int(k): dict(v) for k, v in sec._compare_styles.items()}
-        self._bands = sec.view._bands
+        bands = sec.view._bands
+        n = 0 if bands is None else len(bands)
+        styles = {int(k): v for k, v in sec._compare_styles.items()}
+        sel = set(sec._compare_indices or [])
+
         lay = QVBoxLayout(self)
         lay.setSpacing(6)
-        lay.addWidget(QLabel("Bandas a superponer (marcá dos o más):"))
+        lay.addWidget(QLabel("Activá dos o más bandas para superponerlas y elegí cómo se dibuja cada una:"))
         grid = QGridLayout()
-        grid.setSpacing(2)
-        self._checks = {}
-        sel = set(sec._compare_indices or [])
-        n = 0 if self._bands is None else len(self._bands)
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(3)
+        self._rows = {}                        # banda -> (check, color, grosor, tipo)
+        per_col = (n + 1) // 2
         for i in range(n):
-            cb = QCheckBox(freq_label(float(self._bands[i])))
+            st = styles.get(i, {})
+            cb = QCheckBox(f"{freq_label(float(bands[i]))} Hz")
+            cb.setMinimumWidth(78)
             cb.setChecked(i in sel)
-            cb.toggled.connect(self._selection_changed)
-            self._checks[i] = cb
-            grid.addWidget(cb, i // 6, i % 6)
+            btn = sec._make_color_button(dlg, st.get('color', _COMPARE_COLORS[i % len(_COMPARE_COLORS)]))
+            w = _NumEdit()
+            w.setFixedWidth(44)
+            w.setRange(0.5, 10.0)
+            w.setValue(st.get('width', 2.5))
+            w.setToolTip("Grosor de la línea")
+            dash = QComboBox()
+            dash.addItems(_DASH_STYLES)
+            dash.setCurrentText(st.get('dash', 'solid'))
+            dash.setToolTip("Tipo de línea")
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(6)
+            for x in (cb, btn, w, dash):
+                h.addWidget(x)
+            grid.addWidget(row, i % per_col, i // per_col)
+            self._rows[i] = (cb, btn, w, dash)
+            cb.toggled.connect(lambda on, k=i: self._toggled(k, on))
+            btn.on_change = self._changed
+            w.textChanged.connect(self._changed)
+            dash.currentTextChanged.connect(self._changed)
+            self._set_row_enabled(i, i in sel)
         lay.addLayout(grid)
-
-        self._rows_box = QVBoxLayout()
-        self._rows_box.setSpacing(4)
-        holder = QWidget()
-        holder.setLayout(self._rows_box)
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._scroll.setWidget(holder)
-        self._scroll.setMaximumHeight(150)
-        lay.addWidget(self._scroll)
 
         form = QFormLayout()
         self._show = QCheckBox("Mostrar leyenda")
@@ -195,48 +211,14 @@ class _CompareEditor(QGroupBox):
         form.addRow(self._show)
         form.addRow("Posición de la leyenda:", self._pos)
         lay.addLayout(form)
-        self._rows = {}
-        self._rebuild_rows()
 
-    def _selected(self) -> list:
-        return [i for i, cb in self._checks.items() if cb.isChecked()]
+    def _set_row_enabled(self, i, on):
+        _, btn, w, dash = self._rows[i]
+        for x in (btn, w, dash):
+            x.setEnabled(on)
 
-    def _collect(self):
-        for i, (btn, w, dash) in self._rows.items():
-            self._styles[i] = {'color': btn.color_hex, 'width': w.value(), 'dash': dash.currentText()}
-
-    def _rebuild_rows(self):
-        self._collect()
-        while self._rows_box.count():
-            it = self._rows_box.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
-        self._rows = {}
-        for pos, i in enumerate(self._selected()):
-            st = self._styles.get(i, {})
-            row = QWidget()
-            h = QHBoxLayout(row)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.addWidget(QLabel(f"{freq_label(float(self._bands[i]))} Hz"), 1)
-            btn = self._sec._make_color_button(self._dlg, st.get('color', _COMPARE_COLORS[pos % len(_COMPARE_COLORS)]))
-            btn.on_change = self._changed
-            w = _NumEdit()
-            w.setRange(0.5, 10.0)
-            w.setValue(st.get('width', 2.5))
-            w.setToolTip("Grosor de la línea")
-            w.textChanged.connect(self._changed)
-            dash = QComboBox()
-            dash.addItems(_DASH_STYLES)
-            dash.setCurrentText(st.get('dash', 'solid'))
-            dash.setToolTip("Tipo de línea")
-            dash.currentTextChanged.connect(self._changed)
-            for x in (btn, w, dash):
-                h.addWidget(x)
-            self._rows_box.addWidget(row)
-            self._rows[i] = (btn, w, dash)
-
-    def _selection_changed(self, *_):
-        self._rebuild_rows()
+    def _toggled(self, i, on):
+        self._set_row_enabled(i, on)
         self._changed()
 
     def _changed(self, *_):
@@ -244,11 +226,11 @@ class _CompareEditor(QGroupBox):
             self.on_change()
 
     def state(self):
-        """(bandas elegidas, {banda: estilo}, {'pos':…, 'show':…})"""
-        self._collect()
-        sel = self._selected()
-        return sel, {i: self._styles[i] for i in sel if i in self._styles}, \
-            {'pos': self._pos.currentData(), 'show': self._show.isChecked()}
+        """(bandas activas, {banda: estilo}, {'pos':…, 'show':…})"""
+        sel = [i for i, (cb, *_r) in self._rows.items() if cb.isChecked()]
+        styles = {i: {'color': self._rows[i][1].color_hex, 'width': self._rows[i][2].value(),
+                      'dash': self._rows[i][3].currentText()} for i in sel}
+        return sel, styles, {'pos': self._pos.currentData(), 'show': self._show.isChecked()}
 
 
 class _ViewSection(QWidget):
@@ -491,7 +473,7 @@ class _ViewSection(QWidget):
             form_interp = QFormLayout(box_interp)
             spin_interp_deg = _NumEdit()
             spin_interp_deg.setRange(0.5, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', 2.0))
+            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
             spin_interp_deg.setToolTip(
                 "Qué tan fina se dibuja la superficie entre los puntos medidos.\n"
                 "No cambia los datos, sólo el dibujo.\n"
@@ -512,7 +494,7 @@ class _ViewSection(QWidget):
             combo_smooth_method_3d = QComboBox()
             combo_smooth_method_3d.setMaximumWidth(120)
             combo_smooth_method_3d.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method_3d.setCurrentText(self._style.get('smoothing_method', 'gaussian'))
+            combo_smooth_method_3d.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
             combo_smooth_method_3d.setToolTip(
                 "Mismo suavizado circular que el Polar 2D, aplicado en la\n"
                 "dirección de azimuth (cada anillo horizontal de la esfera),\n"
@@ -527,7 +509,7 @@ class _ViewSection(QWidget):
             spin_smooth_win_3d = _NumEdit()
             spin_smooth_win_3d.setDecimals(0)
             spin_smooth_win_3d.setRange(0, 15); spin_smooth_win_3d.setSingleStep(1)
-            spin_smooth_win_3d.setValue(self._style.get('smoothing_window', 0))
+            spin_smooth_win_3d.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
             spin_smooth_win_3d.setToolTip(
                 "Cantidad de puntos vecinos que se promedian entre sí, sobre cada\n"
                 "anillo de azimuth. 0 = SIN SUAVIZAR (recomendado para empezar).\n"
@@ -639,7 +621,7 @@ class _ViewSection(QWidget):
             combo_smooth_method = QComboBox()
             combo_smooth_method.setMaximumWidth(120)
             combo_smooth_method.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method.setCurrentText(self._style.get('smoothing_method', 'gaussian'))
+            combo_smooth_method.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
             combo_smooth_method.setToolTip(
                 "Sólo importa si la 'Intensidad' de abajo es mayor a 0.\n"
                 "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
@@ -653,7 +635,7 @@ class _ViewSection(QWidget):
             spin_smooth_win = _NumEdit()
             spin_smooth_win.setDecimals(0)
             spin_smooth_win.setRange(0, 15); spin_smooth_win.setSingleStep(1)
-            spin_smooth_win.setValue(self._style.get('smoothing_window', 0))
+            spin_smooth_win.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
             spin_smooth_win.setToolTip(
                 "Cantidad de puntos vecinos que se promedian entre sí.\n"
                 "0 = SIN SUAVIZAR (recomendado para empezar — dejalo así\n"
@@ -666,7 +648,7 @@ class _ViewSection(QWidget):
             combo_interp = QComboBox()
             combo_interp.setMaximumWidth(120)
             combo_interp.addItems(['cubic', 'quadratic', 'linear', 'none'])
-            combo_interp.setCurrentText(self._style.get('interp_kind', 'cubic'))
+            combo_interp.setCurrentText(self._style.get('interp_kind', DEFAULT_INTERP_KIND))
             combo_interp.setToolTip(
                 "No cambia los datos medidos, sólo cómo se dibuja la curva entre puntos.\n"
                 "cubic: recomendado, curva natural (por defecto).\n"
@@ -678,7 +660,7 @@ class _ViewSection(QWidget):
             form_interp.addRow("Tipo de interpolación:", combo_interp)
             spin_interp_deg = _NumEdit()
             spin_interp_deg.setRange(0.1, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', 1.0))
+            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
             spin_interp_deg.setToolTip(
                 "Qué tan fina se dibuja la curva. No cambia los datos.\n"
                 "Recomendado: dejar en 1 (por defecto).\n"

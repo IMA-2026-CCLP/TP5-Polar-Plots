@@ -41,6 +41,13 @@ _FONT_CSS       = "Inter, 'Segoe UI', sans-serif"
 # Tamaño de fuente único (px) para números, etiquetas, leyendas y barras de color de los 4
 # gráficos: así se ven parejos entre paneles y en la imagen exportada.
 FONT_SIZE       = 12
+# Suavizado/interpolación por defecto, iguales para Polar 2D, Superficie 3D y Esfera. Gaussiano ventana 3
+# (σ = 1 punto ≈ 10°): suaviza el escalón entre puntos medidos sin borrar lóbulos ni nulos ni crear ondulaciones.
+# (Savitzky-Golay con ventana 3 y polinomio de orden 2 no suaviza nada: el filtro es la identidad.)
+DEFAULT_SMOOTH_METHOD = 'gaussian'
+DEFAULT_SMOOTH_WINDOW = 3
+DEFAULT_INTERP_KIND   = 'cubic'
+DEFAULT_INTERP_DEG    = 2.0
 # plotly.js va incluido en la app (plot/vendor): funciona sin internet. Las páginas se cargan con
 # PLOTLY_BASE_URL como URL base para que el <script src> relativo lo encuentre.
 import os as _os
@@ -234,8 +241,8 @@ def _build_hemisphere_grid(
     thetas:           np.ndarray,
     interp_deg:       Optional[float] = 2.0,
     smoothing:        float = 0.0,
-    smoothing_method: str = 'gaussian',
-    smoothing_window: int = 0,
+    smoothing_method: str = DEFAULT_SMOOTH_METHOD,
+    smoothing_window: int = DEFAULT_SMOOTH_WINDOW,
 ) -> tuple:
     """
     Grilla hemisférica (n_elev × n_phi) en dB, idem plot_polar_3d en patron.py.
@@ -560,10 +567,10 @@ def build_balloon_html(
 
     R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
         lev_2d, azimuths, elevations,
-        interp_deg=style.get('interp_deg', 2.0),
+        interp_deg=style.get('interp_deg', DEFAULT_INTERP_DEG),
         smoothing=style.get('smoothing', 0.0),
-        smoothing_method=style.get('smoothing_method', 'gaussian'),
-        smoothing_window=int(style.get('smoothing_window', 0)),
+        smoothing_method=style.get('smoothing_method', DEFAULT_SMOOTH_METHOD),
+        smoothing_window=int(style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW)),
     )
 
     cmin = min_db if min_db is not None else vmin
@@ -641,10 +648,10 @@ def build_sphere_html(
 
     R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
         lev_2d, azimuths, elevations,
-        interp_deg=style.get('interp_deg', 2.0),
+        interp_deg=style.get('interp_deg', DEFAULT_INTERP_DEG),
         smoothing=style.get('smoothing', 0.0),
-        smoothing_method=style.get('smoothing_method', 'gaussian'),
-        smoothing_window=int(style.get('smoothing_window', 0)),
+        smoothing_method=style.get('smoothing_method', DEFAULT_SMOOTH_METHOD),
+        smoothing_window=int(style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW)),
     )
 
     cmin = min_db if min_db is not None else vmin
@@ -830,14 +837,14 @@ def compute_polar2d_ring(lev_2d, band_index, band_hz, azimuths, elevations,
     )
 
     # ── Suavizado circular opcional (previo a interpolar) ─────────────────
-    smoothing_window = int(style.get('smoothing_window', 0))
-    smoothing_method = style.get('smoothing_method', 'gaussian')
+    smoothing_window = int(style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
+    smoothing_method = style.get('smoothing_method', DEFAULT_SMOOTH_METHOD)
     if smoothing_window >= 2:
         r_full = _smooth_circular(r_full, smoothing_window, method=smoothing_method)
 
     # ── Interpolación 1D (idem plot_polar_2d en patron.py) ───────────────
-    interp_kind = style.get('interp_kind', 'cubic')
-    interp_deg  = style.get('interp_deg', 1.0)
+    interp_kind = style.get('interp_kind', DEFAULT_INTERP_KIND)
+    interp_deg  = style.get('interp_deg', DEFAULT_INTERP_DEG)
     try:
         if interp_kind == 'none' or not interp_deg:
             raise ValueError("interpolación desactivada")
