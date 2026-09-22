@@ -262,7 +262,8 @@ class Polar2DView(QWidget):
                               style=_DASH_QT.get(st.get('ring_dash', 'dot'), Qt.PenStyle.DotLine))
         spoke_pen  = pg.mkPen(st.get('spoke_color') or ring_color, width=float(st.get('spoke_width', 1)),
                               style=_DASH_QT.get(st.get('spoke_dash', 'dot'), Qt.PenStyle.DotLine))
-        show_spokes = st.get('show_spokes', True)
+        # Líneas radiales cada N grados (0 = ninguna); los números de ángulo se siguen mostrando cada 30°
+        spoke_step = float(st.get('spoke_step', 30 if st.get('show_spokes', True) else 0) or 0)
         ring_font  = self._style.get('ring_font_size', 9)
         ring_vals  = np.arange(math.ceil(r_floor / step) * step, r_ceil + 0.01, step)
         ring_vals  = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
@@ -287,7 +288,9 @@ class Polar2DView(QWidget):
             txt.setFont(_px_font(self._tick_font_size))
             txt.setPos(ax, ay)
             self._plot.addItem(txt)
-            if show_spokes:
+
+        if spoke_step > 0:
+            for a in np.arange(0, 360, spoke_step):
                 sx, sy = to_xy(a, 1.0)
                 self._plot.addItem(pg.PlotCurveItem([0, sx], [0, sy], pen=spoke_pen))
 

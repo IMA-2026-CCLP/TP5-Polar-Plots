@@ -611,9 +611,11 @@ class _ViewSection(QWidget):
             combo_ring_dash.addItems(_DASH_STYLES)
             combo_ring_dash.setCurrentText(self._style.get('ring_dash', 'dot'))
             form_rg.addRow("Anillos — tipo de línea:", combo_ring_dash)
-            chk_spokes = QCheckBox("Mostrar líneas radiales (cada 30°)")
-            chk_spokes.setChecked(self._style.get('show_spokes', True))
-            form_rg.addRow(chk_spokes)
+            spin_spoke_step = _NumEdit()
+            spin_spoke_step.setRange(0, 180)
+            spin_spoke_step.setValue(self._style.get('spoke_step', 30 if self._style.get('show_spokes', True) else 0))
+            spin_spoke_step.setToolTip("Cada cuántos grados va una línea radial. 0 = sin líneas radiales.")
+            form_rg.addRow("Líneas radiales cada (°):", spin_spoke_step)
             btn_spoke = self._make_color_button(dlg, self._style.get('spoke_color') or self._style.get('ring_color') or "#000000")
             form_rg.addRow("Radios — color:", btn_spoke)
             spin_spoke_w = _NumEdit()
@@ -625,7 +627,7 @@ class _ViewSection(QWidget):
             combo_spoke_dash.setCurrentText(self._style.get('spoke_dash', 'dot'))
             form_rg.addRow("Radios — tipo de línea:", combo_spoke_dash)
             fields['ring_color'], fields['ring_width'], fields['ring_dash'] = btn_ring, spin_ring_w, combo_ring_dash
-            fields['show_spokes'], fields['spoke_color'] = chk_spokes, btn_spoke
+            fields['spoke_step'], fields['spoke_color'] = spin_spoke_step, btn_spoke
             fields['spoke_width'], fields['spoke_dash'] = spin_spoke_w, combo_spoke_dash
             outer.addWidget(box_rg)
 
@@ -766,7 +768,7 @@ class _ViewSection(QWidget):
                 new_style['ring_color']        = fields['ring_color'].color_hex
                 new_style['ring_width']        = fields['ring_width'].value()
                 new_style['ring_dash']         = fields['ring_dash'].currentText()
-                new_style['show_spokes']       = fields['show_spokes'].isChecked()
+                new_style['spoke_step']        = fields['spoke_step'].value()
                 new_style['spoke_color']       = fields['spoke_color'].color_hex
                 new_style['spoke_width']       = fields['spoke_width'].value()
                 new_style['spoke_dash']        = fields['spoke_dash'].currentText()
