@@ -1416,6 +1416,15 @@ class TabDirectividad(QWidget):
             self.log.emit("[Dir] Sin datos para guardar.")
             return
 
+        # Primero el DPI (afecta el nombre sugerido del archivo), después dónde guardarlo.
+        from ui.export_utils import get_export_defaults
+        dpi, ok = QInputDialog.getInt(
+            self, "Resolución de exportación", "DPI (el tamaño físico es fijo, ver Opciones ▸ Imágenes):",
+            get_export_defaults()[0], 72, 1200, 1
+        )
+        if not ok:
+            return
+
         mode_label = _MODE_LABELS.get(mode, mode)
         nota = (self._nota
                 .replace("Todo el audio", "todo")
@@ -1427,9 +1436,9 @@ class TabDirectividad(QWidget):
             cmp_idx = [i for i in (self._sections[mode]._compare_indices or []) if i < len(self._full_bands)]
             if mode == "polar2d" and len(cmp_idx) >= 2:      # comparación: todas las bandas superpuestas
                 freq = "-".join(str(int(round(float(self._full_bands[i])))) for i in sorted(cmp_idx))
-            suggested = f"dir_{mode_label}_{freq}Hz_{nota}.png"
+            suggested = f"dir_{mode_label}_{freq}Hz_{nota}_{dpi}dpi.png"
         else:
-            suggested = f"dir_{mode_label}_{nota}.png"
+            suggested = f"dir_{mode_label}_{nota}_{dpi}dpi.png"
 
         # El SVG del Espectro no es fiel (las barras no se recortan al eje): sólo PNG/JPEG/WEBP
         filters = ("PNG (*.png);;JPEG (*.jpg);;WEBP (*.webp)" if mode == "spectrum"
@@ -1455,14 +1464,6 @@ class TabDirectividad(QWidget):
 
         if fmt == 'svg':
             dpi = 300   # vectorial: el DPI no aplica, pero el parámetro existe igual
-        else:
-            from ui.export_utils import get_export_defaults
-            dpi, ok = QInputDialog.getInt(
-                self, "Resolución de exportación", "DPI (el tamaño físico es fijo, ver Opciones ▸ Imágenes):",
-                get_export_defaults()[0], 72, 1200, 1
-            )
-            if not ok:
-                return
 
         self._sections[mode].export_image(path, dpi=dpi, fmt=fmt)
 
