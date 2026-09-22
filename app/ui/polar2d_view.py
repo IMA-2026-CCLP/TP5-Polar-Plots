@@ -283,7 +283,7 @@ class Polar2DView(QWidget):
             self._plot.addItem(txt)
 
         for a in range(0, 360, 30):
-            ax, ay = to_xy(a, 1.06)
+            ax, ay = to_xy(a, 1.14)   # separados del borde exterior, no pegados al anillo
             txt = pg.TextItem(f"{a}°", color='#000000', anchor=(0.5, 0.5))
             txt.setFont(_px_font(self._tick_font_size))
             txt.setPos(ax, ay)
