@@ -267,7 +267,7 @@ class NativeRibbon(QWidget):
         act('patterns',    "Patrones de archivos…", "Cómo se llaman los archivos de audio ({MIC} = micrófono, {H} = azimut)", b.editPatterns)
         self._make_view_actions()
         act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
-        act('load_session', "Cargar…",  "Abre una sesión (.cclp) guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
+        act('load_session', "Cargar",  "Abre una sesión (.cclp) guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
         act('save_session', "Guardar", "Guarda en el mismo archivo .cclp cargado o guardado antes; si todavía no hay ninguno, pregunta dónde (como 'Guardar como…')", b.saveSession, False)
         act('save_session_as', "Guardar como…", "Guarda los gráficos ya calculados (global y por nota) y toda la interfaz, sin los audios, eligiendo el archivo .cclp", b.saveSessionAs, False)
         # "Cargar/Guardar directividad (.npz)…" se sacó del menú: la sesión .cclp ya cubre el mismo caso
