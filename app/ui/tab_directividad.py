@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
 from ui.balloon_view import BalloonView
+from ui.gl3d_view import GL3DView
 from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
@@ -28,11 +29,11 @@ from plot.balloon import (COLORSCALES, _COMPARE_COLORS, FONT_SIZE, DEFAULT_SMOOT
 from core.data_store import freq_label
 from core.worker import Worker, begin as _begin, end as _end, report as _report
 
-# polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView);
-# superficie_3d y esfera siguen en Plotly/QWebEngineView (BalloonView) hasta
-# que se migren a pyqtgraph.opengl en una pasada aparte.
+# polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView); 3d migró a
+# pyqtgraph.opengl (GL3DView, ver ui/gl3d_view.py) como piloto de la migración fuera de
+# Plotly/QWebEngineView; esfera sigue en Plotly (BalloonView) hasta confirmar el piloto.
 _VIEW_CLASS_BY_MODE = {
-    "3d":       BalloonView,
+    "3d":       GL3DView,
     "sphere":   BalloonView,
     "polar2d":  Polar2DView,
     "spectrum": SpectrumView,
