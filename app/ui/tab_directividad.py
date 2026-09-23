@@ -1432,8 +1432,13 @@ class TabDirectividad(QWidget):
                 .replace(" ", "_"))
 
         if mode != "spectrum":
+            # La frecuencia del nombre sale del band_selector (lo que el usuario efectivamente
+            # ve resaltado), no de self._full_bands[self._current_band_idx]: ese array puede
+            # quedar con otro recorte de Rango (Hz) que el que se le pasó al selector la última
+            # vez (p. ej. si se cambió el rango sin recalcular), desincronizando los índices y
+            # guardando el nombre con una banda distinta a la que se está viendo.
             bi   = min(self._current_band_idx, len(self._full_bands) - 1)
-            freq = int(round(float(self._full_bands[bi])))
+            freq = int(round(self.band_selector.current_band_hz()))
             cmp_idx = [i for i in (self._sections[mode]._compare_indices or []) if i < len(self._full_bands)]
             if mode == "polar2d" and len(cmp_idx) >= 2:      # comparación: todas las bandas superpuestas
                 freq = "-".join(str(int(round(float(self._full_bands[i])))) for i in sorted(cmp_idx))

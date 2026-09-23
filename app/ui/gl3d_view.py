@@ -43,7 +43,7 @@ API pública: espejo del subconjunto de BalloonView que usa TabDirectividad para
 '3d' (ver ui/tab_directividad.py::_ViewSection) — mismos nombres de método, misma firma.
 """
 import numpy as np
-from PyQt6.QtWidgets import QWidget, QStackedLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QStackedLayout, QLabel, QApplication
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QImage, QColor, QPixmap
 
@@ -473,6 +473,10 @@ class GL3DView(QWidget):
 
         def _grab():
             ok = False
+            # grabFramebuffer() puede capturar el cursor del mouse dentro de la imagen (bug
+            # conocido de Qt/Windows con QOpenGLWidget, no algo que dibuje esta vista) — se oculta
+            # el cursor justo antes de capturar y se restaura enseguida después.
+            QApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
             try:
                 img = clone.grabFramebuffer()
                 ok = (not img.isNull()) and img.save(path)
@@ -486,6 +490,7 @@ class GL3DView(QWidget):
             except Exception as exc:
                 self.log.emit(f"[ERROR] Exportando 3D: {exc}")
             finally:
+                QApplication.restoreOverrideCursor()
                 if on_done:
                     on_done(ok)
 
