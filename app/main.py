@@ -95,6 +95,11 @@ def _make_splash_pixmap(w: int = 460, h: int = 280) -> QPixmap:
 
 
 def main():
+    # Obligatorio para que Superficie 3D (pyqtgraph.opengl, QOpenGLWidget) y Esfera
+    # (QWebEngineView/Plotly) convivan en la misma ventana sin corromperse el render entre
+    # sí (pantalla negra con contenido de otros paneles filtrándose adentro) — hay que
+    # setearlo ANTES de construir la QApplication, no alcanza con setearlo después.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
