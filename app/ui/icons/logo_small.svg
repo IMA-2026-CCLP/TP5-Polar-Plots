@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <clipPath id="hx2">
+      <polygon points="73,32 183,32 238,128 183,224 73,224 18,128"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#hx2)">
+    <path d="M128,58
+             C174,58 210,90 210,130
+             C210,166 182,187 150,187
+             C136,187 130,176 128,166
+             C126,176 120,187 106,187
+             C74,187 46,166 46,130
+             C46,90 82,58 128,58 Z"
+          fill="#2F6DB5"/>
+  </g>
+
+  <polygon points="73,32 183,32 238,128 183,224 73,224 18,128"
+           fill="none" stroke="#1B3A6B" stroke-width="14" stroke-linejoin="round"/>
+</svg>

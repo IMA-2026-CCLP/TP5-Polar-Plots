@@ -43,7 +43,7 @@ class SpectrumView(QWidget):
         self._bands = None
         self._azimuths = None
         self._spec_global = True
-        self._show_info = True
+        self._show_info = False
         self._style = {}
         self._build_ui()
 
@@ -58,16 +58,10 @@ class SpectrumView(QWidget):
 
         self._plot = pg.PlotWidget()
         self._plot.setBackground('#ffffff')   # fondo fijo, ver tab_directividad.py
-        self._plot.showGrid(x=False, y=True, alpha=0.15)
-        self._plot.setLabel('left', 'dB SPL', color='#000000', **{'font-size': f'{FONT_SIZE}px'})
-        self._plot.setLabel('bottom', 'Frecuencia [Hz]', color='#000000', **{'font-size': f'{FONT_SIZE}px'})
-        tick_font = QFont("Segoe UI")
-        tick_font.setPixelSize(FONT_SIZE)
-        for ax in ('left', 'bottom'):          # ejes negros sobre el fondo blanco fijo
-            axis = self._plot.getAxis(ax)
-            axis.setPen('#000000')
-            axis.setTextPen('#000000')
-            axis.setStyle(tickFont=tick_font)
+        self._unit = 'dB SPL'
+        self._min_db = None
+        self._max_db = None
+        self._apply_axes_style()
         self._plot.getPlotItem().setMenuEnabled(False)
         self._legend = None
 
@@ -108,11 +102,39 @@ class SpectrumView(QWidget):
 
     def set_unit(self, unit: str):
         """'dB SPL' (calibrado) o 'dBFS' (sin calibrar)."""
-        self._plot.setLabel('left', unit, color='#000000', **{'font-size': f'{FONT_SIZE}px'})
+        self._unit = unit
+        self._apply_axes_style()
+
+    def _apply_axes_style(self):
+        """Ejes, fuentes y grilla según el estilo (Propiedades ▸ Ejes / Grilla)."""
+        st = self._style
+        ticks = int(st.get('axis_font_size', FONT_SIZE))
+        labels = int(st.get('label_font_size', FONT_SIZE))
+        tick_font = QFont("Segoe UI")
+        tick_font.setPixelSize(ticks)
+        self._plot.setLabel('left', self._unit, color='#000000', **{'font-size': f'{labels}px'})
+        self._plot.setLabel('bottom', 'Frecuencia [Hz]', color='#000000', **{'font-size': f'{labels}px'})
+        for ax in ('left', 'bottom'):          # ejes negros sobre el fondo blanco fijo
+            axis = self._plot.getAxis(ax)
+            axis.setPen('#000000')
+            axis.setTextPen('#000000')
+            axis.setStyle(tickFont=tick_font)
+        mode = st.get('grid_mode', 'h')        # h = horizontales, v = verticales, both, none
+        alpha = float(st.get('grid_alpha', 0.15))
+        self._plot.showGrid(x=mode in ('v', 'both'), y=mode in ('h', 'both'), alpha=alpha)
+        step = float(st.get('grid_step', 0) or 0)
+        left = self._plot.getAxis('left')
+        if step > 0:
+            left.setTickSpacing(major=step, minor=step / 2)
+        else:
+            left.setTickSpacing()               # automático
     def set_band(self, band_index): pass
     def set_colorscale(self, name): pass
     def set_normalize(self, value): pass
-    def set_db_range(self, min_db, max_db): pass
+    def set_db_range(self, min_db, max_db):
+        self._min_db, self._max_db = min_db, max_db
+        if self._ref_spectrum is not None:
+            self._render()
     def set_el_index(self, el_index): pass
     def set_compare_bands(self, indices): pass
     def set_compare_styles(self, styles): pass
@@ -125,6 +147,7 @@ class SpectrumView(QWidget):
 
     def set_style(self, style):
         self._style = style or {}
+        self._apply_axes_style()
         if self._ref_spectrum is not None:
             self._render()
 
@@ -136,23 +159,11 @@ class SpectrumView(QWidget):
         self._plot.hide()
         self._placeholder.show()
 
-    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
-        import pyqtgraph.exporters as pg_exporters
-        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, size_cm=None):
+        """Tamaño físico fijo (Opciones ▸ Gráficos ▸ Imágenes); el DPI sólo define los píxeles. Ver export_utils."""
+        from ui.export_utils import export_pg_view
         try:
-            if fmt == 'svg':
-                from ui.export_utils import export_pg_svg
-                export_pg_svg(self._plot, path, dpi)
-                if on_done:
-                    on_done(True)
-                return
-            else:
-                exporter = pg_exporters.ImageExporter(self._plot.getPlotItem())
-                # re-renderiza la escena (vectorial) a este ancho: nítido, no es una captura
-                exporter.parameters()['width'] = int(round(EXPORT_BASE_W * dpi / 96))
-            exporter.export(path)
-            if fmt != 'svg':
-                set_png_dpi(path, dpi)
+            export_pg_view(self, path, dpi, fmt, size_cm)
             if on_done:
                 on_done(True)
         except Exception as e:
@@ -169,9 +180,6 @@ class SpectrumView(QWidget):
         self._plot.show()
         self._placeholder.hide()
         self._plot.clear()
-        if self._legend is not None:
-            self._legend.scene().removeItem(self._legend)
-            self._legend = None
 
         sort_idx = np.argsort(self._bands)
         bands = self._bands[sort_idx]
@@ -189,7 +197,8 @@ class SpectrumView(QWidget):
                                     brush=pg.mkBrush(bar_color), pen=pg.mkPen('#1B1F24', width=0.5))
             self._plot.addItem(bars)
             err = pg.ErrorBarItem(x=x, y=mean_vals, height=std_vals * 2,
-                                   pen=pg.mkPen('#C4791F', width=2))
+                                   pen=pg.mkPen(self._style.get('err_color') or '#C4791F',
+                                                width=float(self._style.get('err_width', 2))))
             self._plot.addItem(err)
             fin = mean_vals[np.isfinite(mean_vals)]
             std_fin = std_vals[np.isfinite(std_vals)]
@@ -217,6 +226,10 @@ class SpectrumView(QWidget):
 
         axis = self._plot.getAxis('bottom')
         axis.setTicks([[(i, lbl) for i, lbl in enumerate(x_labels)]])
+        if self._min_db is not None:
+            y_min = self._min_db
+        if self._max_db is not None:
+            y_max = self._max_db
         self._plot.setYRange(y_min, y_max, padding=0)
         self._plot.setXRange(-0.6, n_bands - 0.4, padding=0)
 

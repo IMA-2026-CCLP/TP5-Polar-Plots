@@ -25,10 +25,9 @@ class Bridge(QObject):
     sig_height             = pyqtSignal(int)
     sig_load_audio         = pyqtSignal()
     sig_edit_patterns      = pyqtSignal()
-    sig_save_tensor        = pyqtSignal()
-    sig_load_tensor        = pyqtSignal()
-    sig_load_polar_npz     = pyqtSignal()
-    sig_save_polar_npz     = pyqtSignal()
+    sig_save_session       = pyqtSignal()       # sesión .cclp (sin audio) — sobrescribe si ya hay archivo
+    sig_save_session_as    = pyqtSignal()       # ídem, siempre pregunta la ruta
+    sig_load_session       = pyqtSignal()
     sig_apply_hpf          = pyqtSignal(float)
     sig_align_takes        = pyqtSignal(float, float, object, float)
     sig_align_ref          = pyqtSignal(object)
@@ -41,7 +40,6 @@ class Bridge(QObject):
     sig_save_mask          = pyqtSignal()
     sig_load_mask          = pyqtSignal()
     sig_compute_dir        = pyqtSignal(str, float, float, int, int)
-    sig_save_dir_npz       = pyqtSignal()
     sig_export_all_images  = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
     sig_theme_toggled      = pyqtSignal()
@@ -67,6 +65,7 @@ class Bridge(QObject):
             'note_tol':   50.0,   'note_purity': 0.8,
             'note_start': 0.0,    'note_grad':   25.0,
             'note_theta': 'ref',
+            'show_info':  False,   # recuadro de información de los gráficos: apagado por defecto
         }
 
     # ── Slots llamados desde JS ───────────────────────────────────────────────
@@ -89,20 +88,16 @@ class Bridge(QObject):
         self.sig_edit_patterns.emit()
 
     @pyqtSlot()
-    def saveTensor(self):
-        self.sig_save_tensor.emit()
+    def saveSession(self):
+        self.sig_save_session.emit()
 
     @pyqtSlot()
-    def loadTensor(self):
-        self.sig_load_tensor.emit()
+    def saveSessionAs(self):
+        self.sig_save_session_as.emit()
 
     @pyqtSlot()
-    def loadPolarNpz(self):
-        self.sig_load_polar_npz.emit()
-
-    @pyqtSlot()
-    def savePolarNpz(self):
-        self.sig_save_polar_npz.emit()
+    def loadSession(self):
+        self.sig_load_session.emit()
 
     @pyqtSlot(str)
     def updateState(self, json_str: str):
@@ -192,10 +187,6 @@ class Bridge(QObject):
             int(self.state.get('ref_az', 0)),
             int(self.state.get('ref_th', 0)),
         )
-
-    @pyqtSlot()
-    def saveDirNpz(self):
-        self.sig_save_dir_npz.emit()
 
     @pyqtSlot()
     def exportAllImages(self):

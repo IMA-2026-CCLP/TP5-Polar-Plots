@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtCore import pyqtSignal, QUrl, QTimer
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QStackedLayout
 from PyQt6.QtGui import QFont
 
 from plot.balloon import (
@@ -112,7 +112,7 @@ class BalloonView(QWidget):
         self._band_index:   int   = 0
         self._el_index:     int | None = None
         self._plane:        str   = "XY"
-        self._show_info:    bool  = True
+        self._show_info:    bool  = False
         self._compare_bands: list | None = None   # índices de banda a superponer (polar2d)
         self._compare_styles: dict = {}           # {band_index: {'color','width','dash'}}
         self._tick_font_size: float = FONT_SIZE   # tamaño de números de los ejes (polar2d)
@@ -145,9 +145,11 @@ class BalloonView(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        # El QWebEngineView queda SIEMPRE visible y el placeholder se apila encima: mostrarlo recién al
+        # primer render hacía que Qt recreara la ventana principal (la app "se cerraba y volvía a abrir").
+        layout = QStackedLayout(self)
+        layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
 
         self._web  = QWebEngineView()
         self._page = _SilentPage(self._web)
@@ -167,9 +169,9 @@ class BalloonView(QWidget):
         self._apply_theme_styles(_t.LIGHT)
         self._placeholder.setFont(QFont("Segoe UI", 12))
 
-        layout.addWidget(self._placeholder)
         layout.addWidget(self._web)
-        self._web.hide()
+        layout.addWidget(self._placeholder)      # último = arriba
+        self._placeholder.raise_()
 
     def _apply_theme_styles(self, palette: dict):
         # Los gráficos son siempre de fondo blanco, en tema claro y oscuro: se ignora la paleta.
@@ -306,19 +308,24 @@ class BalloonView(QWidget):
         preset = _CAMERA_PRESETS.get(view)
         if preset is None or self._view_mode not in ("3d", "sphere"):
             return
+        # Plotly.relayout() solo no alcanza cuando cambia el tipo de proyección (perspectiva ⇄
+        # ortográfica, como en "iso"): el canvas WebGL queda con el render roto hasta el próximo
+        # redibujado completo (por eso antes se "arreglaba solo" al cambiar de banda). Un
+        # Plotly.Plots.resize() después del relayout fuerza ese redibujado.
         js = (
             "Plotly.relayout(document.getElementById('plot'), "
             f"{{'scene.camera': {json.dumps(preset)}}})"
+            ".then(function(){ Plotly.Plots.resize(document.getElementById('plot')); });"
         )
         self._web.page().runJavaScript(js)
 
     def show_placeholder(self):
-        self._web.hide()
         self._placeholder.show()
+        self._placeholder.raise_()
 
     _EXPORT_FORMATS = ('png', 'svg', 'jpeg', 'webp')   # soportados por Plotly.toImage() en navegador
 
-    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, _retry: bool = True):
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, _retry: bool = True, size_cm=None):
         """
         Exporta el gráfico real vía Plotly.toImage() (calidad de render de
         Plotly, no una captura de pantalla), usando exactamente el mismo
@@ -345,10 +352,11 @@ class BalloonView(QWidget):
         """
         fmt = fmt if fmt in self._EXPORT_FORMATS else 'png'
         # Se re-renderiza en vectorial/WebGL a mayor resolución (no es una captura): mismo aspecto y
-        # proporción de texto que en pantalla, con ancho final = EXPORT_BASE_W * DPI / 96 píxeles.
-        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
-        target_w = dpi / 96.0 * EXPORT_BASE_W      # ancho final en píxeles
-        scale = round(target_w / max(1, self._web.width()), 4)   # sólo para el log
+        # Tamaño físico fijo (cm, en Opciones ▸ Gráficos ▸ Imágenes); el DPI sólo define los píxeles.
+        from ui.export_utils import get_export_size_cm, logical_px, set_png_dpi
+        w_cm, h_cm = size_cm or get_export_size_cm()
+        lw, lh = logical_px(w_cm), logical_px(h_cm)     # lienzo lógico (fijo); el DPI sólo lo escala
+        scale = round(dpi / 96.0, 4)
 
         import uuid
         exp_id = uuid.uuid4().hex
@@ -376,7 +384,7 @@ class BalloonView(QWidget):
             try:
                 with open(path, 'wb') as f:
                     f.write(base64.b64decode(data_url.split(',', 1)[1]))
-                if fmt == 'png':
+                if fmt != 'svg':
                     set_png_dpi(path, dpi)
                 self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, escala {scale}×, {fmt})")
                 if on_done:
@@ -390,7 +398,7 @@ class BalloonView(QWidget):
                 return
             _cleanup()
             if _retry:      # un fallo aislado (p. ej. WebGL ocupado): reintenta antes de caer a la captura
-                self.export_image(path, dpi, fmt, on_done, _retry=False)
+                self.export_image(path, dpi, fmt, on_done, _retry=False, size_cm=size_cm)
                 return
             self.log.emit(f"[Dir] Plotly.toImage falló ({err}) — se usa captura de pantalla como respaldo.")
             self._export_via_grab(path, on_done)
@@ -408,12 +416,21 @@ class BalloonView(QWidget):
         js = (
             "(function(){"
             "var el=document.getElementById('plot');"
-            # Sin width/height explícitos Plotly usa 700×450 (no el tamaño del panel): se pasan los reales.
-            "var W=(el._fullLayout&&el._fullLayout.width)||el.offsetWidth, H=(el._fullLayout&&el._fullLayout.height)||el.offsetHeight;"
+            # Tamaño físico fijo: se pasa width/height explícitos (lienzo lógico) y el DPI sólo escala.
+            f"var W={lw}, H={lh};"
             # La malla WebGL se rasteriza con plotGlPixelRatio (por defecto 2): se sube a la escala pedida
             # para que la superficie también salga nítida al ampliar (con tope por límites de la GPU).
-            f"if(el._context) el._context.plotGlPixelRatio=Math.min(8, Math.max(2, {target_w}/Math.max(1,W)));"
-            f"Plotly.toImage(el, {{format:'{fmt}', width:W, height:H, scale:{target_w}/Math.max(1,W)}})"
+            f"if(el._context) el._context.plotGlPixelRatio=Math.min(8, Math.max(2, {scale}));"
+            # toImage() con width/height distintos re-renderiza el gráfico desde cero: si la cámara
+            # (zoom/rotación del mouse) sólo vive en el estado interno (_fullLayout) y no en el layout
+            # "oficial", ese re-render la ignora y siempre sale con el encuadre por defecto. Se la fija
+            # explícitamente antes de exportar para que la imagen muestre lo mismo que se ve en pantalla.
+            "var scene=el._fullLayout && el._fullLayout.scene;"
+            "var cam=scene && scene.camera;"
+            "var pre=cam ? Plotly.relayout(el, {'scene.camera': cam}) : Promise.resolve();"
+            "pre.then(function(){ return "
+            f"Plotly.toImage(el, {{format:'{fmt}', width:W, height:H, scale:{scale}}});"
+            "})"
             ".then(function(url){"
             "  var CHUNK=400000;"
             "  var n=Math.max(1, Math.ceil(url.length/CHUNK));"
@@ -586,4 +603,3 @@ class BalloonView(QWidget):
         else:
             self._set_html_safe(html)
             self._placeholder.hide()
-            self._web.show()

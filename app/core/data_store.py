@@ -96,7 +96,7 @@ def save_results(
             "Ejecutar compute_directivity() antes de guardar (global o por nota).")
 
     p = Path(filepath)
-    if p.suffix.lower() != '.npz':
+    if p.suffix.lower() not in ('.npz', '.cclp'):
         filepath = str(p) + '.npz'
 
     thetas_numeric = [t for t in ma_global.thetas if t != 'ref']
@@ -139,7 +139,11 @@ def save_results(
 
     kwargs['metadata'] = np.array([json.dumps(meta, ensure_ascii=False, default=lambda o: o.item() if hasattr(o, 'item') else str(o))])
 
-    np.savez_compressed(filepath, **kwargs)
+    # np.savez_compressed le agrega ".npz" al nombre si el string no termina en ".npz" (comportamiento
+    # propio de numpy) — con un .cclp eso escribiría "sesion.cclp.npz". Se evita pasando un file handle
+    # ya abierto, que no sufre ese renombrado automático.
+    with open(filepath, 'wb') as f:
+        np.savez_compressed(f, **kwargs)
     size_kb = Path(filepath).stat().st_size / 1024
     print(f"  Guardado: {filepath}  ({size_kb:.0f} KB)")
 

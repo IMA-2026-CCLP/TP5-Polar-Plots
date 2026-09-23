@@ -11,20 +11,22 @@ from pathlib import Path
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QCheckBox, QScrollArea,
-    QGridLayout, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
+    QGridLayout, QFrame, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
     QMenu, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
     QColorDialog, QInputDialog, QSplitter, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
-from core.worker import Worker
 from ui.balloon_view import BalloonView
 from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
 from ui.widgets import NumEdit as _NumEdit
-from plot.balloon import COLORSCALES, _COMPARE_COLORS, FONT_SIZE
+from plot.balloon import (COLORSCALES, _COMPARE_COLORS, FONT_SIZE, DEFAULT_SMOOTH_METHOD, DEFAULT_SMOOTH_WINDOW,
+                          DEFAULT_INTERP_KIND, DEFAULT_INTERP_DEG)
+from core.data_store import freq_label
+from core.worker import Worker, begin as _begin, end as _end, report as _report
 
 # polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView);
 # superficie_3d y esfera siguen en Plotly/QWebEngineView (BalloonView) hasta
@@ -50,8 +52,10 @@ _DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
 # acompaña al bg_color para que las etiquetas no queden claras sobre
 # fondo blanco si la app está en tema oscuro.
 _DEFAULT_STYLE_BY_MODE = {
-    "3d":       {"bg_color": "#ffffff", "text_color": "#000000"},
-    "sphere":   {"bg_color": "#ffffff", "text_color": "#000000"},
+    "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
+    "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -61,10 +65,10 @@ _DEFAULT_STYLE_BY_MODE = {
         "ring_label_angle": 45.0,
         "legend_font_size": FONT_SIZE,
         "line_width":       2.5,
-        "smoothing_method": "savgol",
-        "smoothing_window": 3,
-        "interp_kind":      "cubic",
-        "interp_deg":       2.0,
+        "smoothing_method": DEFAULT_SMOOTH_METHOD,
+        "smoothing_window": DEFAULT_SMOOTH_WINDOW,
+        "interp_kind":      DEFAULT_INTERP_KIND,
+        "interp_deg":       DEFAULT_INTERP_DEG,
     },
     "spectrum": {"bg_color": "#ffffff", "text_color": "#000000", "bar_color": "#146B64"},
 }
@@ -108,11 +112,13 @@ class _ComputeAllWorker(QThread):
                         frac_item = sub_done / sub_total if sub_total else 0.0
                         overall = (worker._item_index + frac_item) / worker._item_total
                         worker.overall_progress.emit(min(overall, 1.0))
+                        _report(int(min(overall, 1.0) * 1000), 1000)      # barra de la barra de estado
                 return len(t)
             def flush(self): pass
 
         old_out = sys.stdout
         sys.stdout = _Cap(self.log)
+        _begin("Calculando directividad…")
         try:
             tasks = [("Todo el audio", self._ma)]
             if self._ma.notes:
@@ -137,6 +143,94 @@ class _ComputeAllWorker(QThread):
             self.error.emit(traceback.format_exc())
         finally:
             sys.stdout = old_out
+            _end("Calculando directividad…")
+
+
+class _CompareEditor(QGroupBox):
+    """Pestaña "Comparación" del Polar 2D: lista en 2 columnas, una fila por banda con [activar] [color] [grosor]
+    [tipo de línea], más la leyenda. Sin deslizables. Los cambios se avisan por on_change (edición en vivo)."""
+
+    _POS = [("Arriba a la derecha", "top-right"), ("Arriba a la izquierda", "top-left"),
+            ("Abajo a la derecha", "bottom-right"), ("Abajo a la izquierda", "bottom-left")]
+
+    def __init__(self, sec, dlg, parent=None):
+        super().__init__("Comparación", parent)
+        self.on_change = None
+        bands = sec.view._bands
+        n = 0 if bands is None else len(bands)
+        styles = {int(k): v for k, v in sec._compare_styles.items()}
+        sel = set(sec._compare_indices or [])
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(6)
+        lay.addWidget(QLabel("Activá dos o más bandas para superponerlas y elegí cómo se dibuja cada una:"))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(3)
+        self._rows = {}                        # banda -> (check, color, grosor, tipo)
+        per_col = (n + 1) // 2
+        for i in range(n):
+            st = styles.get(i, {})
+            cb = QCheckBox(f"{freq_label(float(bands[i]))} Hz")
+            cb.setMinimumWidth(78)
+            cb.setChecked(i in sel)
+            btn = sec._make_color_button(dlg, st.get('color', _COMPARE_COLORS[i % len(_COMPARE_COLORS)]))
+            w = _NumEdit()
+            w.setFixedWidth(44)
+            w.setRange(0.5, 10.0)
+            w.setValue(st.get('width', 2.5))
+            w.setToolTip("Grosor de la línea")
+            dash = QComboBox()
+            dash.addItems(_DASH_STYLES)
+            dash.setCurrentText(st.get('dash', 'solid'))
+            dash.setToolTip("Tipo de línea")
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(6)
+            for x in (cb, btn, w, dash):
+                h.addWidget(x)
+            grid.addWidget(row, i % per_col, i // per_col)
+            self._rows[i] = (cb, btn, w, dash)
+            cb.toggled.connect(lambda on, k=i: self._toggled(k, on))
+            btn.on_change = self._changed
+            w.textChanged.connect(self._changed)
+            dash.currentTextChanged.connect(self._changed)
+            self._set_row_enabled(i, i in sel)
+        lay.addLayout(grid)
+
+        form = QFormLayout()
+        self._show = QCheckBox("Mostrar leyenda")
+        self._show.setChecked(sec._style.get('show_legend', True))
+        self._show.toggled.connect(self._changed)
+        self._pos = QComboBox()
+        for label, val in self._POS:
+            self._pos.addItem(label, val)
+        self._pos.setCurrentIndex(max(0, self._pos.findData(sec._style.get('legend_pos', 'top-right'))))
+        self._pos.currentIndexChanged.connect(self._changed)
+        form.addRow(self._show)
+        form.addRow("Posición de la leyenda:", self._pos)
+        lay.addLayout(form)
+
+    def _set_row_enabled(self, i, on):
+        _, btn, w, dash = self._rows[i]
+        for x in (btn, w, dash):
+            x.setEnabled(on)
+
+    def _toggled(self, i, on):
+        self._set_row_enabled(i, on)
+        self._changed()
+
+    def _changed(self, *_):
+        if self.on_change:
+            self.on_change()
+
+    def state(self):
+        """(bandas activas, {banda: estilo}, {'pos':…, 'show':…})"""
+        sel = [i for i, (cb, *_r) in self._rows.items() if cb.isChecked()]
+        styles = {i: {'color': self._rows[i][1].color_hex, 'width': self._rows[i][2].value(),
+                      'dash': self._rows[i][3].currentText()} for i in sel}
+        return sel, styles, {'pos': self._pos.currentData(), 'show': self._show.isChecked()}
 
 
 class _ViewSection(QWidget):
@@ -157,6 +251,7 @@ class _ViewSection(QWidget):
         super().__init__(parent)
         self._mode   = mode
         self._zoomed = False
+        self._open_tab = None       # pestaña a mostrar al abrir Propiedades
         self._min_db: float | None = _DEFAULT_MIN_DB_BY_MODE.get(mode)
         self._max_db: float | None = _DEFAULT_MAX_DB_BY_MODE.get(mode)
         self._compare_indices: list | None = None   # sólo relevante para polar2d
@@ -221,11 +316,9 @@ class _ViewSection(QWidget):
             act_back   = view_menu.addAction("Atrás")
             menu.addSeparator()
 
-        act_compare = act_band_props = None
+        act_compare = None
         if self._mode == "polar2d":
             act_compare = menu.addAction("Comparar bandas…")
-            if self._compare_indices:
-                act_band_props = menu.addAction("Propiedades de bandas…")
             menu.addSeparator()
 
         act_properties = menu.addAction("Propiedades…")
@@ -257,9 +350,8 @@ class _ViewSection(QWidget):
             elif action == act_back:
                 self.view.set_camera_view('back')
             elif action == act_compare:
-                self._prompt_compare_bands()
-            elif action == act_band_props:
-                self._prompt_band_properties()
+                self._open_tab = "Comparación"
+                self.properties_requested.emit()
         except Exception:
             import traceback
             self.log.emit(f"[ERROR] Menú contextual ({self._mode}):\n{traceback.format_exc()}")
@@ -334,7 +426,7 @@ class _ViewSection(QWidget):
         outer = _Tabs()
         fields: dict = {}
 
-        if self._mode != "spectrum":
+        if True:                       # todos los gráficos tienen escala
             box = QGroupBox("Escala")
             form = QFormLayout(box)
             le_min = QLineEdit("" if self._min_db is None else str(self._min_db))
@@ -381,7 +473,7 @@ class _ViewSection(QWidget):
             form_interp = QFormLayout(box_interp)
             spin_interp_deg = _NumEdit()
             spin_interp_deg.setRange(0.5, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', 2.0))
+            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
             spin_interp_deg.setToolTip(
                 "Qué tan fina se dibuja la superficie entre los puntos medidos.\n"
                 "No cambia los datos, sólo el dibujo.\n"
@@ -402,7 +494,7 @@ class _ViewSection(QWidget):
             combo_smooth_method_3d = QComboBox()
             combo_smooth_method_3d.setMaximumWidth(120)
             combo_smooth_method_3d.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method_3d.setCurrentText(self._style.get('smoothing_method', 'gaussian'))
+            combo_smooth_method_3d.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
             combo_smooth_method_3d.setToolTip(
                 "Mismo suavizado circular que el Polar 2D, aplicado en la\n"
                 "dirección de azimuth (cada anillo horizontal de la esfera),\n"
@@ -417,7 +509,7 @@ class _ViewSection(QWidget):
             spin_smooth_win_3d = _NumEdit()
             spin_smooth_win_3d.setDecimals(0)
             spin_smooth_win_3d.setRange(0, 15); spin_smooth_win_3d.setSingleStep(1)
-            spin_smooth_win_3d.setValue(self._style.get('smoothing_window', 0))
+            spin_smooth_win_3d.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
             spin_smooth_win_3d.setToolTip(
                 "Cantidad de puntos vecinos que se promedian entre sí, sobre cada\n"
                 "anillo de azimuth. 0 = SIN SUAVIZAR (recomendado para empezar).\n"
@@ -469,9 +561,6 @@ class _ViewSection(QWidget):
                 "la línea radial o la curva medida."
             )
             form_ax.addRow("Posición de etiquetas de dB:", combo_ring_pos)
-            btn_ring = self._make_color_button(dlg, self._style.get('ring_color') or _balloon_mod._RING_LINE)
-            btn_ring.setToolTip("Color de los anillos punteados y de las líneas radiales (cada 30°). No cambia el color de los números. Click para elegir.")
-            form_ax.addRow("Color de anillos y radios:", btn_ring)
             spin_line_w = _NumEdit()
             spin_line_w.setRange(0.5, 8.0); spin_line_w.setSingleStep(0.5)
             spin_line_w.setValue(self._style.get('line_width', 2.5))
@@ -487,17 +576,52 @@ class _ViewSection(QWidget):
             fields['ring_step']         = spin_ring_step
             fields['ring_label_angle']  = spin_ring_angle
             fields['ring_label_pos']    = combo_ring_pos
-            fields['ring_color']        = btn_ring
             fields['line_width']        = spin_line_w
             fields['legend_font_size']  = spin_legend
             outer.addWidget(box_ax)
+
+            box_rg = QGroupBox("Anillos y radios")
+            form_rg = QFormLayout(box_rg)
+            btn_ring = self._make_color_button(dlg, self._style.get('ring_color') or "#000000")
+            btn_ring.setToolTip("Color de los anillos de dB. No cambia el color de los números.")
+            form_rg.addRow("Anillos — color:", btn_ring)
+            spin_ring_w = _NumEdit()
+            spin_ring_w.setRange(0.25, 8.0)
+            spin_ring_w.setValue(self._style.get('ring_width', 1))
+            form_rg.addRow("Anillos — grosor:", spin_ring_w)
+            combo_ring_dash = QComboBox()
+            combo_ring_dash.addItems(_DASH_STYLES)
+            combo_ring_dash.setCurrentText(self._style.get('ring_dash', 'dot'))
+            form_rg.addRow("Anillos — tipo de línea:", combo_ring_dash)
+            spin_spoke_step = _NumEdit()
+            spin_spoke_step.setRange(0, 180)
+            spin_spoke_step.setValue(self._style.get('spoke_step', 30 if self._style.get('show_spokes', True) else 0))
+            spin_spoke_step.setToolTip("Cada cuántos grados va una línea radial. 0 = sin líneas radiales.")
+            form_rg.addRow("Líneas radiales cada (°):", spin_spoke_step)
+            btn_spoke = self._make_color_button(dlg, self._style.get('spoke_color') or self._style.get('ring_color') or "#000000")
+            form_rg.addRow("Radios — color:", btn_spoke)
+            spin_spoke_w = _NumEdit()
+            spin_spoke_w.setRange(0.25, 8.0)
+            spin_spoke_w.setValue(self._style.get('spoke_width', 1))
+            form_rg.addRow("Radios — grosor:", spin_spoke_w)
+            combo_spoke_dash = QComboBox()
+            combo_spoke_dash.addItems(_DASH_STYLES)
+            combo_spoke_dash.setCurrentText(self._style.get('spoke_dash', 'dot'))
+            form_rg.addRow("Radios — tipo de línea:", combo_spoke_dash)
+            fields['ring_color'], fields['ring_width'], fields['ring_dash'] = btn_ring, spin_ring_w, combo_ring_dash
+            fields['spoke_step'], fields['spoke_color'] = spin_spoke_step, btn_spoke
+            fields['spoke_width'], fields['spoke_dash'] = spin_spoke_w, combo_spoke_dash
+            outer.addWidget(box_rg)
+
+            fields['_compare'] = _CompareEditor(self, dlg)
+            outer.addWidget(fields['_compare'])
 
             box_interp = QGroupBox("Suavizado")
             form_interp = QFormLayout(box_interp)
             combo_smooth_method = QComboBox()
             combo_smooth_method.setMaximumWidth(120)
             combo_smooth_method.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method.setCurrentText(self._style.get('smoothing_method', 'gaussian'))
+            combo_smooth_method.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
             combo_smooth_method.setToolTip(
                 "Sólo importa si la 'Intensidad' de abajo es mayor a 0.\n"
                 "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
@@ -511,7 +635,7 @@ class _ViewSection(QWidget):
             spin_smooth_win = _NumEdit()
             spin_smooth_win.setDecimals(0)
             spin_smooth_win.setRange(0, 15); spin_smooth_win.setSingleStep(1)
-            spin_smooth_win.setValue(self._style.get('smoothing_window', 0))
+            spin_smooth_win.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
             spin_smooth_win.setToolTip(
                 "Cantidad de puntos vecinos que se promedian entre sí.\n"
                 "0 = SIN SUAVIZAR (recomendado para empezar — dejalo así\n"
@@ -524,7 +648,7 @@ class _ViewSection(QWidget):
             combo_interp = QComboBox()
             combo_interp.setMaximumWidth(120)
             combo_interp.addItems(['cubic', 'quadratic', 'linear', 'none'])
-            combo_interp.setCurrentText(self._style.get('interp_kind', 'cubic'))
+            combo_interp.setCurrentText(self._style.get('interp_kind', DEFAULT_INTERP_KIND))
             combo_interp.setToolTip(
                 "No cambia los datos medidos, sólo cómo se dibuja la curva entre puntos.\n"
                 "cubic: recomendado, curva natural (por defecto).\n"
@@ -536,7 +660,7 @@ class _ViewSection(QWidget):
             form_interp.addRow("Tipo de interpolación:", combo_interp)
             spin_interp_deg = _NumEdit()
             spin_interp_deg.setRange(0.1, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', 1.0))
+            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
             spin_interp_deg.setToolTip(
                 "Qué tan fina se dibuja la curva. No cambia los datos.\n"
                 "Recomendado: dejar en 1 (por defecto).\n"
@@ -551,25 +675,60 @@ class _ViewSection(QWidget):
             outer.addWidget(box_interp)
 
         elif self._mode == "spectrum":
-            box_sp = QGroupBox("Barras / grilla")
+            box_sp = QGroupBox("Barras")
             form_sp = QFormLayout(box_sp)
             btn_bar = self._make_color_button(dlg, self._style.get('bar_color') or "#146B64")
             btn_bar.setToolTip("Color de las barras cuando el modo de vista está en 'Global'. No aplica al modo 'Por toma' (usa un color distinto por azimuth).")
             form_sp.addRow("Color de barras (modo Global):", btn_bar)
-            btn_grid_sp = self._make_color_button(dlg, self._style.get('grid_color') or _balloon_mod._GRID_COL)
-            btn_grid_sp.setToolTip("Color de la grilla de los ejes.")
-            form_sp.addRow("Color de grilla:", btn_grid_sp)
-            fields['bar_color']   = btn_bar
-            fields['grid_color2'] = btn_grid_sp
+            btn_err = self._make_color_button(dlg, self._style.get('err_color') or "#C4791F")
+            btn_err.setToolTip("Color del bigote de dispersión (±σ entre tomas). Sólo en modo Global.")
+            form_sp.addRow("Color del bigote de dispersión:", btn_err)
+            spin_err_w = _NumEdit()
+            spin_err_w.setRange(0.5, 8.0)
+            spin_err_w.setValue(self._style.get('err_width', 2))
+            form_sp.addRow("Grosor del bigote:", spin_err_w)
+            fields['bar_color'], fields['err_color'], fields['err_width'] = btn_bar, btn_err, spin_err_w
             outer.addWidget(box_sp)
 
+            box_ex = QGroupBox("Ejes")
+            form_ex = QFormLayout(box_ex)
+            spin_ax_f = _NumEdit()
+            spin_ax_f.setRange(6, 30)
+            spin_ax_f.setValue(self._style.get('axis_font_size', FONT_SIZE))
+            form_ex.addRow("Tamaño de números de los ejes:", spin_ax_f)
+            spin_lb_f = _NumEdit()
+            spin_lb_f.setRange(6, 30)
+            spin_lb_f.setValue(self._style.get('label_font_size', FONT_SIZE))
+            form_ex.addRow("Tamaño de títulos de los ejes:", spin_lb_f)
+            fields['axis_font_size'], fields['label_font_size'] = spin_ax_f, spin_lb_f
+            outer.addWidget(box_ex)
+
+            box_gr = QGroupBox("Grilla")
+            form_gr = QFormLayout(box_gr)
+            combo_grid = QComboBox()
+            for label, val in (("Horizontales", "h"), ("Verticales", "v"), ("Horizontales y verticales", "both"), ("Sin grilla", "none")):
+                combo_grid.addItem(label, val)
+            combo_grid.setCurrentIndex(max(0, combo_grid.findData(self._style.get('grid_mode', 'h'))))
+            form_gr.addRow("Líneas de grilla:", combo_grid)
+            spin_gr_a = _NumEdit()
+            spin_gr_a.setRange(0.0, 1.0)
+            spin_gr_a.setValue(self._style.get('grid_alpha', 0.15))
+            spin_gr_a.setToolTip("Intensidad de la grilla: 0 = invisible, 1 = negra. Por defecto 0.15.")
+            form_gr.addRow("Intensidad (0–1):", spin_gr_a)
+            spin_gr_s = _NumEdit()
+            spin_gr_s.setRange(0, 200)
+            spin_gr_s.setValue(self._style.get('grid_step', 0))
+            spin_gr_s.setToolTip("Cada cuántos dB va una línea horizontal. 0 = automático.")
+            form_gr.addRow("Paso (dB, 0 = automático):", spin_gr_s)
+            fields['grid_mode'], fields['grid_alpha'], fields['grid_step'] = combo_grid, spin_gr_a, spin_gr_s
+            outer.addWidget(box_gr)
+
         def _apply():
-            if self._mode != "spectrum":
-                try:
-                    self._min_db = float(fields['min_db'].text()) if fields['min_db'].text().strip() else None
-                    self._max_db = float(fields['max_db'].text()) if fields['max_db'].text().strip() else None
-                except ValueError:
-                    pass
+            try:
+                self._min_db = float(fields['min_db'].text()) if fields['min_db'].text().strip() else None
+                self._max_db = float(fields['max_db'].text()) if fields['max_db'].text().strip() else None
+            except ValueError:
+                pass
 
             new_style = dict(self._style)
 
@@ -589,6 +748,19 @@ class _ViewSection(QWidget):
                 new_style['ring_label_angle']  = fields['ring_label_angle'].value()
                 new_style['ring_label_pos']    = fields['ring_label_pos'].currentText()
                 new_style['ring_color']        = fields['ring_color'].color_hex
+                new_style['ring_width']        = fields['ring_width'].value()
+                new_style['ring_dash']         = fields['ring_dash'].currentText()
+                new_style['spoke_step']        = fields['spoke_step'].value()
+                new_style['spoke_color']       = fields['spoke_color'].color_hex
+                new_style['spoke_width']       = fields['spoke_width'].value()
+                new_style['spoke_dash']        = fields['spoke_dash'].currentText()
+                sel, styles, legend = fields['_compare'].state()
+                self._compare_indices = sel if len(sel) > 1 else None
+                self._compare_styles = styles
+                new_style['legend_pos'] = legend['pos']
+                new_style['show_legend'] = legend['show']
+                self.view.set_compare_bands(self._compare_indices)
+                self.view.set_compare_styles(self._compare_styles)
                 new_style['line_width']        = fields['line_width'].value()
                 new_style['legend_font_size']  = fields['legend_font_size'].value()
                 new_style['smoothing_method']  = fields['smoothing_method'].currentText()
@@ -597,7 +769,13 @@ class _ViewSection(QWidget):
                 new_style['interp_deg']        = fields['interp_deg'].value()
             elif self._mode == "spectrum":
                 new_style['bar_color']  = fields['bar_color'].color_hex
-                new_style['grid_color'] = fields['grid_color2'].color_hex
+                new_style['err_color']  = fields['err_color'].color_hex
+                new_style['err_width']  = fields['err_width'].value()
+                new_style['axis_font_size']  = fields['axis_font_size'].value()
+                new_style['label_font_size'] = fields['label_font_size'].value()
+                new_style['grid_mode']  = fields['grid_mode'].currentData()
+                new_style['grid_alpha'] = fields['grid_alpha'].value()
+                new_style['grid_step']  = fields['grid_step'].value()
 
             self._style = new_style
             self.view.set_db_range(self._min_db, self._max_db)
@@ -651,108 +829,6 @@ class _ViewSection(QWidget):
             self.view.set_tick_font_size(self._tick_font_size)
         self.view.set_style(self._style)
         self.properties_applied.emit()
-
-    def _prompt_compare_bands(self):
-        bands = self.view._bands
-        if bands is None or len(bands) == 0:
-            return
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Comparar bandas — Polar 2D")
-        dlg.resize(240, 400)
-        outer = QVBoxLayout(dlg)
-        outer.addWidget(QLabel("Seleccioná dos o más bandas para superponer:"))
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        holder = QWidget()
-        inner  = QVBoxLayout(holder)
-        checks = []
-        selected_now = set(self._compare_indices or [])
-        for i, hz in enumerate(bands):
-            cb = QCheckBox(f"{float(hz):.0f} Hz")
-            cb.setChecked(i in selected_now)
-            checks.append(cb)
-            inner.addWidget(cb)
-        inner.addStretch()
-        scroll.setWidget(holder)
-        outer.addWidget(scroll, 1)
-
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        outer.addWidget(btns)
-
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        selected = [i for i, cb in enumerate(checks) if cb.isChecked()]
-        self._compare_indices = selected if len(selected) > 1 else None
-        self.view.set_compare_bands(self._compare_indices)
-
-    def _prompt_band_properties(self):
-        if not self._compare_indices:
-            return
-        bands = self.view._bands
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Propiedades de bandas")
-        form = QFormLayout(dlg)
-
-        rows = {}   # band_index -> (btn_color, spin_width, combo_dash)
-        for pos, i in enumerate(self._compare_indices):
-            style   = self._compare_styles.get(i, {})
-            default_color = _COMPARE_COLORS[pos % len(_COMPARE_COLORS)]
-
-            row_widget = QWidget()
-            row = QHBoxLayout(row_widget)
-            row.setContentsMargins(0, 0, 0, 0)
-
-            btn_color = QPushButton()
-            btn_color.setAutoDefault(False)
-            btn_color.setFixedSize(28, 20)
-            btn_color.color_hex = style.get('color', default_color)
-            btn_color.setStyleSheet(f"background:{btn_color.color_hex};border:1px solid #555;")
-
-            def _pick(checked=False, _btn=btn_color):
-                c = QColorDialog.getColor(self._to_qcolor(_btn.color_hex), dlg)
-                if c.isValid():
-                    _btn.color_hex = c.name()
-                    _btn.setStyleSheet(f"background:{_btn.color_hex};border:1px solid #555;")
-            btn_color.clicked.connect(_pick)
-            row.addWidget(btn_color)
-
-            spin_width = _NumEdit()
-            spin_width.setRange(0.5, 10.0)
-            spin_width.setSingleStep(0.5)
-            spin_width.setValue(style.get('width', 2.5))
-            row.addWidget(spin_width)
-
-            combo_dash = QComboBox()
-            combo_dash.addItems(_DASH_STYLES)
-            combo_dash.setCurrentText(style.get('dash', 'solid'))
-            row.addWidget(combo_dash)
-
-            rows[i] = (btn_color, spin_width, combo_dash)
-            form.addRow(f"{float(bands[i]):.0f} Hz:", row_widget)
-
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        form.addRow(btns)
-
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        for i, (btn_color, spin_width, combo_dash) in rows.items():
-            self._compare_styles[i] = {
-                'color': btn_color.color_hex,
-                'width': spin_width.value(),
-                'dash':  combo_dash.currentText(),
-            }
-        self.view.set_compare_styles(self._compare_styles)
 
     def _reset_scale(self):
         self._min_db = None
@@ -829,7 +905,7 @@ class _ViewSection(QWidget):
         self.view.set_show_info(show)
 
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
-        self.view.export_image(path, dpi=dpi, fmt=fmt, on_done=on_done)
+        self.view.export_image(path, dpi=dpi, fmt=fmt, on_done=on_done)      # el tamaño sale de Opciones ▸ Imágenes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -851,7 +927,7 @@ class TabDirectividad(QWidget):
         self._eq_ref_spl     = None
         self._current_el_idx  = None
         self._plane            = "XY"
-        self._show_info        = True
+        self._show_info        = False
         self._current_band_idx = 0
         self._npz: dict | None = None   # resultados cargados de un .npz (sin MicArray): {nota: {...}}
         self._unit = "dB SPL"          # 'dBFS' si se calculó sin calibrar
@@ -1139,6 +1215,12 @@ class TabDirectividad(QWidget):
             holder.addWidget(current['w'])
 
         build()
+        if sec._open_tab:
+            tw = current['w']
+            for k in range(tw.count()):
+                if tw.tabText(k) == sec._open_tab:
+                    tw.setCurrentIndex(k)
+            sec._open_tab = None
         row = QHBoxLayout()
         btn_reset = QPushButton("Restaurar por defecto")
         btn_reset.setAutoDefault(False)
@@ -1214,30 +1296,12 @@ class TabDirectividad(QWidget):
         n_notes = len(self._ma.notes) if self._ma.notes else 0
         n_total = 1 + n_notes
 
-        # Escala fina (0–1000) para que la barra avance de forma suave dentro
-        # de cada ítem, en base al progreso por posición que ya reporta
-        # compute_directivity(), en vez de saltar sólo entre ítems completos.
-        _PROGRESS_SCALE = 1000
-        dlg = QProgressDialog("Iniciando…", None, 0, _PROGRESS_SCALE, self.window())
-        dlg.setWindowTitle("Calculando directividad")
-        dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        dlg.setMinimumDuration(0)
-        dlg.setValue(0)
-
+        # El progreso se ve en la barra de estado (sin diálogo modal: una ventana extra que aparece y
+        # desaparece hacía parpadear la aplicación).
         self._worker = _ComputeAllWorker(self._ma, bands, ref_az, ref_th)
         self._worker.log.connect(self.log)
-        self._worker.progress.connect(
-            lambda cur, tot, lbl, _d=dlg: (
-                _d.setLabelText(f"Calculando: {lbl}" if lbl else "Finalizando…"),
-            )
-        )
-        self._worker.overall_progress.connect(
-            lambda frac, _d=dlg: _d.setValue(int(frac * _PROGRESS_SCALE))
-        )
-        self._worker.all_done.connect(lambda _d=dlg: self._on_all_done(_d))
-        self._worker.error.connect(lambda msg, _d=dlg: (
-            _d.close(), self._on_error(msg)
-        ))
+        self._worker.all_done.connect(self._on_all_done)
+        self._worker.error.connect(self._on_error)
 
         self.log.emit(
             f"[Directividad] Iniciando cómputo — "
@@ -1245,9 +1309,7 @@ class TabDirectividad(QWidget):
         )
         self._worker.start()
 
-    def _on_all_done(self, dlg: QProgressDialog):
-        dlg.setValue(dlg.maximum())
-        dlg.close()
+    def _on_all_done(self):
         # Mostrar resultados del audio completo por defecto
         self._nota = "Todo el audio"
         self._show_results(self._ma)
@@ -1332,7 +1394,7 @@ class TabDirectividad(QWidget):
         for sec in self._sections.values():
             sec.set_plane(self._plane)
 
-        self._show_info = params.get('show_info', True)
+        self._show_info = params.get('show_info', False)
         for sec in self._sections.values():
             sec.set_show_info(self._show_info)
 
@@ -1354,6 +1416,15 @@ class TabDirectividad(QWidget):
             self.log.emit("[Dir] Sin datos para guardar.")
             return
 
+        # Primero el DPI (afecta el nombre sugerido del archivo), después dónde guardarlo.
+        from ui.export_utils import get_export_defaults
+        dpi, ok = QInputDialog.getInt(
+            self, "Resolución de exportación", "DPI (el tamaño físico es fijo, ver Opciones ▸ Imágenes):",
+            get_export_defaults()[0], 72, 1200, 1
+        )
+        if not ok:
+            return
+
         mode_label = _MODE_LABELS.get(mode, mode)
         nota = (self._nota
                 .replace("Todo el audio", "todo")
@@ -1362,18 +1433,24 @@ class TabDirectividad(QWidget):
         if mode != "spectrum":
             bi   = min(self._current_band_idx, len(self._full_bands) - 1)
             freq = int(round(float(self._full_bands[bi])))
-            suggested = f"dir_{mode_label}_{freq}Hz_{nota}.png"
+            cmp_idx = [i for i in (self._sections[mode]._compare_indices or []) if i < len(self._full_bands)]
+            if mode == "polar2d" and len(cmp_idx) >= 2:      # comparación: todas las bandas superpuestas
+                freq = "-".join(str(int(round(float(self._full_bands[i])))) for i in sorted(cmp_idx))
+            suggested = f"dir_{mode_label}_{freq}Hz_{nota}_{dpi}dpi.png"
         else:
-            suggested = f"dir_{mode_label}_{nota}.png"
+            suggested = f"dir_{mode_label}_{nota}_{dpi}dpi.png"
 
         # El SVG del Espectro no es fiel (las barras no se recortan al eje): sólo PNG/JPEG/WEBP
         filters = ("PNG (*.png);;JPEG (*.jpg);;WEBP (*.webp)" if mode == "spectrum"
                    else "PNG (*.png);;SVG vectorial (*.svg);;JPEG (*.jpg);;WEBP (*.webp)")
+        from ui.export_utils import get_last_export_dir, set_last_export_dir
+        start = str(Path(get_last_export_dir()) / suggested)
         path, selected_filter = QFileDialog.getSaveFileName(
-            self, "Guardar imagen", suggested, filters
+            self, "Guardar imagen", start, filters
         )
         if not path:
             return
+        set_last_export_dir(str(Path(path).parent))
 
         fmt_by_filter = {
             "PNG (*.png)": ("png", ".png"),
@@ -1387,12 +1464,6 @@ class TabDirectividad(QWidget):
 
         if fmt == 'svg':
             dpi = 300   # vectorial: el DPI no aplica, pero el parámetro existe igual
-        else:
-            dpi, ok = QInputDialog.getInt(
-                self, "Resolución de exportación", "DPI:", 300, 72, 1200, 1
-            )
-            if not ok:
-                return
 
         self._sections[mode].export_image(path, dpi=dpi, fmt=fmt)
 
@@ -1406,8 +1477,8 @@ class TabDirectividad(QWidget):
         modes : vistas a exportar (None = las 4).
         fmt   : 'png' o 'svg'; el SVG (vectorial) sólo aplica a Polar 2D; el resto sale en PNG.
 
-        Nombres: {prefix}_{freq}Hz_{vista}.png  (3D/Esfera/Polar2D)
-                 {prefix}_{vista}.png            (Espectro)
+        Nombres: {prefix}_{freq}Hz_{vista}_{dpi}dpi.png  (3D/Esfera/Polar2D)
+                 {prefix}_{vista}_{dpi}dpi.png            (Espectro)
         """
         if self._full_bands is None:
             self.log.emit("[Dir] Sin datos para exportar.")
@@ -1429,9 +1500,10 @@ class TabDirectividad(QWidget):
             for bi in band_indices:
                 freq = int(round(float(self._full_bands[bi])))
                 ext = "svg" if (fmt == "svg" and mode == "polar2d") else "png"
-                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}.{ext}"))
+                dpi_tag = "" if ext == "svg" else f"_{dpi}dpi"   # vectorial: el DPI no aplica
+                tasks.append((mode, bi, f"{prefix}_{freq}Hz_{_MODE_LABELS[mode]}{dpi_tag}.{ext}"))
         if "spectrum" in modes:
-            tasks.append(("spectrum", None, f"{prefix}_{_MODE_LABELS['spectrum']}.png"))
+            tasks.append(("spectrum", None, f"{prefix}_{_MODE_LABELS['spectrum']}_{dpi}dpi.png"))
 
         if not tasks:
             self.log.emit("[Dir] No hay gráficos seleccionados para exportar.")

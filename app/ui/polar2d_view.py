@@ -55,7 +55,7 @@ class Polar2DView(QWidget):
         self._band_index = 0
         self._el_index = None
         self._plane = "XY"
-        self._show_info = True
+        self._show_info = False
         self._compare_bands = None
         self._compare_styles = {}
         self._tick_font_size = FONT_SIZE
@@ -86,6 +86,7 @@ class Polar2DView(QWidget):
         self._plot.hideAxis('left')
         self._plot.getPlotItem().setMenuEnabled(False)
         self._legend = None
+        self._plot.getPlotItem().legend = None
 
         self._info_label = QLabel(self._plot)
         self._info_label.setStyleSheet(
@@ -197,23 +198,11 @@ class Polar2DView(QWidget):
     def apply_theme(self, palette: dict):
         pass   # el fondo del gráfico queda blanco fijo, ver tab_directividad.py
 
-    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None):
-        import pyqtgraph.exporters as pg_exporters
-        from ui.export_utils import EXPORT_BASE_W, set_png_dpi
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, size_cm=None):
+        """Tamaño físico fijo (Opciones ▸ Gráficos ▸ Imágenes); el DPI sólo define los píxeles. Ver export_utils."""
+        from ui.export_utils import export_pg_view
         try:
-            if fmt == 'svg':
-                from ui.export_utils import export_pg_svg
-                export_pg_svg(self._plot, path, dpi)
-                if on_done:
-                    on_done(True)
-                return
-            else:
-                exporter = pg_exporters.ImageExporter(self._plot.getPlotItem())
-                # re-renderiza la escena (vectorial) a este ancho: nítido, no es una captura
-                exporter.parameters()['width'] = int(round(EXPORT_BASE_W * dpi / 96))
-            exporter.export(path)
-            if fmt != 'svg':
-                set_png_dpi(path, dpi)
+            export_pg_view(self, path, dpi, fmt, size_cm)
             if on_done:
                 on_done(True)
         except Exception as e:
@@ -265,14 +254,16 @@ class Polar2DView(QWidget):
             ang = np.radians(rotation + np.asarray(theta_deg, float))
             return r * np.cos(ang), r * np.sin(ang)
 
-        self._plot.clear()
-        if self._legend is not None:
-            scene = self._legend.scene()
-            if scene is not None:              # puede haber salido ya de la escena (plot.clear())
-                scene.removeItem(self._legend)
-            self._legend = None
+        self._plot.clear()          # también vacía las entradas de la leyenda, pero no la leyenda en sí
 
-        ring_color = self._style.get('ring_color') or '#000000'
+        st = self._style
+        ring_color = st.get('ring_color') or '#000000'
+        ring_pen   = pg.mkPen(ring_color, width=float(st.get('ring_width', 1)),
+                              style=_DASH_QT.get(st.get('ring_dash', 'dot'), Qt.PenStyle.DotLine))
+        spoke_pen  = pg.mkPen(st.get('spoke_color') or ring_color, width=float(st.get('spoke_width', 1)),
+                              style=_DASH_QT.get(st.get('spoke_dash', 'dot'), Qt.PenStyle.DotLine))
+        # Líneas radiales cada N grados (0 = ninguna); los números de ángulo se siguen mostrando cada 30°
+        spoke_step = float(st.get('spoke_step', 30 if st.get('show_spokes', True) else 0) or 0)
         ring_font  = self._style.get('ring_font_size', 9)
         ring_vals  = np.arange(math.ceil(r_floor / step) * step, r_ceil + 0.01, step)
         ring_vals  = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
@@ -280,7 +271,7 @@ class Polar2DView(QWidget):
         for db in ring_vals:
             r_ring = float(db_to_r(db))
             rx, ry = to_xy(theta_ring, r_ring)
-            circle = pg.PlotCurveItem(rx, ry, pen=pg.mkPen(ring_color, width=1, style=Qt.PenStyle.DotLine))
+            circle = pg.PlotCurveItem(rx, ry, pen=ring_pen)
             self._plot.addItem(circle)
             label_ang = self._style.get('ring_label_angle', 92)
             lx, ly = to_xy(label_ang, r_ring)
@@ -292,17 +283,18 @@ class Polar2DView(QWidget):
             self._plot.addItem(txt)
 
         for a in range(0, 360, 30):
-            ax, ay = to_xy(a, 1.06)
+            ax, ay = to_xy(a, 1.14)   # separados del borde exterior, no pegados al anillo
             txt = pg.TextItem(f"{a}°", color='#000000', anchor=(0.5, 0.5))
             txt.setFont(_px_font(self._tick_font_size))
             txt.setPos(ax, ay)
             self._plot.addItem(txt)
-            sx, sy = to_xy(a, 1.0)
-            spoke = pg.PlotCurveItem([0, sx], [0, sy], pen=pg.mkPen(ring_color, width=1, style=Qt.PenStyle.DotLine))
-            self._plot.addItem(spoke)
 
-        if multi:
-            self._legend = self._plot.addLegend(offset=(-10, 10))
+        if spoke_step > 0:
+            for a in np.arange(0, 360, spoke_step):
+                sx, sy = to_xy(a, 1.0)
+                self._plot.addItem(pg.PlotCurveItem([0, sx], [0, sy], pen=spoke_pen))
+
+        self._update_legend(multi)
 
         default_width = self._style.get('line_width', 2.5)
         for i, ring in enumerate(rings):
@@ -331,6 +323,34 @@ class Polar2DView(QWidget):
         self._info_label.setVisible(self._show_info)
 
         self._db_to_r_params = (r_floor, dyn_range, rotation)
+
+    _LEGEND_POS = {                      # (ancla del cuadro, ancla del gráfico, desplazamiento)
+        'top-right':    ((1, 0), (1, 0), (-10, 10)),
+        'top-left':     ((0, 0), (0, 0), (10, 10)),
+        'bottom-right': ((1, 1), (1, 1), (-10, -10)),
+        'bottom-left':  ((0, 1), (0, 1), (10, -10)),
+    }
+
+    def _update_legend(self, multi: bool):
+        """Una sola leyenda que se reutiliza: quitarla de la escena y volver a pedirla (addLegend devuelve la
+        misma ya sacada) hacía que desapareciera al editar colores/grosores."""
+        pi = self._plot.getPlotItem()
+        if not multi or not self._style.get('show_legend', True):
+            if pi.legend is not None:
+                pi.legend.setVisible(False)
+            self._legend = None
+            return
+        if pi.legend is None or pi.legend.scene() is None:
+            pi.legend = None
+            self._legend = self._plot.addLegend(offset=(-10, 10))
+        else:
+            self._legend = pi.legend
+        lg = self._legend
+        lg.setVisible(True)
+        pos = self._LEGEND_POS.get(self._style.get('legend_pos', 'top-right'), self._LEGEND_POS['top-right'])
+        lg.anchor(*pos)
+        lg.setLabelTextSize(f"{int(self._style.get('legend_font_size', FONT_SIZE))}px")
+        lg.setLabelTextColor('#000000')
 
     # ── Hover ────────────────────────────────────────────────────────────
 

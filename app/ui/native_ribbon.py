@@ -64,11 +64,10 @@ class NativeRibbon(QWidget):
     sig_load_audio      = pyqtSignal()
     sig_edit_patterns   = pyqtSignal()
     sig_open_notas      = pyqtSignal()
-    sig_save_tensor     = pyqtSignal()
-    sig_load_tensor     = pyqtSignal()
-    sig_load_polar_npz  = pyqtSignal()
-    sig_save_polar_npz  = pyqtSignal()
-
+    sig_open_options    = pyqtSignal(str)     # 'polar2d' | 'spectrum' | 'sphere' | '3d' | 'images'
+    sig_save_session    = pyqtSignal()
+    sig_save_session_as = pyqtSignal()
+    sig_load_session    = pyqtSignal()
     sig_apply_hpf        = pyqtSignal(float)
     sig_align_takes      = pyqtSignal(float, float, object, float)
     sig_align_preview    = pyqtSignal(float, float, object)
@@ -83,7 +82,6 @@ class NativeRibbon(QWidget):
     sig_load_mask        = pyqtSignal()
 
     sig_compute_dir         = pyqtSignal(str, float, float, int, int)
-    sig_save_dir_npz        = pyqtSignal()
     sig_export_all_images   = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
 
@@ -126,11 +124,12 @@ class NativeRibbon(QWidget):
     def _wire(self):
         b = self._b
         for name in (
-            'tab_changed', 'sig_load_audio', 'sig_edit_patterns', 'sig_save_tensor', 'sig_load_tensor',
-            'sig_load_polar_npz', 'sig_save_polar_npz', 'sig_apply_hpf', 'sig_align_takes',
+            'tab_changed', 'sig_load_audio', 'sig_edit_patterns',
+            'sig_save_session', 'sig_save_session_as', 'sig_load_session',
+            'sig_apply_hpf', 'sig_align_takes',
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
-            'sig_save_mask', 'sig_load_mask', 'sig_compute_dir', 'sig_save_dir_npz',
+            'sig_save_mask', 'sig_load_mask', 'sig_compute_dir',
             'sig_export_all_images', 'sig_dir_display_changed', 'sig_theme_toggled',
         ):
             src = 'sig_tab_changed' if name == 'tab_changed' else name
@@ -268,10 +267,11 @@ class NativeRibbon(QWidget):
         act('patterns',    "Patrones de archivos…", "Cómo se llaman los archivos de audio ({MIC} = micrófono, {H} = azimut)", b.editPatterns)
         self._make_view_actions()
         act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
-        act('load_tensor', "Cargar sesión…",  "Carga una sesión (.cclp) o tensor (.npz) guardado", b.loadTensor)
-        act('save_tensor', "Guardar sesión…", "Guarda tensor + calibración + notas + directividad en .cclp", b.saveTensor, False)
-        act('load_polar',  "Cargar directividad (sin audios)…", "Abre un .npz de directividad: los gráficos y su configuración, sin necesidad de los audios", b.loadPolarNpz)
-        act('save_polar',  "Guardar directividad (sin audios)…", "Guarda los resultados calculados y la configuración de los gráficos en un .npz (sin los audios)", b.savePolarNpz, False)
+        act('load_session', "Cargar",  "Abre una sesión (.cclp) guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
+        act('save_session', "Guardar", "Guarda en el mismo archivo .cclp cargado o guardado antes; si todavía no hay ninguno, pregunta dónde (como 'Guardar como…')", b.saveSession, False)
+        act('save_session_as', "Guardar como…", "Guarda los gráficos ya calculados (global y por nota) y toda la interfaz, sin los audios, eligiendo el archivo .cclp", b.saveSessionAs, False)
+        # "Cargar/Guardar directividad (.npz)…" se sacó del menú: la sesión .cclp ya cubre el mismo caso
+        # (mismo contenido, sin audio) y guarda además toda la interfaz, no sólo Directividad.
         act('align_takes', "Alinear entre tomas (onset)…", "Opcional: alinea el inicio de cada toma para superponerlas en la vista de Procesamiento", lambda: self._dlg_takes.exec(), False)
         act('align_mics',  "Alinear entre micrófonos (retardo)…", "Opcional: corrige el retardo de cada micrófono respecto al de referencia (GCC-PHAT)", lambda: self._dlg_mics.exec(), False)
         act('calibrar',    "Calibración…",    "Abre la calibración: al aplicarla, el tensor pasa a dB SPL automáticamente", b.openCalibracion, False)
@@ -311,7 +311,7 @@ class NativeRibbon(QWidget):
 
         def load_info():
             info.blockSignals(True)
-            info.setChecked(bool(b.state.get('show_info', True)))
+            info.setChecked(bool(b.state.get('show_info', False)))
             info.blockSignals(False)
 
         info.toggled.connect(lambda on: (b.state.update(show_info=on), b.dirDisplayChanged()))
@@ -350,10 +350,10 @@ class NativeRibbon(QWidget):
     def _make_menubar(self) -> QMenuBar:
         mb = QMenuBar()
         m = mb.addMenu("&Archivo")
-        for n in ('load_audio', 'patterns', 'load_tensor', 'save_tensor'):
+        for n in ('load_audio', 'patterns'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('load_polar', 'save_polar'):
+        for n in ('load_session', 'save_session', 'save_session_as'):
             m.addAction(self._act[n])
         m.addSeparator()
         m.addMenu("Exportar").addAction(self._act['export_all'])
@@ -376,6 +376,17 @@ class NativeRibbon(QWidget):
         m.addSeparator()
         for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
+
+        m = mb.addMenu("&Opciones")
+        g = m.addMenu("Gráficos")
+        for key, text in (("polar2d", "Polar 2D…"), ("spectrum", "Espectro…"), ("sphere", "Esfera 3D…"),
+                          ("3d", "Superficie 3D…"), ("images", "Imágenes…")):
+            if key == "images":
+                g.addSeparator()
+            a = g.addAction(text)
+            a.triggered.connect(lambda _=False, k=key: self.sig_open_options.emit(k))
+            a.setToolTip("Tamaño, DPI y formato de las imágenes exportadas" if key == "images"
+                         else "Todas las opciones de este gráfico (escala, ejes, líneas, estilos…)")
 
         m = mb.addMenu("A&yuda")
         m.addAction("Acerca de…", self._about)
@@ -406,8 +417,9 @@ class NativeRibbon(QWidget):
         QMessageBox.about(
             self.window(), "Acerca de",
             f"<b>{APP_NAME}</b> &nbsp;v{__version__}<br><br>"
-            "Análisis y visualización de la directividad polar de la voz cantada, "
-            "medida con un array semicircular de micrófonos.")
+            "GUI realizada para mediciones de patrón polar.<br><br>"
+            "Dudas, bugs o recomendaciones: "
+            "<a href=\"mailto:abellamasm@gmail.com\">abellamasm@gmail.com</a>")
 
     def _make_tabbar(self) -> QHBoxLayout:
         h = QHBoxLayout()
@@ -636,8 +648,10 @@ class NativeRibbon(QWidget):
                 (None, self._combo('colorscale', 84, "Paleta de colores de los gráficos 3D y esfera",
                                    [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis")], disp))]),
             ("Espectro", [
-                ("Audio", self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
-                                      [("Originales", 0), ("Igualados en nivel", 1)], disp)),
+                ("Audio", self._with_info(
+                    self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
+                                [("Originales", 0), ("Igualados en nivel", 1)], disp),
+                    "Espectro: Originales / Igualados en nivel", '<b>Originales</b><br>Espectro del micrófono de referencia en cada toma, tal como se midió. Incluye las diferencias de nivel con que el cantante emitió en cada toma.<br><br><b>Igualados en nivel</b><br>Espectro después de la corrección de emisión que usa el cálculo de directividad: se compensa, banda por banda, la diferencia de nivel de cada toma respecto de la toma de referencia (Ref. azimut). Así todas las tomas quedan al mismo nivel y solo importa la forma del espectro, no cuánto cantó más fuerte o más suave en cada toma.<br><br>Como la corrección se calcula con ese mismo micrófono, en <i>Igualados</i> todas las tomas coinciden; la vista Por toma sirve sobre todo con <i>Originales</i>.')),
                 ("Curvas", self._combo('spec_global', 84, "Global: promedio de todos los ángulos. Por toma: una curva por azimuth",
                                        [("Global", True), ("Por toma", False)], disp))]),
         ])
@@ -675,7 +689,6 @@ class NativeRibbon(QWidget):
         self._act['calibrar'].setEnabled(True)
         self._act['align_takes'].setEnabled(True)
         self._act['align_mics'].setEnabled(True)
-        self._act['save_tensor'].setEnabled(True)
 
         sr = getattr(ma, 'sr', 0) // 1000
         self._chip_last = (f"{len(angles)} × {len(thetas)} · {sr} kHz" + (' · SPL ✓' if is_spl else ''), True)
@@ -705,7 +718,7 @@ class NativeRibbon(QWidget):
         self._fill(self._c_el, [("Auto (0°)", 0)] + [(f'{round(float(t))}°', i + 1) for i, t in enumerate(thetas)])
         self._c_el.setCurrentIndex(0)
         self._b.state['el_idx'] = None
-        for n in ('save_polar', 'export_all'):
+        for n in ('save_session', 'save_session_as', 'export_all'):
             self._act[n].setEnabled(True)
 
     def set_dir_status(self, text: str):
@@ -719,7 +732,7 @@ class NativeRibbon(QWidget):
             colorscale  = str(s.get('colorscale', 'Plasma')),
             el_index    = s.get('el_idx'),
             plane       = str(s.get('polar_plane', 'XY')),
-            show_info   = bool(s.get('show_info', True)),
+            show_info   = bool(s.get('show_info', False)),
             symmetry    = str(s.get('symmetry', 'none')),
             nota        = str(s.get('nota', 'Todo el audio')),
             spec_data   = int(s.get('spec_data', 0)),

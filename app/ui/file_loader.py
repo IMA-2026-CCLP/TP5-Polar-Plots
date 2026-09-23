@@ -17,7 +17,7 @@ _DEF_REF   = "mic_ref_ang_forte_{H}.wav"
 
 
 class _PatternsDialog(QDialog):
-    def __init__(self, array_pattern: str, ref_pattern: str, parent=None):
+    def __init__(self, array_pattern: str, ref_pattern: str, parent=None, accept_text: str = "Aceptar"):
         super().__init__(parent)
         self.setWindowTitle("Patrones de nombres de archivo")
         self.setMinimumWidth(460)
@@ -36,6 +36,8 @@ class _PatternsDialog(QDialog):
         form.addRow("Referencia (opcional):", self.edit_ref)
         lay.addLayout(form)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText(accept_text)
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
@@ -51,22 +53,28 @@ class FileLoader(QObject):
         self._settings = settings
         self._worker: Worker | None = None
         self._ma = None
-        self._loaded_ui_state: dict = {}
 
     # ── Patrones ──────────────────────────────────────────────────────────
     def patterns(self) -> tuple[str, str]:
         s = self._settings
         return (str(s.value("array_pattern", _DEF_ARRAY)), str(s.value("ref_pattern", _DEF_REF)))
 
-    def edit_patterns(self, parent=None):
-        dlg = _PatternsDialog(*self.patterns(), parent)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._settings.setValue("array_pattern", dlg.edit_array.text().strip() or _DEF_ARRAY)
-            self._settings.setValue("ref_pattern", dlg.edit_ref.text().strip())
+    def edit_patterns(self, parent=None, title: str | None = None, accept_text: str = "Aceptar") -> bool:
+        """Modal de patrones; guarda si se acepta. Devuelve True si se aceptó."""
+        dlg = _PatternsDialog(*self.patterns(), parent, accept_text)
+        if title:
+            dlg.setWindowTitle(title)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return False
+        self._settings.setValue("array_pattern", dlg.edit_array.text().strip() or _DEF_ARRAY)
+        self._settings.setValue("ref_pattern", dlg.edit_ref.text().strip())
+        return True
 
     # ── Carga ─────────────────────────────────────────────────────────────
     def load_audio(self, parent=None):
-        """Pide la carpeta y carga con los patrones guardados (sin paso extra de 'procesar')."""
+        """Primero confirma los patrones de nombres de archivo (modal) y recién después pide la carpeta."""
+        if not self.edit_patterns(parent, "Cargar audio — patrones de nombres de archivo", "Cargar"):
+            return
         path = QFileDialog.getExistingDirectory(
             parent, "Carpeta con los audios de la medición", str(self._settings.value("last_audio_dir", "")))
         if not path:
@@ -79,24 +87,6 @@ class FileLoader(QObject):
             return MicArray.from_audio(path, arr, ref or None)
 
         self._start(_run, f"[Carga] Audios de {path}", "Cargando audios…")
-
-    def load_session(self, parent=None):
-        path, _ = QFileDialog.getOpenFileName(
-            parent, "Cargar sesión", "", "Sesión CCLP (*.cclp);;NPZ tensor (*.npz)")
-        if not path:
-            return
-
-        def _run():
-            from mic_array.patron import MicArray
-            from core.session import load_cclp
-            if path.endswith('.cclp'):
-                ma, ui_state = load_cclp(path)
-                self._loaded_ui_state = ui_state
-                return ma
-            self._loaded_ui_state = {}
-            return MicArray.from_tensor(path)
-
-        self._start(_run, f"[Carga] Sesión {path}", "Cargando sesión…")
 
     def _start(self, fn, msg: str, label: str):
         if self._worker and self._worker.isRunning():
@@ -114,21 +104,3 @@ class FileLoader(QObject):
         self.log.emit(f"[Carga] Tensor listo — {ma.tensor.shape}")
         self.ma_ready.emit(ma)
 
-    # ── Guardado ──────────────────────────────────────────────────────────
-    def save_session(self, parent=None, ui_state: dict | None = None):
-        if self._ma is None:
-            return
-        path, selected_filter = QFileDialog.getSaveFileName(
-            parent, "Guardar sesión", "", "Sesión CCLP (*.cclp);;NPZ tensor (*.npz)")
-        if not path:
-            return
-        # El diálogo nativo no siempre agrega la extensión del filtro elegido
-        # → si no la tipeó, se infiere del filtro, con .cclp como default.
-        if not path.lower().endswith(('.cclp', '.npz')):
-            path += '.npz' if 'npz' in selected_filter.lower() else '.cclp'
-        if path.lower().endswith('.cclp'):
-            from core.session import save_cclp
-            save_cclp(path, self._ma, ui_state or {})
-        else:
-            self._ma.save(path)
-        self.log.emit(f"[Carga] Sesión guardada → {path}")

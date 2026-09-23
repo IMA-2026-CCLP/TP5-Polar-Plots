@@ -25,11 +25,6 @@ from ui.tab_directividad     import TabDirectividad
 from core.data_store         import load_results, save_results
 
 
-# Controles de Directividad que se guardan con el .npz para reabrir los gráficos igual
-_DIR_UI_KEYS = ('bands', 'hz_min', 'hz_max', 'ref_az', 'ref_th', 'colorscale', 'el_idx', 'polar_plane',
-                'show_info', 'symmetry', 'nota', 'spec_data', 'spec_global')
-
-
 class _NotasWindow(QWidget):
     """Ventana no modal de Notas: parámetros de detección arriba y la vista de segmentos/F0 abajo."""
     def __init__(self, params: QWidget, view: QWidget, parent=None):
@@ -57,6 +52,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(QSS)
 
         self._ma       = None
+        self._session_path: str | None = None   # último .cclp guardado/cargado — "Guardar" reusa esto
         self._settings = QSettings("AcousticTools", "PolarAnalyzerV2")
         import plot.balloon as _balloon
         _balloon.set_theme(_theme.LIGHT)   # gráficos siempre en claro (fondo blanco), aunque la app esté en oscuro
@@ -81,7 +77,11 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         self._stack.addWidget(self.view_prepro)     # 0  (home)
         self._stack.addWidget(self.view_dir)        # 1
-        self._stack.setCurrentIndex(0)
+        # La ventana se muestra por primera vez con las vistas web (Directividad) visibles y recién después
+        # vuelve a Procesamiento (ver showEvent): si esas vistas se muestran más tarde, Qt recrea la ventana
+        # y la app parece cerrarse y reabrirse ("pantallazo") al cambiar de pestaña o graficar.
+        self._stack.setCurrentIndex(1)
+        self._first_show = True
 
         # Layout central
         # Menú + pestañas arriba a todo el ancho; parámetros en un dock movible a la izquierda
@@ -130,12 +130,12 @@ class MainWindow(QMainWindow):
         rb.tab_changed.connect(self._on_tab_changed)
         # ── Archivo
         rb.sig_load_audio.connect(lambda: self.loader.load_audio(self))
-        rb.sig_load_tensor.connect(lambda: self.loader.load_session(self))
         rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
         rb.sig_open_notas.connect(self._open_notas)
-        rb.sig_save_tensor.connect(self._on_save_session)
-        rb.sig_load_polar_npz.connect(self._on_load_polar_npz)
-        rb.sig_save_polar_npz.connect(self._on_save_polar_npz)
+        rb.sig_open_options.connect(self._open_graph_options)
+        rb.sig_save_session.connect(self._on_save_session)
+        rb.sig_save_session_as.connect(self._on_save_session_as)
+        rb.sig_load_session.connect(self._on_load_session)
 
         # ── Procesamiento
         rb.sig_plot_params.connect(self._on_plot_params)
@@ -154,7 +154,6 @@ class MainWindow(QMainWindow):
 
         # ── Directividad
         rb.sig_compute_dir.connect(self._on_compute_dir)
-        rb.sig_save_dir_npz.connect(self._on_save_dir_npz)
         rb.sig_export_all_images.connect(self._on_export_all_images)
         rb.sig_dir_display_changed.connect(self._on_dir_display_changed)
 
@@ -216,6 +215,15 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(idx)
         self._params_stack.setCurrentIndex(idx)
 
+    def _open_graph_options(self, kind: str):
+        """Opciones ▸ Gráficos ▸ …: el mismo modal de Propiedades del gráfico (o el de Imágenes)."""
+        if kind == "images":
+            from ui.options_dialogs import ImageOptionsDialog
+            ImageOptionsDialog(self).exec()
+            return
+        self.ribbon._switch_tab(1)          # Directividad
+        self.view_dir._show_properties_panel(kind)
+
     def _open_notas(self):
         self.notas_win.show()
         self.notas_win.raise_()
@@ -223,15 +231,14 @@ class MainWindow(QMainWindow):
 
     # ── Slots de Archivo ──────────────────────────────────────────────────────
 
-    def _on_save_session(self):
-        self.loader.save_session(self, ui_state=self.ribbon._bridge.state.copy())
+    # Sesión .cclp: mismo contenido que la directividad .npz (core/data_store.py), sin audio, más
+    # el estado COMPLETO de la interfaz (no sólo los controles de Directividad). Ver core/session.py.
 
-    def _on_load_polar_npz(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Cargar directividad", "", "NPZ (*.npz)"
-        )
+    def _on_load_session(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Cargar sesión", "", "Sesión CCLP (*.cclp)")
         if path:
             self._load_polar_npz_file(path)
+            self._session_path = path
 
     def _load_polar_npz_file(self, path: str):
         try:
@@ -243,19 +250,40 @@ class MainWindow(QMainWindow):
             notes = self.view_dir.load_from_npz(data)
             self.ribbon.set_dir_computed(data['thetas'])
             self.ribbon.set_notes_loaded(notes)
-            if view.get('ui'):                       # controles como estaban al guardar
-                self.ribbon.apply_ui_state(view['ui'])
-            if view.get('view_dir'):                 # propiedades de cada gráfico
+            if view.get('session_ui'):                # todo el estado de la interfaz
+                self.ribbon.apply_ui_state(view['session_ui'])
+            if view.get('view_dir'):                   # propiedades de cada gráfico
                 self.view_dir.apply_view_config(view['view_dir'])
             self.view_dir.apply_display_params(self.ribbon.get_dir_display_params())
             self.ribbon.set_dir_status(
                 f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
-            self._append_log(f"[Directividad] Cargado desde {path}")
+            self._append_log(f"[Sesión] Cargado desde {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al cargar directividad: {e}")
+            self._append_log(f"[ERROR] Al cargar sesión: {e}")
 
-    def _on_save_polar_npz(self):
+    def _on_save_session(self):
+        """Guardar: si ya se guardó/cargó un .cclp en esta sesión de trabajo, sobrescribe ese mismo
+        archivo sin preguntar (como Ctrl+S en cualquier editor). Si no, se comporta como 'Guardar como…'."""
+        if self._session_path is None:
+            self._on_save_session_as()
+            return
+        ma = self._get_ma_for_session()
+        if ma is not None:
+            self._save_polar_npz_file(self._session_path, ma)
+
+    def _on_save_session_as(self):
+        ma = self._get_ma_for_session()
+        if ma is None:
+            return
+        start = self._session_path or (str(self._settings.value("last_polar_dir", "")) + "/sesion.cclp")
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar sesión como", start, "Sesión CCLP (*.cclp)")
+        if path:
+            self._settings.setValue("last_polar_dir", str(Path(path).parent))
+            self._save_polar_npz_file(path, ma)
+            self._session_path = path
+
+    def _get_ma_for_session(self):
         # OJO: self._ma sólo se actualiza al cargar/preprocesar/calibrar
         # audio (_on_ma_ready) — la directividad (global y por nota) se
         # calcula adentro de TabDirectividad, que mantiene su propia
@@ -268,20 +296,18 @@ class MainWindow(QMainWindow):
         has_notes  = ma is not None and ma.notes and any(
             n.dir_levels is not None for n in ma.notes.values())
         if not has_global and not has_notes:
-            return
-        start = str(self._settings.value("last_polar_dir", "")) + "/directividad.npz"
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar directividad", start, "NPZ (*.npz)")
-        if path:
-            self._settings.setValue("last_polar_dir", str(Path(path).parent))
-            self._save_polar_npz_file(path, ma)
+            self._append_log("[Sesión] Nada calculado todavía: no hay datos de gráficos para guardar "
+                              "(usar Calcular en Directividad primero).")
+            return None
+        return ma
 
     def _save_polar_npz_file(self, path: str, ma):
         try:
             rb = self.ribbon
             st = rb._bridge.state
             view = {
-                'ui': {k: st[k] for k in _DIR_UI_KEYS if k in st},
-                'view_dir': self.view_dir.get_view_config(),
+                'view_dir':   self.view_dir.get_view_config(),
+                'session_ui': st.copy(),    # todo el estado de la interfaz, no sólo Directividad
             }
             save_results(
                 filepath       = path,
@@ -291,9 +317,9 @@ class MainWindow(QMainWindow):
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
                 view           = view,
             )
-            self._append_log(f"[Directividad] Guardado → {path}")
+            self._append_log(f"[Sesión] Guardado → {path}")
         except Exception as e:
-            self._append_log(f"[ERROR] Al guardar NPZ polar: {e}")
+            self._append_log(f"[ERROR] Al guardar sesión: {e}")
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
 
@@ -367,14 +393,16 @@ class MainWindow(QMainWindow):
 
     def _on_save_mask(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar máscara de segmentos", "", "Máscara (*.json)"
+            self, "Guardar máscara de segmentos", "", "Máscara (*.msk)"
         )
         if path:
+            if not path.lower().endswith('.msk'):
+                path += '.msk'
             self.view_notas.save_mask(path)
 
     def _on_load_mask(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Cargar máscara de segmentos", "", "Máscara (*.json)"
+            self, "Cargar máscara de segmentos", "", "Máscara (*.msk);;JSON antiguo (*.json)"
         )
         if path:
             self.view_notas.load_mask(path)
@@ -414,9 +442,6 @@ class MainWindow(QMainWindow):
             return False
         return clicked is btn_go
 
-    def _on_save_dir_npz(self):
-        self._on_save_polar_npz()
-
     def _on_export_all_images(self):
         if self.view_dir._full_bands is None:
             self._append_log("[Dir] Sin datos para exportar.")
@@ -439,12 +464,13 @@ class MainWindow(QMainWindow):
         le_prefix = QLineEdit("directividad")
         form.addRow("Nombre base:", le_prefix)
 
-        le_folder = QLineEdit()
+        from ui.export_utils import get_last_export_dir, set_last_export_dir
+        le_folder = QLineEdit(get_last_export_dir())
         le_folder.setReadOnly(True)
         btn_browse = QPushButton("Examinar…")
 
         def _browse():
-            d = QFileDialog.getExistingDirectory(dlg, "Carpeta de destino")
+            d = QFileDialog.getExistingDirectory(dlg, "Carpeta de destino", le_folder.text())
             if d:
                 le_folder.setText(d)
         btn_browse.clicked.connect(_browse)
@@ -454,16 +480,34 @@ class MainWindow(QMainWindow):
         row.addWidget(btn_browse)
         form.addRow("Carpeta:", row)
 
-        le_dpi = QLineEdit("300")
+        from ui import export_utils as _eu
+        w_cm, h_cm = _eu.get_export_size_cm()
+        dpi0, fmt0 = _eu.get_export_defaults()
+        le_dpi = QLineEdit(str(dpi0))
         le_dpi.setFixedWidth(70)
-        le_dpi.setToolTip("Resolución de la imagen. El ancho en píxeles es 720 × DPI / 96 (300 DPI ≈ 2250 px). "
+        le_dpi.setToolTip("Calidad de la imagen (píxeles por pulgada). No cambia el tamaño físico, sólo la nitidez. "
                           "Se guarda también en el archivo. Valor típico: 300.")
         form.addRow("DPI:", le_dpi)
+        lbl_size = QLabel()
+        lbl_size.setObjectName("rb_status")
+        lbl_size.setToolTip("Se cambia en Opciones ▸ Gráficos ▸ Imágenes")
+
+        def _upd_size(*_):
+            try:
+                d = max(72.0, min(1200.0, float(le_dpi.text().replace(',', '.'))))
+            except ValueError:
+                d = float(dpi0)
+            lbl_size.setText(f"Tamaño fijo {w_cm:g} × {h_cm:g} cm = {round(w_cm / 2.54 * d)} × {round(h_cm / 2.54 * d)} px "
+                             "(Opciones ▸ Gráficos ▸ Imágenes)")
+        le_dpi.textChanged.connect(_upd_size)
+        _upd_size()
+        form.addRow(lbl_size)
 
         combo_fmt = QComboBox()
         combo_fmt.addItem("PNG (imagen)", "png")
         combo_fmt.addItem("SVG (vectorial) — solo Polar 2D", "svg")
         combo_fmt.setToolTip("SVG no se pixela al ampliar. Espectro, Superficie 3D y Esfera se exportan siempre en PNG.")
+        combo_fmt.setCurrentIndex(max(0, combo_fmt.findData(fmt0)))
         form.addRow("Formato:", combo_fmt)
 
         btns = QDialogButtonBox(
@@ -484,6 +528,7 @@ class MainWindow(QMainWindow):
         if not folder:
             self._append_log("[Dir] Exportación cancelada: no se eligió carpeta.")
             return
+        set_last_export_dir(folder)
 
         try:
             dpi = int(float(le_dpi.text().strip().replace(',', '.') or 300))
@@ -503,14 +548,14 @@ class MainWindow(QMainWindow):
             return
         box = QMessageBox(self)
         box.setWindowTitle("Directividad calculada")
-        box.setText("¿Querés guardar el archivo de directividad?")
+        box.setText("¿Querés guardar la sesión?")
         box.setInformativeText("Así podés volver a ver los gráficos más adelante sin reprocesar los audios.")
         btn_save = box.addButton("Guardar…", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Ahora no", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(btn_save)
         box.exec()
         if box.clickedButton() is btn_save:
-            self._on_save_polar_npz()
+            self._on_save_session()
 
     def _on_dir_computed(self, thetas, status: str):
         self.ribbon.set_dir_computed(thetas)
@@ -531,18 +576,6 @@ class MainWindow(QMainWindow):
         self.view_prepro.set_ma(ma)
         self.view_notas.set_ma(ma)
         self.view_dir.set_ma(ma)
-
-        # Restaurar ui_state si viene de un .cclp — se excluyen los toggles
-        # view_3d/view_sphere/view_polar2d/view_spectrum: son preferencia de
-        # panel, no dato de sesión, y sesiones viejas guardadas antes de
-        # cambiar los defaults (sólo 2D+Esfera visibles) traían "true" para
-        # los 4, pisando el default nuevo apenas se disparaba el primer
-        # dirDisplayChanged (cambiar de nota, apagar Info, etc.).
-        ui = self.loader._loaded_ui_state
-        if ui:
-            ui = {k: v for k, v in ui.items() if not k.startswith('view_')}
-            self.ribbon._bridge.state.update(ui)
-            self.loader._loaded_ui_state = {}
 
         self.ribbon.set_ma_loaded(ma)
         if ma.notes:
@@ -607,6 +640,12 @@ class MainWindow(QMainWindow):
         if geom:
             self.restoreGeometry(geom)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._first_show:
+            self._first_show = False
+            QTimer.singleShot(0, lambda: self._stack.setCurrentIndex(self.ribbon._tabs.currentIndex()))
+
     def closeEvent(self, event):
         self._settings.setValue("geometry", self.saveGeometry())
         super().closeEvent(event)
@@ -631,9 +670,5 @@ class _CalibracionDialog(QDialog):
         self._cal_widget.ma_updated.connect(self.ma_updated)
         self._cal_widget.log.connect(self.log)
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        btns.rejected.connect(self.reject)
-
         lay = QVBoxLayout(self)
         lay.addWidget(self._cal_widget, 1)
-        lay.addWidget(btns)
