@@ -21,6 +21,24 @@ Simplificaciones deliberadas de este primer piloto (fáciles de revisar/ajustar 
     ahora estiliza estos círculos.
   - No hay tooltip al pasar el mouse sobre la malla (Plotly sí lo tenía).
 
+Bugs reales encontrados y corregidos tras la primera prueba en una PC real (ver historial de
+commits para el detalle de cada uno):
+  - El shader 'shaded' de pyqtgraph aplica una luz direccional fija que oscurecía casi a negro
+    cualquier cara que no mirara hacia esa dirección — se sacó (sin shader = colores planos,
+    fieles al dato).
+  - El cénit se armaba como una malla de "cap" aparte (anillo + un punto ápice) y, como el
+    anillo no es perfectamente plano (sigue la forma del dato), el ápice podía quedar más bajo
+    que partes del anillo y dejar un hueco visible. Ahora el polo es una fila más de la propia
+    grilla (todas las columnas colapsan al mismo punto): la superficie queda cerrada sin
+    discontinuidades siempre, sin tratamiento especial.
+  - La exportación usaba el último preset de cámara aplicado (self._camera) en vez de la
+    posición VIVA (self._gl.cameraParams()), así que ignoraba cualquier rotación/zoom hecho a
+    mano con el mouse. Ahora lee la cámara viva.
+  - Crear y destruir un GLViewWidget nuevo en cada exportación resultó poco confiable (la
+    segunda exportación seguida en el mismo proceso podía salir con errores de OpenGL e imagen
+    en blanco) — ahora se reusa un único widget de exportación (_get_export_clone) de principio
+    a fin de la sesión de trabajo.
+
 API pública: espejo del subconjunto de BalloonView que usa TabDirectividad para el modo
 '3d' (ver ui/tab_directividad.py::_ViewSection) — mismos nombres de método, misma firma.
 """
@@ -119,6 +137,7 @@ class GL3DView(QWidget):
         self._style:      dict = {}
         self._camera      = dict(_CAMERA_PRESETS["default"])
         self._current_items: list = []
+        self._export_clone = None   # GLViewWidget reusado entre exportaciones, ver _get_export_clone
         # último grid calculado (para reconstruir los mismos items al exportar sin
         # recalcular la malla — ver export_image)
         self._last_grid = None
@@ -282,8 +301,23 @@ class GL3DView(QWidget):
         X = R_r * np.cos(E) * np.cos(P)
         Y = R_r * np.cos(E) * np.sin(P)
         Z = R_r * np.sin(E)
+        C = R_clip
 
-        self._last_grid = dict(X=X, Y=Y, Z=Z, C=R_clip, cmin=cmin, cmax=cmax,
+        # Cierre del cénit: se agrega el polo como una fila más de la MISMA grilla (todas las
+        # columnas colapsan al mismo punto XYZ) en vez de una malla de "cap" aparte — así la
+        # triangulación estándar en abanico cierra siempre sola, sin depender de que el último
+        # anillo sea plano (no lo es: sigue la forma del dato, y un cap separado con un solo
+        # punto ápice podía quedar más bajo que partes del anillo y dejar un hueco visible).
+        if zenith_dB is not None:
+            n_p = X.shape[1]
+            z_norm  = float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
+            z_color = float(np.clip(zenith_dB, cmin, cmax))
+            X = np.vstack([X, np.zeros(n_p)])
+            Y = np.vstack([Y, np.zeros(n_p)])
+            Z = np.vstack([Z, np.full(n_p, z_norm)])
+            C = np.vstack([C, np.full(n_p, z_color)])
+
+        self._last_grid = dict(X=X, Y=Y, Z=Z, C=C, cmin=cmin, cmax=cmax,
                                 zenith_dB=zenith_dB, vmin=vmin, span=span)
 
         for it in self._current_items:
@@ -312,14 +346,15 @@ class GL3DView(QWidget):
 
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
-        cap = self._make_cap_item(g)
-        if cap is not None:
-            items.append(cap)
         items += self._make_axis_items()
         items += self._make_grid_items()
         return items
 
     def _make_surface_item(self, g: dict):
+        # El polo (cénit) ya viene como una fila más de esta misma grilla si zenith_dB no es
+        # None (ver _render_inner) — todas sus columnas coinciden en un mismo punto XYZ, así
+        # que la triangulación de abajo cierra sola en un abanico sin ningún tratamiento
+        # especial: superficie sin agujero ni discontinuidad en el cénit, siempre.
         X, Y, Z, C = g['X'], g['Y'], g['Z'], g['C']
         n_e, n_p = X.shape
         verts  = np.stack([X, Y, Z], axis=-1).reshape(-1, 3)
@@ -334,24 +369,11 @@ class GL3DView(QWidget):
         faces = np.concatenate([tri1, tri2], axis=0)
 
         md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
-        return gl.GLMeshItem(meshdata=md, smooth=True, shader='shaded', glOptions='opaque')
-
-    def _make_cap_item(self, g: dict):
-        zenith_dB = g['zenith_dB']
-        if zenith_dB is None:
-            return None
-        X, Y, Z, C = g['X'], g['Y'], g['Z'], g['C']
-        ring_x, ring_y, ring_z, ring_c = X[-1], Y[-1], Z[-1], C[-1]
-        n = len(ring_x) - 1     # el último punto duplica al primero (vuelta completa): se excluye
-        z_norm  = float(np.clip((zenith_dB - g['vmin']) / g['span'], 0.01, 1.0))
-        z_color = float(np.clip(zenith_dB, g['cmin'], g['cmax']))
-        verts  = np.vstack([np.stack([ring_x[:n], ring_y[:n], ring_z[:n]], axis=-1),
-                             [[0.0, 0.0, z_norm]]])
-        colors = _map_colors(np.append(ring_c[:n], z_color), g['cmin'], g['cmax'], self._colorscale)
-        apex = n
-        faces = np.array([[k, (k + 1) % n, apex] for k in range(n)])
-        md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
-        return gl.GLMeshItem(meshdata=md, smooth=True, shader='shaded', glOptions='opaque')
+        # Sin shader (colores planos, tal cual el dato): el shader 'shaded' de pyqtgraph aplica
+        # una luz direccional fija (rgb *= 0.2 + dot(normal, luz)) que oscurece casi a negro
+        # cualquier cara que no mire hacia esa dirección — con una malla tipo globo, la mayoría
+        # de las caras quedaban así sin importar su color real.
+        return gl.GLMeshItem(meshdata=md, smooth=True, glOptions='opaque')
 
     def _make_axis_items(self) -> list:
         width = float(self._style.get('axis_line_width', 3))
@@ -406,14 +428,25 @@ class GL3DView(QWidget):
 
     # ── Exportación ──────────────────────────────────────────────────────
 
+    def _get_export_clone(self):
+        """GLViewWidget fuera de pantalla para exportar, creado UNA sola vez y reusado en cada
+        exportación (en vez de crear/destruir uno por llamada): crear varios QOpenGLWidget
+        seguidos en el mismo proceso resultó poco confiable acá (la segunda exportación salía
+        con errores de OpenGL y la imagen quedaba prácticamente en blanco) — reusar el mismo
+        contexto de principio a fin lo evita. Se posiciona fuera del área visible del escritorio
+        (move a coordenadas negativas) en vez de WA_DontShowOnScreen: un QOpenGLWidget necesita
+        una ventana nativa real para poder crear su contexto OpenGL."""
+        if self._export_clone is None:
+            self._export_clone = gl.GLViewWidget()
+            self._export_clone.move(-4000, -4000)
+            self._export_clone.show()
+        return self._export_clone
+
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, size_cm=None):
         """Tamaño físico fijo (Opciones ▸ Gráficos ▸ Imágenes); el DPI sólo define los píxeles
-        (ver ui/export_utils.py). Se renderiza en un GLViewWidget clon fuera de pantalla, al
-        tamaño final exacto — no es una captura del panel en pantalla.
-
-        El clon se posiciona fuera del área visible del escritorio (move a coordenadas
-        negativas) en vez de WA_DontShowOnScreen: un QOpenGLWidget necesita una ventana nativa
-        real para poder crear su contexto OpenGL, cosa que WA_DontShowOnScreen impide."""
+        (ver ui/export_utils.py). Se renderiza en un GLViewWidget fuera de pantalla (reusado
+        entre llamadas, ver _get_export_clone), al tamaño final exacto — no es una captura del
+        panel en pantalla."""
         if self._last_grid is None:
             self.log.emit("[Dir] Sin datos para exportar.")
             if on_done:
@@ -427,14 +460,16 @@ class GL3DView(QWidget):
         W = max(1, int(round(logical_px(w_cm) * k)))
         H = max(1, int(round(logical_px(h_cm) * k)))
 
-        clone = gl.GLViewWidget()
+        clone = self._get_export_clone()
         clone.setBackgroundColor(self._style.get('bg_color') or '#ffffff')
         clone.resize(W, H)
-        clone.move(-W - 200, -H - 200)
-        clone.show()
+        for item in list(clone.items):
+            clone.removeItem(item)
         for item in self._build_items(self._last_grid):
             clone.addItem(item)
-        clone.setCameraPosition(distance=_DEFAULT_DISTANCE, **self._camera)
+        # Cámara VIVA (self._gl.cameraParams()), no la del último preset aplicado (self._camera):
+        # si no, la imagen exportada no coincidía con la rotación/zoom hechos a mano con el mouse.
+        clone.setCameraParams(**self._gl.cameraParams())
 
         def _grab():
             ok = False
@@ -451,8 +486,6 @@ class GL3DView(QWidget):
             except Exception as exc:
                 self.log.emit(f"[ERROR] Exportando 3D: {exc}")
             finally:
-                clone.hide()
-                clone.deleteLater()
                 if on_done:
                     on_done(ok)
 
