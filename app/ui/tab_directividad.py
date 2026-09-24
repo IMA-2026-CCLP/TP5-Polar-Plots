@@ -247,6 +247,7 @@ class _ViewSection(QWidget):
     properties_requested = pyqtSignal()      # pide abrir/actualizar el panel de Propiedades
     properties_applied   = pyqtSignal()      # se aplicó un cambio de Propiedades (para Ctrl+Z)
     zoom_requested       = pyqtSignal(str)   # 'Ver en grande' / volver (emite el modo)
+    intersect_requested  = pyqtSignal(float) # "Intersectar" del plano de corte XY (sólo '3d'): elevación en °
 
     def __init__(self, title: str, mode: str, parent=None):
         super().__init__(parent)
@@ -281,6 +282,8 @@ class _ViewSection(QWidget):
         # ve el evento ahí. En su lugar, el propio HTML reenvía el click
         # derecho por consola (ver plot/balloon.py _wrap_html), capturado acá.
         self.view.context_menu_requested.connect(self._show_context_menu)
+        if hasattr(self.view, 'intersect_requested'):   # sólo lo tiene GL3DView ('3d')
+            self.view.intersect_requested.connect(self.intersect_requested)
 
         self.setMinimumHeight(80)
 
@@ -915,6 +918,7 @@ class TabDirectividad(QWidget):
     log      = pyqtSignal(str)
     computed = pyqtSignal(object, str)  # (thetas_np, status_text)
     compute_finished = pyqtSignal()     # terminó un cálculo pedido con 'Calcular' (no al cargar datos)
+    intersect_elevation = pyqtSignal(int)   # índice (en _full_thetas) más cercano a "Intersectar"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -979,6 +983,7 @@ class TabDirectividad(QWidget):
                 lambda m=mode: self._show_properties_panel(m))
             sec.properties_applied.connect(
                 lambda m=mode: setattr(self, '_last_props_mode', m))
+            sec.intersect_requested.connect(self._on_intersect_requested)
 
         # Ctrl+Z deshace el último "Aplicar" de Propiedades (cualquier gráfico).
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_properties)
@@ -1410,6 +1415,18 @@ class TabDirectividad(QWidget):
                 return
 
         self._refresh_display()
+
+    def _on_intersect_requested(self, elevation_deg: float):
+        """'Intersectar' del plano de corte XY en Superficie 3D: busca la elevación medida más
+        cercana y avisa (MainWindow lo usa para elegir esa misma elevación en el selector de
+        Polar 2D, que ya sabe dibujar ese contorno — ver ui/gl3d_view.py)."""
+        if self._full_thetas is None or not len(self._full_thetas):
+            self.log.emit("[Dir] Sin datos para intersectar.")
+            return
+        idx = int(np.argmin(np.abs(self._full_thetas - elevation_deg)))
+        self.log.emit(f"[Dir] Intersección a {elevation_deg:g}° → elevación medida más cercana: "
+                       f"{self._full_thetas[idx]:g}°")
+        self.intersect_elevation.emit(idx)
 
     def _save_section(self, mode: str):
         """Guarda la imagen de la sección indicada mediante un diálogo de archivo."""

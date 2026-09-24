@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self.view_dir.log.connect(self._append_log)
         self.view_dir.computed.connect(self._on_dir_computed)
         self.view_dir.compute_finished.connect(lambda: QTimer.singleShot(0, self._offer_save_directivity))
+        self.view_dir.intersect_elevation.connect(self.ribbon.set_elevation_index)
 
     # ── Tema ──────────────────────────────────────────────────────────────────
 

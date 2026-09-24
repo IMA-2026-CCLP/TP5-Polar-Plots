@@ -43,11 +43,15 @@ API pública: espejo del subconjunto de BalloonView que usa TabDirectividad para
 '3d' (ver ui/tab_directividad.py::_ViewSection) — mismos nombres de método, misma firma.
 """
 import numpy as np
-from PyQt6.QtWidgets import QWidget, QStackedLayout, QLabel, QApplication
+from PyQt6.QtWidgets import (
+    QWidget, QStackedLayout, QLabel, QApplication, QHBoxLayout, QPushButton, QCheckBox,
+)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QImage, QColor, QPixmap
 
 import pyqtgraph.opengl as gl
+
+from ui.widgets import NumEdit
 
 from plot.balloon import (
     _build_hemisphere_grid, FONT_SIZE, DEFAULT_SMOOTH_METHOD, DEFAULT_SMOOTH_WINDOW,
@@ -118,6 +122,7 @@ class GL3DView(QWidget):
 
     log = pyqtSignal(str)
     context_menu_requested = pyqtSignal(int, int)   # x, y en píxeles locales del widget
+    intersect_requested    = pyqtSignal(float)      # elevación elegida (°) — "Intersectar"
 
     _EXPORT_FORMATS = ('png', 'jpeg', 'webp')   # sin SVG: es una malla rasterizada, no vectorial
 
@@ -138,6 +143,8 @@ class GL3DView(QWidget):
         self._camera      = dict(_CAMERA_PRESETS["default"])
         self._current_items: list = []
         self._export_clone = None   # GLViewWidget reusado entre exportaciones, ver _get_export_clone
+        self._cut_elevation: float = 0.0   # ángulo del plano de corte (0°–90°), ver _make_cut_plane_item
+        self._cut_visible:   bool  = False
         # último grid calculado (para reconstruir los mismos items al exportar sin
         # recalcular la malla — ver export_image)
         self._last_grid = None
@@ -170,7 +177,62 @@ class GL3DView(QWidget):
         self._colorbar = QLabel(self)
         self._colorbar.hide()
 
+        self._build_cut_plane_controls()
         self._apply_camera()
+
+    def _build_cut_plane_controls(self):
+        """Controles del plano de corte XY (abajo a la izquierda): elegir la elevación
+        (0°–90°), mostrarla como plano de referencia en la escena, e "Intersectar" — manda esa
+        misma elevación al selector "Elevación" que ya tiene Polar 2D (Parámetros ▸ Polar 2D),
+        que muestra el contorno medido en ese ángulo. No se recalcula una intersección geométrica
+        aparte contra la malla (que además de compleja daría un resultado distinto: la malla
+        codifica el nivel en el radio, no es una esfera real) — se reusa el corte por elevación
+        que Polar 2D ya sabe dibujar, sólo que elegido visualmente desde acá."""
+        box = QWidget(self)
+        box.setStyleSheet(
+            "background: rgba(255,255,255,0.9); border:1px solid #c8c8c8; border-radius:3px;")
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(6, 4, 6, 4)
+        lay.setSpacing(4)
+
+        self._chk_cut = QCheckBox("Plano XY")
+        self._chk_cut.setToolTip("Muestra un plano de referencia en la elevación elegida.")
+        self._chk_cut.toggled.connect(self._on_cut_toggled)
+        lay.addWidget(self._chk_cut)
+
+        lay.addWidget(QLabel("Elevación:"))
+        self._ne_cut = NumEdit()
+        self._ne_cut.setRange(0, 90)
+        self._ne_cut.setDecimals(0)
+        self._ne_cut.setValue(0)
+        self._ne_cut.setFixedWidth(40)
+        self._ne_cut.setToolTip("0° a 90°. Ubica el plano; 'Intersectar' manda este valor a Polar 2D.")
+        self._ne_cut.textChanged.connect(self._on_cut_value_changed)
+        lay.addWidget(self._ne_cut)
+        lay.addWidget(QLabel("°"))
+
+        btn = QPushButton("Intersectar →")
+        btn.setToolTip("Muestra en Polar 2D el contorno medido en esta elevación.")
+        btn.setAutoDefault(False)
+        btn.clicked.connect(self._on_intersect_clicked)
+        lay.addWidget(btn)
+
+        box.adjustSize()
+        self._cut_box = box
+        self._cut_box.hide()   # se muestra recién cuando hay datos (ver _render_inner)
+
+    def _on_cut_toggled(self, on: bool):
+        self._cut_visible = on
+        if self._last_grid is not None:
+            self._render()
+
+    def _on_cut_value_changed(self, *_):
+        self._cut_elevation = self._ne_cut.value()
+        if self._cut_visible and self._last_grid is not None:
+            self._render()
+
+    def _on_intersect_clicked(self):
+        self.intersect_requested.emit(self._ne_cut.value())
 
     # ── API pública ──────────────────────────────────────────────────────
 
@@ -185,8 +247,12 @@ class GL3DView(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._reposition_overlays()
+
+    def _reposition_overlays(self):
         if self._colorbar.isVisible():
             self._colorbar.move(self.width() - self._colorbar.width() - 28, 10)
+        self._cut_box.move(8, self.height() - self._cut_box.height() - 8)
 
     # — no aplican a este modo, pero _ViewSection los llama para los 4 tipos de vista —
     def set_view_mode(self, mode):
@@ -279,6 +345,9 @@ class GL3DView(QWidget):
 
     def _render_inner(self):
         self._placeholder.hide()
+        self._cut_box.show()
+        self._cut_box.raise_()
+        self._reposition_overlays()   # reubica el control ahora que ya tiene su tamaño final
         style = self._style
         lev_2d = self._levels[:, :, self._band_index]
         band_hz = float(self._bands[self._band_index])
@@ -364,7 +433,27 @@ class GL3DView(QWidget):
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
         items += self._make_grid_items()
+        if self._cut_visible:
+            items.append(self._make_cut_plane_item())
         return items
+
+    def _make_cut_plane_item(self):
+        """Disco semitransparente en el plano XY, a la altura Z que corresponde a la elevación
+        elegida — referencia visual para elegir el ángulo antes de "Intersectar" (ver
+        _build_cut_plane_controls). radio > 1 para que sobresalga un poco de la malla."""
+        e = np.radians(np.clip(self._cut_elevation, 0, 90))
+        z = float(np.sin(e))
+        radius = 1.3
+        n = 48
+        phi = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        rim = np.stack([radius * np.cos(phi), radius * np.sin(phi), np.full(n, z)], axis=-1)
+        verts = np.vstack([rim, [[0.0, 0.0, z]]])   # centro al final
+        center = n
+        faces = np.array([[k, (k + 1) % n, center] for k in range(n)])
+        color = QColor("#2F6DB5")
+        colors = np.tile([color.redF(), color.greenF(), color.blueF(), 0.18], (len(verts), 1))
+        md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
+        return gl.GLMeshItem(meshdata=md, smooth=False, glOptions='translucent')
 
     def _make_surface_item(self, g: dict):
         # El polo (cénit) ya viene como una fila más de esta misma grilla si zenith_dB no es

@@ -721,6 +721,16 @@ class NativeRibbon(QWidget):
         for n in ('save_session', 'save_session_as', 'export_all'):
             self._act[n].setEnabled(True)
 
+    def set_elevation_index(self, idx: int):
+        """"Intersectar" del plano de corte XY en Superficie 3D: fuerza el plano a XY (el
+        selector de Elevación sólo aplica ahí) y elige esa elevación en Polar 2D."""
+        i = self._c_plane.findData("XY")
+        if i >= 0:
+            self._c_plane.setCurrentIndex(i)
+        i = self._c_el.findData(idx + 1)
+        if i >= 0:
+            self._c_el.setCurrentIndex(i)
+
     def set_dir_status(self, text: str):
         self._dir_status.setText(text.replace('\n', ' · '))
 
