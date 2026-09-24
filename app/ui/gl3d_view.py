@@ -145,6 +145,12 @@ class GL3DView(QWidget):
         self._export_clone = None   # GLViewWidget reusado entre exportaciones, ver _get_export_clone
         self._cut_elevation: float = 0.0   # elevación elegida (0°–90°), ver _make_cut_ring_items
         self._cut_visible:   bool  = False
+        # 'origin': el nivel escala el vector ENTERO desde (0,0,0) — balloon plot clásico
+        #           (CLIO, GLL Viewer, EASE...), el que ya tenía este programa.
+        # 'zaxis':  el nivel sólo escala la parte horizontal; la altura Z depende nada más del
+        #           ángulo de elevación — con esto un plano horizontal SÍ coincide exacto con
+        #           una elevación fija (ver charla con el usuario sobre "Radial al eje Z").
+        self._geometry_mode: str = 'origin'
         # último grid calculado (para reconstruir los mismos items al exportar sin
         # recalcular la malla — ver export_image)
         self._last_grid = None
@@ -162,42 +168,84 @@ class GL3DView(QWidget):
         self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
         self._placeholder.setFont(QFont("Segoe UI", 12))
 
+        # Los overlays 2D (info, colorbar, controles del plano de corte) NO pueden ser hijos
+        # sueltos posicionados con .move() encima de un QOpenGLWidget — Qt no compone bien ese
+        # caso (salían como recuadros en blanco sin dibujar). Tienen que entrar en el MISMO
+        # QStackedLayout que _gl, en un contenedor transparente que ocupa todo el panel; adentro
+        # de ese contenedor sí se pueden posicionar hijos con .move() con total normalidad,
+        # porque ya no hay ningún QOpenGLWidget de por medio.
+        self._overlay = QWidget()
+        self._overlay.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._overlay.setStyleSheet("background: transparent;")
+
         layout.addWidget(self._gl)
+        layout.addWidget(self._overlay)
         layout.addWidget(self._placeholder)
+        self._overlay.raise_()
         self._placeholder.raise_()
 
-        # Overlays 2D (info + colorbar): hijos directos del widget, por encima de todo.
-        self._info_label = QLabel(self)
+        # Overlays 2D (info + colorbar), hijos de _overlay (ver nota arriba).
+        self._info_label = QLabel(self._overlay)
         self._info_label.setStyleSheet(
             "background: rgba(255,255,255,0.85); color:#1a1a1a; padding:4px 8px; "
             "border:1px solid #c8c8c8; border-radius:3px; font-size:10px;")
-        self._info_label.move(8, 8)
-        self._info_label.hide()
+        self._info_label.hide()   # posición: ver _reposition_overlays (debajo del combo de modo)
 
-        self._colorbar = QLabel(self)
+        self._colorbar = QLabel(self._overlay)
         self._colorbar.hide()
 
+        self._build_geometry_mode_control()
         self._build_cut_plane_controls()
+        self._reposition_overlays()
         self._apply_camera()
 
-    def _build_cut_plane_controls(self):
-        """Controles del plano de corte XY (abajo a la izquierda): elegir la elevación
-        (0°–90°), mostrarla en la escena (plano de referencia + la curva real a esa elevación),
-        e "Intersectar" — manda esa misma elevación al selector "Elevación" que ya tiene Polar 2D
-        (Parámetros ▸ Polar 2D), que muestra el contorno medido en ese ángulo. No se recalcula
-        una intersección geométrica aparte contra la malla (que además de compleja daría un
-        resultado distinto: acá el radio codifica el nivel medido, no es una esfera real, así
-        que la curva a una elevación no es plana — el plano de referencia se muestra al lado
-        para que se note la diferencia) — se reusa el corte por elevación que Polar 2D ya sabe
-        dibujar, sólo que elegido visualmente desde acá."""
-        box = QWidget(self)
+    def _build_geometry_mode_control(self):
+        """Combo (arriba a la izquierda, siempre visible): elige cómo se construye la
+        Superficie 3D a partir del nivel medido — ver comentario de self._geometry_mode."""
+        from PyQt6.QtWidgets import QComboBox
+        box = QWidget(self._overlay)
         box.setStyleSheet(
             "background: rgba(255,255,255,0.9); border:1px solid #c8c8c8; border-radius:3px;")
         lay = QHBoxLayout(box)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
 
-        self._chk_cut = QCheckBox("Resaltar curva")
+        self._combo_geom = QComboBox()
+        self._combo_geom.addItem("Radial al origen", "origin")
+        self._combo_geom.addItem("Radial al eje Z", "zaxis")
+        self._combo_geom.setToolTip(
+            "Cómo se construye la superficie a partir del nivel medido.\n"
+            "Radial al origen: el nivel escala todo el vector desde el centro (balloon clásico).\n"
+            "Radial al eje Z: el nivel sólo escala la parte horizontal; la altura depende nada "
+            "más del ángulo de elevación — un corte horizontal coincide exacto con una elevación.")
+        self._combo_geom.currentIndexChanged.connect(self._on_geometry_mode_changed)
+        lay.addWidget(self._combo_geom)
+
+        box.adjustSize()
+        self._geom_box = box
+
+    def _on_geometry_mode_changed(self, _idx: int):
+        self._geometry_mode = self._combo_geom.currentData()
+        if self._last_grid is not None:
+            self._render()
+
+    def _build_cut_plane_controls(self):
+        """Controles del plano de corte XY (abajo a la izquierda, hijos de _overlay): elegir la
+        elevación (0°–90°) y "Intersectar" — manda esa elevación al selector "Elevación" que ya
+        tiene Polar 2D (Parámetros ▸ Polar 2D), que muestra el contorno medido en ese ángulo. No
+        se recalcula una intersección geométrica aparte contra la malla (que además de compleja
+        daría un resultado distinto: acá el radio codifica el nivel medido, no es una esfera
+        real, así que la curva a una elevación no es plana — el checkbox muestra el plano de
+        referencia al lado de esa curva real para que se note la diferencia) — se reusa el corte
+        por elevación que Polar 2D ya sabe dibujar, sólo que elegido visualmente desde acá."""
+        box = QWidget(self._overlay)
+        box.setStyleSheet(
+            "background: rgba(255,255,255,0.9); border:1px solid #c8c8c8; border-radius:3px;")
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(6, 4, 6, 4)
+        lay.setSpacing(4)
+
+        self._chk_cut = QCheckBox("Corte")
         self._chk_cut.setToolTip(
             "Muestra el plano de referencia y la curva real a esta elevación — es una de las "
             "curvas apiladas que arman la superficie (sigue el relieve real, no es plana como "
@@ -205,9 +253,8 @@ class GL3DView(QWidget):
         self._chk_cut.toggled.connect(self._on_cut_toggled)
         lay.addWidget(self._chk_cut)
 
-        lay.addWidget(QLabel("Elevación:"))
         btn_down = QPushButton("◀")
-        btn_down.setFixedWidth(24)
+        btn_down.setFixedWidth(22)
         btn_down.setAutoDefault(False)
         btn_down.setToolTip("-10°")
         btn_down.clicked.connect(lambda: self._step_cut_elevation(-10))
@@ -217,24 +264,17 @@ class GL3DView(QWidget):
         self._ne_cut.setRange(0, 90)
         self._ne_cut.setDecimals(0)
         self._ne_cut.setValue(0)
-        self._ne_cut.setFixedWidth(36)
-        self._ne_cut.setToolTip("0° a 90°. 'Aceptar' (o Enter) lo aplica; 'Intersectar' lo manda a Polar 2D.")
+        self._ne_cut.setFixedWidth(32)
+        self._ne_cut.setToolTip("Elevación (0°–90°). Enter para aplicar lo tipeado.")
         self._ne_cut.returnPressed.connect(self._apply_cut_elevation)
         lay.addWidget(self._ne_cut)
-        lay.addWidget(QLabel("°"))
 
         btn_up = QPushButton("▶")
-        btn_up.setFixedWidth(24)
+        btn_up.setFixedWidth(22)
         btn_up.setAutoDefault(False)
         btn_up.setToolTip("+10°")
         btn_up.clicked.connect(lambda: self._step_cut_elevation(10))
         lay.addWidget(btn_up)
-
-        btn_ok = QPushButton("Aceptar")
-        btn_ok.setAutoDefault(False)
-        btn_ok.setToolTip("Aplica el valor tipeado (mueve el plano y la curva resaltada).")
-        btn_ok.clicked.connect(self._apply_cut_elevation)
-        lay.addWidget(btn_ok)
 
         btn_go = QPushButton("Intersectar →")
         btn_go.setToolTip("Muestra en Polar 2D el contorno medido en esta elevación.")
@@ -282,6 +322,8 @@ class GL3DView(QWidget):
         self._reposition_overlays()
 
     def _reposition_overlays(self):
+        self._geom_box.move(8, 8)
+        self._info_label.move(8, self._geom_box.height() + 16)
         if self._colorbar.isVisible():
             self._colorbar.move(self.width() - self._colorbar.width() - 28, 10)
         self._cut_box.move(8, self.height() - self._cut_box.height() - 8)
@@ -408,7 +450,10 @@ class GL3DView(QWidget):
         E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
         X = R_r * np.cos(E) * np.cos(P)
         Y = R_r * np.cos(E) * np.sin(P)
-        Z = R_r * np.sin(E)
+        if self._geometry_mode == 'zaxis':
+            Z = np.sin(E)   # sólo depende de la elevación (fila): no lo escala el nivel
+        else:
+            Z = R_r * np.sin(E)   # 'origin': vector entero escalado por el nivel (balloon clásico)
         C = R_clip
 
         # Costura acimutal (φ=0° y φ=360° son el mismo meridiano, primera y última columna de
@@ -427,11 +472,12 @@ class GL3DView(QWidget):
         # punto ápice podía quedar más bajo que partes del anillo y dejar un hueco visible).
         if zenith_dB is not None and np.isfinite(zenith_dB):
             n_p = X.shape[1]
-            z_norm  = float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
+            # 'zaxis': el polo está siempre en Z=1 (90° de elevación), sin importar el nivel.
+            z_pole = 1.0 if self._geometry_mode == 'zaxis' else float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
             z_color = float(np.clip(zenith_dB, cmin, cmax))
             X = np.vstack([X, np.zeros(n_p)])
             Y = np.vstack([Y, np.zeros(n_p)])
-            Z = np.vstack([Z, np.full(n_p, z_norm)])
+            Z = np.vstack([Z, np.full(n_p, z_pole)])
             C = np.vstack([C, np.full(n_p, z_color)])
 
         self._last_grid = dict(X=X, Y=Y, Z=Z, C=C, cmin=cmin, cmax=cmax,
