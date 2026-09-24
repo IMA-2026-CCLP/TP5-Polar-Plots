@@ -54,7 +54,8 @@ _DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
 # fondo blanco si la app está en tema oscuro.
 _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
-                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
+                 "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin"},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
     "polar2d":  {
@@ -527,6 +528,45 @@ class _ViewSection(QWidget):
             fields['smoothing_window'] = spin_smooth_win_3d
             outer.addWidget(box_interp)
 
+        if self._mode == "3d":
+            box_cut = QGroupBox("Corte")
+            form_cut = QFormLayout(box_cut)
+            chk_cut = QCheckBox("Mostrar plano y curva de referencia")
+            chk_cut.setChecked(bool(self._style.get('cut_visible', False)))
+            chk_cut.setToolTip(
+                "Resalta sobre la propia malla la curva a la elevación de abajo — es una de "
+                "las curvas apiladas que arman la superficie (sigue el relieve real), más un "
+                "plano chato de referencia al lado para comparar. Es exactamente lo que "
+                "'Intersectar' manda a Polar 2D."
+            )
+            form_cut.addRow(chk_cut)
+            spin_cut_el = _NumEdit()
+            spin_cut_el.setRange(0, 90)
+            spin_cut_el.setDecimals(0)
+            spin_cut_el.setValue(self._style.get('cut_elevation', 0.0))
+            spin_cut_el.setToolTip("Elevación del plano/curva de referencia y de 'Intersectar' (0° a 90°).")
+            form_cut.addRow("Elevación (°):", spin_cut_el)
+            combo_geom = QComboBox()
+            combo_geom.addItem("Radial al origen", "origin")
+            combo_geom.addItem("Radial al eje Z", "zaxis")
+            combo_geom.setCurrentIndex(max(0, combo_geom.findData(self._style.get('geometry_mode', 'origin'))))
+            combo_geom.setToolTip(
+                "Cómo se construye la superficie a partir del nivel medido.\n"
+                "Radial al origen: el nivel escala todo el vector desde el centro (balloon clásico).\n"
+                "Radial al eje Z: el nivel sólo escala la parte horizontal; la altura depende nada "
+                "más del ángulo de elevación — un corte horizontal coincide exacto con una elevación."
+            )
+            form_cut.addRow("Construcción:", combo_geom)
+            btn_intersect = QPushButton("Intersectar → Polar 2D")
+            btn_intersect.setAutoDefault(False)
+            btn_intersect.setToolTip("Muestra en Polar 2D el contorno medido en la elevación de arriba.")
+            btn_intersect.clicked.connect(lambda: self.view.request_intersect())
+            form_cut.addRow(btn_intersect)
+            fields['cut_visible']   = chk_cut
+            fields['cut_elevation'] = spin_cut_el
+            fields['geometry_mode'] = combo_geom
+            outer.addWidget(box_cut)
+
         elif self._mode == "polar2d":
             box_ax = QGroupBox("Ejes / traza")
             form_ax = QFormLayout(box_ax)
@@ -745,6 +785,10 @@ class _ViewSection(QWidget):
                 new_style['smoothing']       = fields['smoothing'].value()
                 new_style['smoothing_method'] = fields['smoothing_method'].currentText()
                 new_style['smoothing_window'] = fields['smoothing_window'].value()
+                if self._mode == "3d":
+                    new_style['cut_visible']   = fields['cut_visible'].isChecked()
+                    new_style['cut_elevation'] = fields['cut_elevation'].value()
+                    new_style['geometry_mode'] = fields['geometry_mode'].currentData()
             elif self._mode == "polar2d":
                 self._tick_font_size = fields['tick_font_size'].value()
                 new_style['ring_font_size']    = fields['ring_font_size'].value()

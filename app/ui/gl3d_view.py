@@ -43,15 +43,11 @@ API pública: espejo del subconjunto de BalloonView que usa TabDirectividad para
 '3d' (ver ui/tab_directividad.py::_ViewSection) — mismos nombres de método, misma firma.
 """
 import numpy as np
-from PyQt6.QtWidgets import (
-    QWidget, QStackedLayout, QLabel, QApplication, QHBoxLayout, QPushButton, QCheckBox,
-)
+from PyQt6.QtWidgets import QWidget, QStackedLayout, QLabel, QApplication
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QImage, QColor, QPixmap
 
 import pyqtgraph.opengl as gl
-
-from ui.widgets import NumEdit
 
 from plot.balloon import (
     _build_hemisphere_grid, FONT_SIZE, DEFAULT_SMOOTH_METHOD, DEFAULT_SMOOTH_WINDOW,
@@ -168,18 +164,17 @@ class GL3DView(QWidget):
         self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
         self._placeholder.setFont(QFont("Segoe UI", 12))
 
-        # Los overlays 2D (info, colorbar, controles del plano de corte) NO pueden ser hijos
-        # sueltos posicionados con .move() encima de un QOpenGLWidget — Qt no compone bien ese
-        # caso (salían como recuadros en blanco sin dibujar). Tienen que entrar en el MISMO
-        # QStackedLayout que _gl, en un contenedor transparente que ocupa todo el panel; adentro
-        # de ese contenedor sí se pueden posicionar hijos con .move() con total normalidad,
-        # porque ya no hay ningún QOpenGLWidget de por medio.
+        # Overlays 2D (info + colorbar) — no controles interactivos: los botones/checkbox del
+        # corte y el modo de construcción se sacaron de acá (ver Propiedades…, botón "Intersectar"
+        # incluido) porque Qt no compone bien widgets interactivos superpuestos a un
+        # QOpenGLWidget: salían como recuadros en blanco, y el intento de arreglarlo con un
+        # contenedor transparente (WA_TransparentForMouseEvents) terminó bloqueando el mouse de
+        # la escena (orbitar/zoom) y a veces también los propios controles. Un QDialog aparte
+        # (Propiedades) no tiene ninguno de estos problemas: es una ventana normal, no se
+        # superpone a nada. self._info_label/_colorbar quedan en un contenedor transparente
+        # igual, porque no son clickeables (no tienen este problema).
         self._overlay = QWidget()
         self._overlay.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # El fondo vacío de _overlay no debe tapar el mouse (orbitar/zoom con el mouse sobre la
-        # escena dejaba de andar: todos los clics caían en _overlay en vez de llegar a _gl,
-        # aunque se viera "transparente"). Los widgets hijos (botones, checkbox, combo) siguen
-        # recibiendo sus propios clics normalmente — este flag sólo afecta el fondo vacío.
         self._overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._overlay.setStyleSheet("background: transparent;")
 
@@ -189,127 +184,17 @@ class GL3DView(QWidget):
         self._overlay.raise_()
         self._placeholder.raise_()
 
-        # Overlays 2D (info + colorbar), hijos de _overlay (ver nota arriba).
         self._info_label = QLabel(self._overlay)
         self._info_label.setStyleSheet(
             "background: rgba(255,255,255,0.85); color:#1a1a1a; padding:4px 8px; "
             "border:1px solid #c8c8c8; border-radius:3px; font-size:10px;")
-        self._info_label.hide()   # posición: ver _reposition_overlays (debajo del combo de modo)
+        self._info_label.move(8, 8)
+        self._info_label.hide()
 
         self._colorbar = QLabel(self._overlay)
         self._colorbar.hide()
 
-        self._build_geometry_mode_control()
-        self._build_cut_plane_controls()
-        self._reposition_overlays()
         self._apply_camera()
-
-    def _build_geometry_mode_control(self):
-        """Combo (arriba a la izquierda, siempre visible): elige cómo se construye la
-        Superficie 3D a partir del nivel medido — ver comentario de self._geometry_mode."""
-        from PyQt6.QtWidgets import QComboBox
-        box = QWidget(self._overlay)
-        box.setStyleSheet(
-            "background: rgba(255,255,255,0.9); border:1px solid #c8c8c8; border-radius:3px;")
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(6, 4, 6, 4)
-        lay.setSpacing(4)
-
-        self._combo_geom = QComboBox()
-        self._combo_geom.addItem("Radial al origen", "origin")
-        self._combo_geom.addItem("Radial al eje Z", "zaxis")
-        self._combo_geom.setToolTip(
-            "Cómo se construye la superficie a partir del nivel medido.\n"
-            "Radial al origen: el nivel escala todo el vector desde el centro (balloon clásico).\n"
-            "Radial al eje Z: el nivel sólo escala la parte horizontal; la altura depende nada "
-            "más del ángulo de elevación — un corte horizontal coincide exacto con una elevación.")
-        self._combo_geom.currentIndexChanged.connect(self._on_geometry_mode_changed)
-        lay.addWidget(self._combo_geom)
-
-        box.adjustSize()
-        self._geom_box = box
-
-    def _on_geometry_mode_changed(self, _idx: int):
-        self._geometry_mode = self._combo_geom.currentData()
-        if self._last_grid is not None:
-            self._render()
-
-    def _build_cut_plane_controls(self):
-        """Controles del plano de corte XY (abajo a la izquierda, hijos de _overlay): elegir la
-        elevación (0°–90°) y "Intersectar" — manda esa elevación al selector "Elevación" que ya
-        tiene Polar 2D (Parámetros ▸ Polar 2D), que muestra el contorno medido en ese ángulo. No
-        se recalcula una intersección geométrica aparte contra la malla (que además de compleja
-        daría un resultado distinto: acá el radio codifica el nivel medido, no es una esfera
-        real, así que la curva a una elevación no es plana — el checkbox muestra el plano de
-        referencia al lado de esa curva real para que se note la diferencia) — se reusa el corte
-        por elevación que Polar 2D ya sabe dibujar, sólo que elegido visualmente desde acá."""
-        box = QWidget(self._overlay)
-        box.setStyleSheet(
-            "background: rgba(255,255,255,0.9); border:1px solid #c8c8c8; border-radius:3px;")
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(6, 4, 6, 4)
-        lay.setSpacing(4)
-
-        self._chk_cut = QCheckBox("Corte")
-        self._chk_cut.setToolTip(
-            "Muestra el plano de referencia y la curva real a esta elevación — es una de las "
-            "curvas apiladas que arman la superficie (sigue el relieve real, no es plana como "
-            "el plano). Es exactamente lo que 'Intersectar' va a mostrar en Polar 2D.")
-        self._chk_cut.toggled.connect(self._on_cut_toggled)
-        lay.addWidget(self._chk_cut)
-
-        btn_down = QPushButton("◀")
-        btn_down.setFixedWidth(22)
-        btn_down.setAutoDefault(False)
-        btn_down.setToolTip("-10°")
-        btn_down.clicked.connect(lambda: self._step_cut_elevation(-10))
-        lay.addWidget(btn_down)
-
-        self._ne_cut = NumEdit()
-        self._ne_cut.setRange(0, 90)
-        self._ne_cut.setDecimals(0)
-        self._ne_cut.setValue(0)
-        self._ne_cut.setFixedWidth(32)
-        self._ne_cut.setToolTip("Elevación (0°–90°). Enter para aplicar lo tipeado.")
-        self._ne_cut.returnPressed.connect(self._apply_cut_elevation)
-        lay.addWidget(self._ne_cut)
-
-        btn_up = QPushButton("▶")
-        btn_up.setFixedWidth(22)
-        btn_up.setAutoDefault(False)
-        btn_up.setToolTip("+10°")
-        btn_up.clicked.connect(lambda: self._step_cut_elevation(10))
-        lay.addWidget(btn_up)
-
-        btn_go = QPushButton("Intersectar →")
-        btn_go.setToolTip("Muestra en Polar 2D el contorno medido en esta elevación.")
-        btn_go.setAutoDefault(False)
-        btn_go.clicked.connect(self._on_intersect_clicked)
-        lay.addWidget(btn_go)
-
-        box.adjustSize()
-        self._cut_box = box
-        self._cut_box.hide()   # se muestra recién cuando hay datos (ver _render_inner)
-
-    def _on_cut_toggled(self, on: bool):
-        self._cut_visible = on
-        if self._last_grid is not None:
-            self._render()
-
-    def _step_cut_elevation(self, delta: float):
-        self._ne_cut.setValue(max(0, min(90, self._ne_cut.value() + delta)))
-        self._apply_cut_elevation()
-
-    def _apply_cut_elevation(self):
-        # No se aplica en cada tecla tipeada (textChanged) — re-renderiza toda la malla y
-        # resultaba molesto/lento mientras se escribe un número de más de un dígito.
-        self._cut_elevation = self._ne_cut.value()
-        if self._cut_visible and self._last_grid is not None:
-            self._render()
-
-    def _on_intersect_clicked(self):
-        self._apply_cut_elevation()
-        self.intersect_requested.emit(self._ne_cut.value())
 
     # ── API pública ──────────────────────────────────────────────────────
 
@@ -327,11 +212,8 @@ class GL3DView(QWidget):
         self._reposition_overlays()
 
     def _reposition_overlays(self):
-        self._geom_box.move(8, 8)
-        self._info_label.move(8, self._geom_box.height() + 16)
         if self._colorbar.isVisible():
             self._colorbar.move(self.width() - self._colorbar.width() - 28, 10)
-        self._cut_box.move(8, self.height() - self._cut_box.height() - 8)
 
     # — no aplican a este modo, pero _ViewSection los llama para los 4 tipos de vista —
     def set_view_mode(self, mode):
@@ -400,8 +282,16 @@ class GL3DView(QWidget):
     def set_style(self, style: dict):
         self._style = style or {}
         self._gl.setBackgroundColor(self._style.get('bg_color') or '#ffffff')
+        self._cut_visible   = bool(self._style.get('cut_visible', False))
+        self._cut_elevation = float(self._style.get('cut_elevation', 0.0))
+        self._geometry_mode = self._style.get('geometry_mode', 'origin')
         if self._levels is not None:
             self._render()
+
+    def request_intersect(self):
+        """Botón "Intersectar" del panel de Propiedades: manda la elevación del corte actual
+        (self._cut_elevation, ver set_style) a Polar 2D."""
+        self.intersect_requested.emit(self._cut_elevation)
 
     def set_camera_view(self, view: str):
         preset = _CAMERA_PRESETS.get(view)
@@ -424,9 +314,6 @@ class GL3DView(QWidget):
 
     def _render_inner(self):
         self._placeholder.hide()
-        self._cut_box.show()
-        self._cut_box.raise_()
-        self._reposition_overlays()   # reubica el control ahora que ya tiene su tamaño final
         style = self._style
         lev_2d = self._levels[:, :, self._band_index]
         band_hz = float(self._bands[self._band_index])
