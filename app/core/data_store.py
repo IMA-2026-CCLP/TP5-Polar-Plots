@@ -181,9 +181,10 @@ def drop_bad_thetas(
             kwargs[key] = raw[key][:, keep, :].astype(np.float32)
 
     p = str(filepath_out)
-    if not p.endswith('.npz'):
+    if Path(p).suffix.lower() not in ('.npz', '.cclp'):
         p += '.npz'
-    np.savez_compressed(p, **kwargs)
+    with open(p, 'wb') as f:      # ver nota de save_results(): evita que numpy fuerce ".npz"
+        np.savez_compressed(f, **kwargs)
     print(f"  Guardado sin thetas malos: {p}")
 
 
@@ -257,11 +258,12 @@ def repair_broken_mic(
             kwargs[key] = note_lev.astype(np.float32)
 
     p = str(filepath_out)
-    if not p.endswith('.npz'):
+    if Path(p).suffix.lower() not in ('.npz', '.cclp'):
         p += '.npz'
-    np.savez_compressed(p, **kwargs)
+    with open(p, 'wb') as f:      # ver nota de save_results(): evita que numpy fuerce ".npz"
+        np.savez_compressed(f, **kwargs)
     size_kb = Path(p).stat().st_size / 1024
-    print(f"  NPZ reparado guardado en: {p}  ({size_kb:.0f} KB)")
+    print(f"  Reparado guardado en: {p}  ({size_kb:.0f} KB)")
 
 
 def load_results(filepath: str) -> dict:

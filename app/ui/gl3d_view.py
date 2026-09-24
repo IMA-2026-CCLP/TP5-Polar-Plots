@@ -310,6 +310,15 @@ class GL3DView(QWidget):
         Z = R_r * np.sin(E)
         C = R_clip
 
+        # Costura acimutal (φ=0° y φ=360° son el mismo meridiano, primera y última columna de
+        # la grilla): el spline de interpolación no garantiza que ambos bordes coincidan exacto
+        # — medido hasta ~0,08 de diferencia en radio normalizado, nada que ver con redondeo de
+        # punto flotante — y como son dos columnas de vértices DISTINTAS, esa diferencia dejaba
+        # una grieta angosta visible ahí (justo donde estaba la marca blanca, cerca de X/0°). Se
+        # fuerza la última columna a coincidir exacto con la primera: cierra siempre, sin
+        # depender de que el spline sea perfectamente periódico.
+        X[:, -1], Y[:, -1], Z[:, -1], C[:, -1] = X[:, 0], Y[:, 0], Z[:, 0], C[:, 0]
+
         # Cierre del cénit: se agrega el polo como una fila más de la MISMA grilla (todas las
         # columnas colapsan al mismo punto XYZ) en vez de una malla de "cap" aparte — así la
         # triangulación estándar en abanico cierra siempre sola, sin depender de que el último
