@@ -143,7 +143,7 @@ class GL3DView(QWidget):
         self._camera      = dict(_CAMERA_PRESETS["default"])
         self._current_items: list = []
         self._export_clone = None   # GLViewWidget reusado entre exportaciones, ver _get_export_clone
-        self._cut_elevation: float = 0.0   # ángulo del plano de corte (0°–90°), ver _make_cut_plane_item
+        self._cut_elevation: float = 0.0   # elevación elegida (0°–90°), ver _make_cut_ring_items
         self._cut_visible:   bool  = False
         # último grid calculado (para reconstruir los mismos items al exportar sin
         # recalcular la malla — ver export_image)
@@ -195,8 +195,11 @@ class GL3DView(QWidget):
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
 
-        self._chk_cut = QCheckBox("Plano XY")
-        self._chk_cut.setToolTip("Muestra un plano de referencia en la elevación elegida.")
+        self._chk_cut = QCheckBox("Resaltar curva")
+        self._chk_cut.setToolTip(
+            "Resalta sobre la propia malla la curva a esta elevación — es una de las curvas "
+            "apiladas que arman la superficie (sigue el relieve real, no es un corte plano). "
+            "Es exactamente lo que 'Intersectar' va a mostrar en Polar 2D.")
         self._chk_cut.toggled.connect(self._on_cut_toggled)
         lay.addWidget(self._chk_cut)
 
@@ -403,7 +406,8 @@ class GL3DView(QWidget):
             C = np.vstack([C, np.full(n_p, z_color)])
 
         self._last_grid = dict(X=X, Y=Y, Z=Z, C=C, cmin=cmin, cmax=cmax,
-                                zenith_dB=zenith_dB, vmin=vmin, span=span)
+                                zenith_dB=zenith_dB, vmin=vmin, span=span,
+                                elev_deg=np.degrees(elev_rad))   # una fila del grid por elevación medida/interpolada
 
         for it in self._current_items:
             self._gl.removeItem(it)
@@ -434,26 +438,27 @@ class GL3DView(QWidget):
         items += self._make_axis_items()
         items += self._make_grid_items()
         if self._cut_visible:
-            items.append(self._make_cut_plane_item())
+            items += self._make_cut_ring_items(g)
         return items
 
-    def _make_cut_plane_item(self):
-        """Disco semitransparente en el plano XY, a la altura Z que corresponde a la elevación
-        elegida — referencia visual para elegir el ángulo antes de "Intersectar" (ver
-        _build_cut_plane_controls). radio > 1 para que sobresalga un poco de la malla."""
-        e = np.radians(np.clip(self._cut_elevation, 0, 90))
-        z = float(np.sin(e))
-        radius = 1.3
-        n = 48
-        phi = np.linspace(0, 2 * np.pi, n, endpoint=False)
-        rim = np.stack([radius * np.cos(phi), radius * np.sin(phi), np.full(n, z)], axis=-1)
-        verts = np.vstack([rim, [[0.0, 0.0, z]]])   # centro al final
-        center = n
-        faces = np.array([[k, (k + 1) % n, center] for k in range(n)])
-        color = QColor("#2F6DB5")
-        colors = np.tile([color.redF(), color.greenF(), color.blueF(), 0.18], (len(verts), 1))
-        md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
-        return gl.GLMeshItem(meshdata=md, smooth=False, glOptions='translucent')
+    def _make_cut_ring_items(self, g: dict) -> list:
+        """Resalta sobre la PROPIA malla la curva (fila de la grilla) más cercana a la elevación
+        elegida — no un plano geométrico aparte. Muestra directamente cuál es la curva que
+        "Intersectar" va a mandar a Polar 2D: es una de las curvas apiladas que arman la
+        superficie (ondulada, seguí el nivel medido en cada azimut), no un corte a Z constante
+        — un plano Z=cte NO coincide con esta curva salvo en direcciones de nivel parejo, porque
+        acá el radio codifica el dB, no el ángulo (ver charla con el usuario)."""
+        elev_deg = g.get('elev_deg')
+        if elev_deg is None or not len(elev_deg):
+            return []
+        row = int(np.argmin(np.abs(elev_deg - np.clip(self._cut_elevation, 0, 90))))
+        X, Y, Z = g['X'], g['Y'], g['Z']
+        pts = np.stack([X[row], Y[row], Z[row]], axis=-1)
+        color = (0.05, 0.05, 0.05, 1.0)   # casi negro: contraste fuerte contra cualquier color de la malla
+        ring = gl.GLLinePlotItem(pos=pts, color=color, width=5, antialias=True)
+        # Puntito en cada vértice: ayuda a ver que la curva sigue el relieve real (no es plana).
+        dots = gl.GLScatterPlotItem(pos=pts[::4], color=color, size=6, pxMode=True)
+        return [ring, dots]
 
     def _make_surface_item(self, g: dict):
         # El polo (cénit) ya viene como una fila más de esta misma grilla si zenith_dB no es
