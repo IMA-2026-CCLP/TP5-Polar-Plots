@@ -182,12 +182,14 @@ class GL3DView(QWidget):
 
     def _build_cut_plane_controls(self):
         """Controles del plano de corte XY (abajo a la izquierda): elegir la elevación
-        (0°–90°), mostrarla como plano de referencia en la escena, e "Intersectar" — manda esa
-        misma elevación al selector "Elevación" que ya tiene Polar 2D (Parámetros ▸ Polar 2D),
-        que muestra el contorno medido en ese ángulo. No se recalcula una intersección geométrica
-        aparte contra la malla (que además de compleja daría un resultado distinto: la malla
-        codifica el nivel en el radio, no es una esfera real) — se reusa el corte por elevación
-        que Polar 2D ya sabe dibujar, sólo que elegido visualmente desde acá."""
+        (0°–90°), mostrarla en la escena (plano de referencia + la curva real a esa elevación),
+        e "Intersectar" — manda esa misma elevación al selector "Elevación" que ya tiene Polar 2D
+        (Parámetros ▸ Polar 2D), que muestra el contorno medido en ese ángulo. No se recalcula
+        una intersección geométrica aparte contra la malla (que además de compleja daría un
+        resultado distinto: acá el radio codifica el nivel medido, no es una esfera real, así
+        que la curva a una elevación no es plana — el plano de referencia se muestra al lado
+        para que se note la diferencia) — se reusa el corte por elevación que Polar 2D ya sabe
+        dibujar, sólo que elegido visualmente desde acá."""
         box = QWidget(self)
         box.setStyleSheet(
             "background: rgba(255,255,255,0.9); border:1px solid #c8c8c8; border-radius:3px;")
@@ -197,28 +199,48 @@ class GL3DView(QWidget):
 
         self._chk_cut = QCheckBox("Resaltar curva")
         self._chk_cut.setToolTip(
-            "Resalta sobre la propia malla la curva a esta elevación — es una de las curvas "
-            "apiladas que arman la superficie (sigue el relieve real, no es un corte plano). "
-            "Es exactamente lo que 'Intersectar' va a mostrar en Polar 2D.")
+            "Muestra el plano de referencia y la curva real a esta elevación — es una de las "
+            "curvas apiladas que arman la superficie (sigue el relieve real, no es plana como "
+            "el plano). Es exactamente lo que 'Intersectar' va a mostrar en Polar 2D.")
         self._chk_cut.toggled.connect(self._on_cut_toggled)
         lay.addWidget(self._chk_cut)
 
         lay.addWidget(QLabel("Elevación:"))
+        btn_down = QPushButton("◀")
+        btn_down.setFixedWidth(24)
+        btn_down.setAutoDefault(False)
+        btn_down.setToolTip("-10°")
+        btn_down.clicked.connect(lambda: self._step_cut_elevation(-10))
+        lay.addWidget(btn_down)
+
         self._ne_cut = NumEdit()
         self._ne_cut.setRange(0, 90)
         self._ne_cut.setDecimals(0)
         self._ne_cut.setValue(0)
-        self._ne_cut.setFixedWidth(40)
-        self._ne_cut.setToolTip("0° a 90°. Ubica el plano; 'Intersectar' manda este valor a Polar 2D.")
-        self._ne_cut.textChanged.connect(self._on_cut_value_changed)
+        self._ne_cut.setFixedWidth(36)
+        self._ne_cut.setToolTip("0° a 90°. 'Aceptar' (o Enter) lo aplica; 'Intersectar' lo manda a Polar 2D.")
+        self._ne_cut.returnPressed.connect(self._apply_cut_elevation)
         lay.addWidget(self._ne_cut)
         lay.addWidget(QLabel("°"))
 
-        btn = QPushButton("Intersectar →")
-        btn.setToolTip("Muestra en Polar 2D el contorno medido en esta elevación.")
-        btn.setAutoDefault(False)
-        btn.clicked.connect(self._on_intersect_clicked)
-        lay.addWidget(btn)
+        btn_up = QPushButton("▶")
+        btn_up.setFixedWidth(24)
+        btn_up.setAutoDefault(False)
+        btn_up.setToolTip("+10°")
+        btn_up.clicked.connect(lambda: self._step_cut_elevation(10))
+        lay.addWidget(btn_up)
+
+        btn_ok = QPushButton("Aceptar")
+        btn_ok.setAutoDefault(False)
+        btn_ok.setToolTip("Aplica el valor tipeado (mueve el plano y la curva resaltada).")
+        btn_ok.clicked.connect(self._apply_cut_elevation)
+        lay.addWidget(btn_ok)
+
+        btn_go = QPushButton("Intersectar →")
+        btn_go.setToolTip("Muestra en Polar 2D el contorno medido en esta elevación.")
+        btn_go.setAutoDefault(False)
+        btn_go.clicked.connect(self._on_intersect_clicked)
+        lay.addWidget(btn_go)
 
         box.adjustSize()
         self._cut_box = box
@@ -229,12 +251,19 @@ class GL3DView(QWidget):
         if self._last_grid is not None:
             self._render()
 
-    def _on_cut_value_changed(self, *_):
+    def _step_cut_elevation(self, delta: float):
+        self._ne_cut.setValue(max(0, min(90, self._ne_cut.value() + delta)))
+        self._apply_cut_elevation()
+
+    def _apply_cut_elevation(self):
+        # No se aplica en cada tecla tipeada (textChanged) — re-renderiza toda la malla y
+        # resultaba molesto/lento mientras se escribe un número de más de un dígito.
         self._cut_elevation = self._ne_cut.value()
         if self._cut_visible and self._last_grid is not None:
             self._render()
 
     def _on_intersect_clicked(self):
+        self._apply_cut_elevation()
         self.intersect_requested.emit(self._ne_cut.value())
 
     # ── API pública ──────────────────────────────────────────────────────
@@ -442,15 +471,17 @@ class GL3DView(QWidget):
         return items
 
     def _make_cut_ring_items(self, g: dict) -> list:
-        """Resalta sobre la PROPIA malla la curva (fila de la grilla) más cercana a la elevación
-        elegida — no un plano geométrico aparte. Muestra directamente cuál es la curva que
-        "Intersectar" va a mandar a Polar 2D: es una de las curvas apiladas que arman la
-        superficie (ondulada, seguí el nivel medido en cada azimut), no un corte a Z constante
-        — un plano Z=cte NO coincide con esta curva salvo en direcciones de nivel parejo, porque
-        acá el radio codifica el dB, no el ángulo (ver charla con el usuario)."""
+        """Plano de referencia (chato, Z constante) + la curva REAL a esa elevación resaltada
+        sobre la propia malla (fila de la grilla más cercana) — a propósito uno al lado del otro:
+        acá el radio codifica el nivel medido, no es una esfera real, así que la curva a una
+        elevación no es plana (sube y baja siguiendo el nivel de cada azimut) — el plano se ve
+        chato y la curva no, y esa diferencia es la prueba visual de por qué. La curva es
+        exactamente lo que "Intersectar" manda a Polar 2D; el plano es sólo referencia, no se
+        usa para calcular nada."""
+        items = [self._make_reference_plane_item()]
         elev_deg = g.get('elev_deg')
         if elev_deg is None or not len(elev_deg):
-            return []
+            return items
         row = int(np.argmin(np.abs(elev_deg - np.clip(self._cut_elevation, 0, 90))))
         X, Y, Z = g['X'], g['Y'], g['Z']
         pts = np.stack([X[row], Y[row], Z[row]], axis=-1)
@@ -458,7 +489,25 @@ class GL3DView(QWidget):
         ring = gl.GLLinePlotItem(pos=pts, color=color, width=5, antialias=True)
         # Puntito en cada vértice: ayuda a ver que la curva sigue el relieve real (no es plana).
         dots = gl.GLScatterPlotItem(pos=pts[::4], color=color, size=6, pxMode=True)
-        return [ring, dots]
+        items += [ring, dots]
+        return items
+
+    def _make_reference_plane_item(self):
+        """Disco chato y semitransparente a la altura Z que tendría un punto a esta elevación
+        en una esfera de radio 1 — sólo referencia visual, nunca se usa para calcular nada."""
+        e = np.radians(np.clip(self._cut_elevation, 0, 90))
+        z = float(np.sin(e))
+        radius = 1.3
+        n = 48
+        phi = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        rim = np.stack([radius * np.cos(phi), radius * np.sin(phi), np.full(n, z)], axis=-1)
+        verts = np.vstack([rim, [[0.0, 0.0, z]]])   # centro al final
+        center = n
+        faces = np.array([[k, (k + 1) % n, center] for k in range(n)])
+        color = QColor("#2F6DB5")
+        colors = np.tile([color.redF(), color.greenF(), color.blueF(), 0.18], (len(verts), 1))
+        md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
+        return gl.GLMeshItem(meshdata=md, smooth=False, glOptions='translucent')
 
     def _make_surface_item(self, g: dict):
         # El polo (cénit) ya viene como una fila más de esta misma grilla si zenith_dB no es
