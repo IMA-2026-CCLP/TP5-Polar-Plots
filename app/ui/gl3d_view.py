@@ -176,6 +176,11 @@ class GL3DView(QWidget):
         # porque ya no hay ningún QOpenGLWidget de por medio.
         self._overlay = QWidget()
         self._overlay.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # El fondo vacío de _overlay no debe tapar el mouse (orbitar/zoom con el mouse sobre la
+        # escena dejaba de andar: todos los clics caían en _overlay en vez de llegar a _gl,
+        # aunque se viera "transparente"). Los widgets hijos (botones, checkbox, combo) siguen
+        # recibiendo sus propios clics normalmente — este flag sólo afecta el fondo vacío.
+        self._overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._overlay.setStyleSheet("background: transparent;")
 
         layout.addWidget(self._gl)
