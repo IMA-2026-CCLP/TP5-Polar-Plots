@@ -42,6 +42,7 @@ class Bridge(QObject):
     sig_compute_dir        = pyqtSignal(str, float, float, int, int)
     sig_export_all_images  = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
+    sig_intersect_cut3d     = pyqtSignal()   # "Intersectar" (Corte, Superficie 3D) — no toca Polar 2D
     sig_theme_toggled      = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -66,6 +67,7 @@ class Bridge(QObject):
             'note_start': 0.0,    'note_grad':   25.0,
             'note_theta': 'ref',
             'show_info':  False,   # recuadro de información de los gráficos: apagado por defecto
+            'cut3d_elevation': 0.0,   # "Corte (Superficie 3D)": elevación del corte, ver intersectCut3D
         }
 
     # ── Slots llamados desde JS ───────────────────────────────────────────────
@@ -195,6 +197,10 @@ class Bridge(QObject):
     @pyqtSlot()
     def dirDisplayChanged(self):
         self.sig_dir_display_changed.emit()
+
+    @pyqtSlot()
+    def intersectCut3D(self):
+        self.sig_intersect_cut3d.emit()
 
     @pyqtSlot()
     def themeToggled(self):

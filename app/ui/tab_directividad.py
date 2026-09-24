@@ -55,7 +55,8 @@ _DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
 _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
-                 "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin"},
+                 "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
+                 "show_ref_plane": True, "show_hemisphere_grid": True},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
     "polar2d":  {
@@ -248,7 +249,6 @@ class _ViewSection(QWidget):
     properties_requested = pyqtSignal()      # pide abrir/actualizar el panel de Propiedades
     properties_applied   = pyqtSignal()      # se aplicó un cambio de Propiedades (para Ctrl+Z)
     zoom_requested       = pyqtSignal(str)   # 'Ver en grande' / volver (emite el modo)
-    intersect_requested  = pyqtSignal(float) # "Intersectar" del plano de corte XY (sólo '3d'): elevación en °
 
     def __init__(self, title: str, mode: str, parent=None):
         super().__init__(parent)
@@ -283,8 +283,6 @@ class _ViewSection(QWidget):
         # ve el evento ahí. En su lugar, el propio HTML reenvía el click
         # derecho por consola (ver plot/balloon.py _wrap_html), capturado acá.
         self.view.context_menu_requested.connect(self._show_context_menu)
-        if hasattr(self.view, 'intersect_requested'):   # sólo lo tiene GL3DView ('3d')
-            self.view.intersect_requested.connect(self.intersect_requested)
 
         self.setMinimumHeight(80)
 
@@ -468,84 +466,31 @@ class _ViewSection(QWidget):
             spin_axis_w.setValue(self._style.get('axis_line_width', 3))
             spin_axis_w.setToolTip("Grosor de las líneas de los ejes X/Y/Z. Valor típico: 2 a 4. Por defecto: 3.")
             form_ax.addRow("Grosor líneas X/Y/Z:", spin_axis_w)
+            if self._mode == "3d":
+                chk_plane = QCheckBox("Mostrar plano translúcido de referencia")
+                chk_plane.setChecked(bool(self._style.get('show_ref_plane', True)))
+                chk_plane.setToolTip(
+                    "El plano chato que marca la altura de la elevación elegida en el grupo "
+                    "'Corte (Superficie 3D)' de la barra izquierda. Sólo se ve si ahí se activó "
+                    "'Intersectar'; esto lo saca sin desactivar la curva de corte."
+                )
+                form_ax.addRow(chk_plane)
+                chk_grid = QCheckBox("Mostrar grilla hemisférica")
+                chk_grid.setChecked(bool(self._style.get('show_hemisphere_grid', True)))
+                chk_grid.setToolTip("Los círculos de latitud/longitud de referencia alrededor de la superficie.")
+                form_ax.addRow(chk_grid)
+                fields['show_ref_plane']       = chk_plane
+                fields['show_hemisphere_grid'] = chk_grid
+
             fields['grid_color']     = btn_grid
             fields['grid_width']     = spin_grid_w
             fields['axis_label_size'] = spin_label
             fields['axis_line_width'] = spin_axis_w
             outer.addWidget(box_ax)
 
-            box_interp = QGroupBox("Suavizado")
-            form_interp = QFormLayout(box_interp)
-            spin_interp_deg = _NumEdit()
-            spin_interp_deg.setRange(0.5, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
-            spin_interp_deg.setToolTip(
-                "Qué tan fina se dibuja la superficie entre los puntos medidos.\n"
-                "No cambia los datos, sólo el dibujo.\n"
-                "Recomendado: dejar en 2 (por defecto). Bajalo a 1 sólo si vas a\n"
-                "exportar una imagen grande y querés más detalle (más lento)."
-            )
-            form_interp.addRow("Paso de interpolación (°):", spin_interp_deg)
-            spin_smoothing = _NumEdit()
-            spin_smoothing.setRange(0.0, 500.0); spin_smoothing.setSingleStep(5.0)
-            spin_smoothing.setValue(self._style.get('smoothing', 0.0))
-            spin_smoothing.setToolTip(
-                "0 = la superficie pasa exacto por los datos medidos (recomendado,\n"
-                "dejar así salvo que se vea muy ruidosa). Si necesitás suavizar,\n"
-                "empezá con 20-50 y andá subiendo de a poco mirando el resultado.\n"
-                "Ojo: valores muy altos (200+) empiezan a deformar la forma real."
-            )
-            form_interp.addRow("Suavizado (factor spline):", spin_smoothing)
-            combo_smooth_method_3d = QComboBox()
-            combo_smooth_method_3d.setMaximumWidth(120)
-            combo_smooth_method_3d.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method_3d.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
-            combo_smooth_method_3d.setToolTip(
-                "Mismo suavizado circular que el Polar 2D, aplicado en la\n"
-                "dirección de azimuth (cada anillo horizontal de la esfera),\n"
-                "ANTES de ajustar la superficie. Sólo importa si la ventana de\n"
-                "abajo es mayor a 0.\n"
-                "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
-                "savgol: preserva mejor lóbulos/nulos angostos.\n"
-                "moving_average: el más simple, puede generar ondulaciones falsas.\n"
-                "none: sin efecto, ignora la ventana."
-            )
-            form_interp.addRow("Tipo de suavizado (azimuth):", combo_smooth_method_3d)
-            spin_smooth_win_3d = _NumEdit()
-            spin_smooth_win_3d.setDecimals(0)
-            spin_smooth_win_3d.setRange(0, 15); spin_smooth_win_3d.setSingleStep(1)
-            spin_smooth_win_3d.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
-            spin_smooth_win_3d.setToolTip(
-                "Cantidad de puntos vecinos que se promedian entre sí, sobre cada\n"
-                "anillo de azimuth. 0 = SIN SUAVIZAR (recomendado para empezar).\n"
-                "3 a 5 = suavizado leve. 7 a 9 = fuerte (cuidado, puede borrar\n"
-                "lóbulos/nulos reales). No recomendado pasar de 10."
-            )
-            form_interp.addRow("Intensidad (0 = sin suavizar):", spin_smooth_win_3d)
-            fields['interp_deg'] = spin_interp_deg
-            fields['smoothing']  = spin_smoothing
-            fields['smoothing_method'] = combo_smooth_method_3d
-            fields['smoothing_window'] = spin_smooth_win_3d
-            outer.addWidget(box_interp)
-
         if self._mode == "3d":
-            box_cut = QGroupBox("Corte")
-            form_cut = QFormLayout(box_cut)
-            chk_cut = QCheckBox("Mostrar plano y curva de referencia")
-            chk_cut.setChecked(bool(self._style.get('cut_visible', False)))
-            chk_cut.setToolTip(
-                "Resalta sobre la propia malla la curva a la elevación de abajo — es una de "
-                "las curvas apiladas que arman la superficie (sigue el relieve real), más un "
-                "plano chato de referencia al lado para comparar. Es exactamente lo que "
-                "'Intersectar' manda a Polar 2D."
-            )
-            form_cut.addRow(chk_cut)
-            spin_cut_el = _NumEdit()
-            spin_cut_el.setRange(0, 90)
-            spin_cut_el.setDecimals(0)
-            spin_cut_el.setValue(self._style.get('cut_elevation', 0.0))
-            spin_cut_el.setToolTip("Elevación del plano/curva de referencia y de 'Intersectar' (0° a 90°).")
-            form_cut.addRow("Elevación (°):", spin_cut_el)
+            box_calc = QGroupBox("Método de cálculo")
+            form_calc = QFormLayout(box_calc)
             combo_geom = QComboBox()
             combo_geom.addItem("Radial al origen", "origin")
             combo_geom.addItem("Radial al eje Z", "zaxis")
@@ -556,16 +501,9 @@ class _ViewSection(QWidget):
                 "Radial al eje Z: el nivel sólo escala la parte horizontal; la altura depende nada "
                 "más del ángulo de elevación — un corte horizontal coincide exacto con una elevación."
             )
-            form_cut.addRow("Construcción:", combo_geom)
-            btn_intersect = QPushButton("Intersectar → Polar 2D")
-            btn_intersect.setAutoDefault(False)
-            btn_intersect.setToolTip("Muestra en Polar 2D el contorno medido en la elevación de arriba.")
-            btn_intersect.clicked.connect(lambda: self.view.request_intersect())
-            form_cut.addRow(btn_intersect)
-            fields['cut_visible']   = chk_cut
-            fields['cut_elevation'] = spin_cut_el
+            form_calc.addRow("Construcción:", combo_geom)
             fields['geometry_mode'] = combo_geom
-            outer.addWidget(box_cut)
+            outer.addWidget(box_calc)
 
         elif self._mode == "polar2d":
             box_ax = QGroupBox("Ejes / traza")
@@ -660,64 +598,6 @@ class _ViewSection(QWidget):
             fields['_compare'] = _CompareEditor(self, dlg)
             outer.addWidget(fields['_compare'])
 
-            box_interp = QGroupBox("Suavizado")
-            form_interp = QFormLayout(box_interp)
-            combo_smooth_method = QComboBox()
-            combo_smooth_method.setMaximumWidth(120)
-            combo_smooth_method.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
-            combo_smooth_method.setToolTip(
-                "Sólo importa si la 'Intensidad' de abajo es mayor a 0.\n"
-                "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
-                "savgol (Savitzky-Golay): usalo si el gaussiano te 'redondea'\n"
-                "  demasiado un lóbulo o nulo que sabés que es real.\n"
-                "moving_average: el más simple, pero puede generar\n"
-                "  ondulaciones que no existen en la medición real.\n"
-                "none: sin suavizar, ignora la intensidad."
-            )
-            form_interp.addRow("Tipo de suavizado:", combo_smooth_method)
-            spin_smooth_win = _NumEdit()
-            spin_smooth_win.setDecimals(0)
-            spin_smooth_win.setRange(0, 15); spin_smooth_win.setSingleStep(1)
-            spin_smooth_win.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
-            spin_smooth_win.setToolTip(
-                "Cantidad de puntos vecinos que se promedian entre sí.\n"
-                "0 = SIN SUAVIZAR (recomendado para empezar — dejalo así\n"
-                "  salvo que el patrón se vea con ruido/dientes de sierra raros).\n"
-                "3 a 5 = suavizado leve, buen punto de partida si hace falta.\n"
-                "7 a 9 = suavizado fuerte — cuidado, puede borrar lóbulos/nulos reales.\n"
-                "No recomendado pasar de 10: empieza a distorsionar la forma real."
-            )
-            form_interp.addRow("Intensidad (0 = sin suavizar):", spin_smooth_win)
-            combo_interp = QComboBox()
-            combo_interp.setMaximumWidth(120)
-            combo_interp.addItems(['cubic', 'quadratic', 'linear', 'none'])
-            combo_interp.setCurrentText(self._style.get('interp_kind', DEFAULT_INTERP_KIND))
-            combo_interp.setToolTip(
-                "No cambia los datos medidos, sólo cómo se dibuja la curva entre puntos.\n"
-                "cubic: recomendado, curva natural (por defecto).\n"
-                "quadratic: intermedio.\n"
-                "linear: conecta los puntos con rectas (se ve 'picudo', como un diamante).\n"
-                "none: sólo los puntos medidos, sin curva — útil para comparar\n"
-                "  contra el dato crudo y ver si el suavizado está bien."
-            )
-            form_interp.addRow("Tipo de interpolación:", combo_interp)
-            spin_interp_deg = _NumEdit()
-            spin_interp_deg.setRange(0.1, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
-            spin_interp_deg.setToolTip(
-                "Qué tan fina se dibuja la curva. No cambia los datos.\n"
-                "Recomendado: dejar en 1 (por defecto).\n"
-                "Bajalo a 0.5 sólo si vas a exportar una imagen grande y querés\n"
-                "más nitidez. Subilo a 2-5 si sentís que el gráfico va lento."
-            )
-            form_interp.addRow("Paso de interpolación (°):", spin_interp_deg)
-            fields['smoothing_method'] = combo_smooth_method
-            fields['smoothing_window'] = spin_smooth_win
-            fields['interp_kind']      = combo_interp
-            fields['interp_deg']       = spin_interp_deg
-            outer.addWidget(box_interp)
-
         elif self._mode == "spectrum":
             box_sp = QGroupBox("Barras")
             form_sp = QFormLayout(box_sp)
@@ -781,14 +661,10 @@ class _ViewSection(QWidget):
                 self._axis_width = fields['grid_width'].value()
                 new_style['axis_label_size'] = fields['axis_label_size'].value()
                 new_style['axis_line_width'] = fields['axis_line_width'].value()
-                new_style['interp_deg']      = fields['interp_deg'].value()
-                new_style['smoothing']       = fields['smoothing'].value()
-                new_style['smoothing_method'] = fields['smoothing_method'].currentText()
-                new_style['smoothing_window'] = fields['smoothing_window'].value()
                 if self._mode == "3d":
-                    new_style['cut_visible']   = fields['cut_visible'].isChecked()
-                    new_style['cut_elevation'] = fields['cut_elevation'].value()
-                    new_style['geometry_mode'] = fields['geometry_mode'].currentData()
+                    new_style['show_ref_plane']       = fields['show_ref_plane'].isChecked()
+                    new_style['show_hemisphere_grid'] = fields['show_hemisphere_grid'].isChecked()
+                    new_style['geometry_mode']        = fields['geometry_mode'].currentData()
             elif self._mode == "polar2d":
                 self._tick_font_size = fields['tick_font_size'].value()
                 new_style['ring_font_size']    = fields['ring_font_size'].value()
@@ -811,10 +687,6 @@ class _ViewSection(QWidget):
                 self.view.set_compare_styles(self._compare_styles)
                 new_style['line_width']        = fields['line_width'].value()
                 new_style['legend_font_size']  = fields['legend_font_size'].value()
-                new_style['smoothing_method']  = fields['smoothing_method'].currentText()
-                new_style['smoothing_window']  = fields['smoothing_window'].value()
-                new_style['interp_kind']       = fields['interp_kind'].currentText()
-                new_style['interp_deg']        = fields['interp_deg'].value()
             elif self._mode == "spectrum":
                 new_style['bar_color']  = fields['bar_color'].color_hex
                 new_style['err_color']  = fields['err_color'].color_hex
@@ -962,7 +834,6 @@ class TabDirectividad(QWidget):
     log      = pyqtSignal(str)
     computed = pyqtSignal(object, str)  # (thetas_np, status_text)
     compute_finished = pyqtSignal()     # terminó un cálculo pedido con 'Calcular' (no al cargar datos)
-    intersect_elevation = pyqtSignal(int)   # índice (en _full_thetas) más cercano a "Intersectar"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -993,6 +864,22 @@ class TabDirectividad(QWidget):
         }
 
         self._build_ui()
+        from ui.export_utils import get_smoothing_settings
+        self.apply_smoothing_settings(get_smoothing_settings())   # última config guardada (Herramientas ▸ Suavizado…)
+
+    def apply_smoothing_settings(self, values: dict):
+        """Una sola configuración de suavizado para Polar 2D, Superficie 3D y Esfera (Herramientas
+        ▸ Suavizado…, ver ui/options_dialogs.py::SmoothingOptionsDialog) — reemplaza los paneles
+        de Suavizado/Interpolación que antes tenía cada Propiedades por separado, duplicados y
+        potencialmente desalineados entre sí."""
+        common = {k: values[k] for k in ('smoothing_method', 'smoothing_window', 'interp_deg')}
+        for mode in ('3d', 'sphere'):
+            sec = self._sections[mode]
+            sec._style.update(common, smoothing=values['spline_factor'])
+            sec.view.set_style(sec._style)
+        sec = self._sections['polar2d']
+        sec._style.update(common, interp_kind=values['interp_kind'])
+        sec.view.set_style(sec._style)
 
     # ── Construcción UI ───────────────────────────────────────────────────
 
@@ -1027,7 +914,6 @@ class TabDirectividad(QWidget):
                 lambda m=mode: self._show_properties_panel(m))
             sec.properties_applied.connect(
                 lambda m=mode: setattr(self, '_last_props_mode', m))
-            sec.intersect_requested.connect(self._on_intersect_requested)
 
         # Ctrl+Z deshace el último "Aplicar" de Propiedades (cualquier gráfico).
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_properties)
@@ -1459,18 +1345,6 @@ class TabDirectividad(QWidget):
                 return
 
         self._refresh_display()
-
-    def _on_intersect_requested(self, elevation_deg: float):
-        """'Intersectar' del plano de corte XY en Superficie 3D: busca la elevación medida más
-        cercana y avisa (MainWindow lo usa para elegir esa misma elevación en el selector de
-        Polar 2D, que ya sabe dibujar ese contorno — ver ui/gl3d_view.py)."""
-        if self._full_thetas is None or not len(self._full_thetas):
-            self.log.emit("[Dir] Sin datos para intersectar.")
-            return
-        idx = int(np.argmin(np.abs(self._full_thetas - elevation_deg)))
-        self.log.emit(f"[Dir] Intersección a {elevation_deg:g}° → elevación medida más cercana: "
-                       f"{self._full_thetas[idx]:g}°")
-        self.intersect_elevation.emit(idx)
 
     def _save_section(self, mode: str):
         """Guarda la imagen de la sección indicada mediante un diálogo de archivo."""

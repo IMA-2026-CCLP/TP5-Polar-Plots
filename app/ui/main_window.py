@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         rb.sig_compute_dir.connect(self._on_compute_dir)
         rb.sig_export_all_images.connect(self._on_export_all_images)
         rb.sig_dir_display_changed.connect(self._on_dir_display_changed)
+        rb.sig_intersect_cut3d.connect(self._on_intersect_cut3d)
 
         # ── Tema
         rb.sig_theme_toggled.connect(self._toggle_theme)
@@ -174,7 +175,6 @@ class MainWindow(QMainWindow):
         self.view_dir.log.connect(self._append_log)
         self.view_dir.computed.connect(self._on_dir_computed)
         self.view_dir.compute_finished.connect(lambda: QTimer.singleShot(0, self._offer_save_directivity))
-        self.view_dir.intersect_elevation.connect(self.ribbon.set_elevation_index)
 
     # ── Tema ──────────────────────────────────────────────────────────────────
 
@@ -217,10 +217,18 @@ class MainWindow(QMainWindow):
         self._params_stack.setCurrentIndex(idx)
 
     def _open_graph_options(self, kind: str):
-        """Opciones ▸ Gráficos ▸ …: el mismo modal de Propiedades del gráfico (o el de Imágenes)."""
+        """Opciones ▸ Gráficos ▸ …: el mismo modal de Propiedades del gráfico (o el de Imágenes).
+        'smoothing' (Herramientas ▸ Suavizado…) es aparte: una sola configuración común a Polar 2D,
+        Superficie 3D y Esfera, no un modal de Propiedades de un gráfico en particular."""
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
             ImageOptionsDialog(self).exec()
+            return
+        if kind == "smoothing":
+            from ui.options_dialogs import SmoothingOptionsDialog
+            dlg = SmoothingOptionsDialog(self)
+            if dlg.exec() == dlg.DialogCode.Accepted:
+                self.view_dir.apply_smoothing_settings(dlg.values())
             return
         self.ribbon._switch_tab(1)          # Directividad
         self.view_dir._show_properties_panel(kind)
@@ -541,6 +549,18 @@ class MainWindow(QMainWindow):
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()
         self.view_dir.apply_display_params(params)
+
+    def _on_intersect_cut3d(self):
+        """"Intersectar" (barra izquierda, grupo "Corte (Superficie 3D)"): muestra el plano de
+        referencia y la curva real a esa elevación sobre la Superficie 3D — sólo esa vista,
+        nunca toca Polar 2D (queda totalmente independiente)."""
+        sec = self.view_dir._sections.get('3d')
+        if sec is None:
+            return
+        elevation = float(self.ribbon._b.state.get('cut3d_elevation', 0.0))
+        sec._style['cut_visible']   = True
+        sec._style['cut_elevation'] = elevation
+        sec.view.set_style(sec._style)
 
     def _offer_save_directivity(self):
         """Tras Calcular: ofrece guardar el archivo de directividad (elige la ubicación en el diálogo de archivo)."""

@@ -118,7 +118,6 @@ class GL3DView(QWidget):
 
     log = pyqtSignal(str)
     context_menu_requested = pyqtSignal(int, int)   # x, y en píxeles locales del widget
-    intersect_requested    = pyqtSignal(float)      # elevación elegida (°) — "Intersectar"
 
     _EXPORT_FORMATS = ('png', 'jpeg', 'webp')   # sin SVG: es una malla rasterizada, no vectorial
 
@@ -140,7 +139,9 @@ class GL3DView(QWidget):
         self._current_items: list = []
         self._export_clone = None   # GLViewWidget reusado entre exportaciones, ver _get_export_clone
         self._cut_elevation: float = 0.0   # elevación elegida (0°–90°), ver _make_cut_ring_items
-        self._cut_visible:   bool  = False
+        self._cut_visible:   bool  = False   # muestra la curva (y, si show_ref_plane, el plano)
+        self._show_ref_plane:      bool = True   # plano translúcido — sólo si _cut_visible también
+        self._show_hemisphere_grid: bool = True  # círculos de referencia lat/long, independiente del corte
         # 'origin': el nivel escala el vector ENTERO desde (0,0,0) — balloon plot clásico
         #           (CLIO, GLL Viewer, EASE...), el que ya tenía este programa.
         # 'zaxis':  el nivel sólo escala la parte horizontal; la altura Z depende nada más del
@@ -285,13 +286,10 @@ class GL3DView(QWidget):
         self._cut_visible   = bool(self._style.get('cut_visible', False))
         self._cut_elevation = float(self._style.get('cut_elevation', 0.0))
         self._geometry_mode = self._style.get('geometry_mode', 'origin')
+        self._show_ref_plane       = bool(self._style.get('show_ref_plane', True))
+        self._show_hemisphere_grid = bool(self._style.get('show_hemisphere_grid', True))
         if self._levels is not None:
             self._render()
-
-    def request_intersect(self):
-        """Botón "Intersectar" del panel de Propiedades: manda la elevación del corte actual
-        (self._cut_elevation, ver set_style) a Polar 2D."""
-        self.intersect_requested.emit(self._cut_elevation)
 
     def set_camera_view(self, view: str):
         preset = _CAMERA_PRESETS.get(view)
@@ -403,23 +401,23 @@ class GL3DView(QWidget):
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
-        items += self._make_grid_items()
+        if self._show_hemisphere_grid:
+            items += self._make_grid_items()
         if self._cut_visible:
             items += self._make_cut_ring_items(g)
+            if self._show_ref_plane:
+                items.append(self._make_reference_plane_item())
         return items
 
     def _make_cut_ring_items(self, g: dict) -> list:
-        """Plano de referencia (chato, Z constante) + la curva REAL a esa elevación resaltada
-        sobre la propia malla (fila de la grilla más cercana) — a propósito uno al lado del otro:
-        acá el radio codifica el nivel medido, no es una esfera real, así que la curva a una
-        elevación no es plana (sube y baja siguiendo el nivel de cada azimut) — el plano se ve
-        chato y la curva no, y esa diferencia es la prueba visual de por qué. La curva es
-        exactamente lo que "Intersectar" manda a Polar 2D; el plano es sólo referencia, no se
-        usa para calcular nada."""
-        items = [self._make_reference_plane_item()]
+        """Curva REAL a la elevación elegida, resaltada sobre la propia malla (fila de la grilla
+        más cercana) — acá el radio codifica el nivel medido, no es una esfera real, así que la
+        curva a una elevación no es plana (sube y baja siguiendo el nivel de cada azimut); el
+        plano de referencia (chato, ver _make_reference_plane_item, activable aparte en
+        Propiedades) se muestra al lado a propósito para que se note esa diferencia."""
         elev_deg = g.get('elev_deg')
         if elev_deg is None or not len(elev_deg):
-            return items
+            return []
         row = int(np.argmin(np.abs(elev_deg - np.clip(self._cut_elevation, 0, 90))))
         X, Y, Z = g['X'], g['Y'], g['Z']
         pts = np.stack([X[row], Y[row], Z[row]], axis=-1)
@@ -427,8 +425,7 @@ class GL3DView(QWidget):
         ring = gl.GLLinePlotItem(pos=pts, color=color, width=5, antialias=True)
         # Puntito en cada vértice: ayuda a ver que la curva sigue el relieve real (no es plana).
         dots = gl.GLScatterPlotItem(pos=pts[::4], color=color, size=6, pxMode=True)
-        items += [ring, dots]
-        return items
+        return [ring, dots]
 
     def _make_reference_plane_item(self):
         """Disco chato y semitransparente a la altura Z que tendría un punto a esta elevación
@@ -488,8 +485,8 @@ class GL3DView(QWidget):
         """Círculos de referencia (latitud/longitud) — ver nota de diseño en el docstring
         del módulo. Estilizados por 'Ejes / grilla' en Propiedades (mismo control que antes
         manejaba la grilla de caja de Plotly)."""
-        qc = QColor(self._axis_color or '#2e3248')
-        color = (qc.redF(), qc.greenF(), qc.blueF(), 0.6)
+        qc = QColor(self._axis_color or '#8a8f9a')   # gris medio — el navy oscuro de antes se notaba poco
+        color = (qc.redF(), qc.greenF(), qc.blueF(), 0.85)
         width = float(self._axis_width or 1)
         items = []
         phi = np.linspace(0, 2 * np.pi, 73)

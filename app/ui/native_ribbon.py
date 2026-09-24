@@ -84,6 +84,7 @@ class NativeRibbon(QWidget):
     sig_compute_dir         = pyqtSignal(str, float, float, int, int)
     sig_export_all_images   = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
+    sig_intersect_cut3d     = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -130,7 +131,7 @@ class NativeRibbon(QWidget):
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
             'sig_save_mask', 'sig_load_mask', 'sig_compute_dir',
-            'sig_export_all_images', 'sig_dir_display_changed', 'sig_theme_toggled',
+            'sig_export_all_images', 'sig_dir_display_changed', 'sig_intersect_cut3d', 'sig_theme_toggled',
         ):
             src = 'sig_tab_changed' if name == 'tab_changed' else name
             getattr(b, src).connect(getattr(self, name))
@@ -279,6 +280,8 @@ class NativeRibbon(QWidget):
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
         act('export_all',  "Imágenes de directividad…", "Exporta las imágenes de los gráficos que elijas, para todas las bandas del rango", b.exportAllImages, False)
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
+        act('smoothing',   "Suavizado…",      "Suavizado e interpolación — se aplica por igual a Polar 2D, Superficie 3D y Esfera",
+            lambda: self.sig_open_options.emit('smoothing'))
 
     def _make_view_actions(self):
         """Menú Ver: Vista (Amplitud / Envolvente / dB, excluyentes) y Suavizado… (modal). Estado en Bridge.state."""
@@ -374,7 +377,7 @@ class NativeRibbon(QWidget):
         for n in ('align_takes', 'align_mics'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('notas', 'edit_scale', 'save_mask', 'load_mask'):
+        for n in ('notas', 'edit_scale', 'smoothing', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
 
         m = mb.addMenu("&Opciones")
@@ -647,6 +650,12 @@ class NativeRibbon(QWidget):
             ("Paleta de color", [
                 (None, self._combo('colorscale', 84, "Paleta de colores de los gráficos 3D y esfera",
                                    [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis")], disp))]),
+            ("Corte (Superficie 3D)", [
+                ("Elevación (°)", self._num('cut3d_elevation', 52,
+                    "Elevación del plano/curva de referencia (0° a 90°)")),
+                (None, self._button("Intersectar", "Muestra el plano de referencia y la curva real a esta "
+                    "elevación sobre la Superficie 3D — no afecta a Polar 2D, es independiente.",
+                    lambda: b.intersectCut3D()))]),
             ("Espectro", [
                 ("Audio", self._with_info(
                     self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
@@ -720,16 +729,6 @@ class NativeRibbon(QWidget):
         self._b.state['el_idx'] = None
         for n in ('save_session', 'save_session_as', 'export_all'):
             self._act[n].setEnabled(True)
-
-    def set_elevation_index(self, idx: int):
-        """"Intersectar" del plano de corte XY en Superficie 3D: fuerza el plano a XY (el
-        selector de Elevación sólo aplica ahí) y elige esa elevación en Polar 2D."""
-        i = self._c_plane.findData("XY")
-        if i >= 0:
-            self._c_plane.setCurrentIndex(i)
-        i = self._c_el.findData(idx + 1)
-        if i >= 0:
-            self._c_el.setCurrentIndex(i)
 
     def set_dir_status(self, text: str):
         self._dir_status.setText(text.replace('\n', ' · '))

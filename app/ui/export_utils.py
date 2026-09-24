@@ -78,6 +78,40 @@ def set_export_defaults(dpi: int, fmt: str) -> None:
     s.setValue("export/format", fmt)
 
 
+# ── Suavizado (Herramientas ▸ Suavizado…) — una sola configuración para Polar 2D, Superficie 3D
+# y Esfera (antes cada gráfico tenía su propio "Suavizado"/"Interpolación" duplicado y desalineado
+# en Propiedades). smoothing_method/smoothing_window/interp_deg son comunes a los 3; spline_factor
+# sólo lo usan Superficie 3D/Esfera (factor de la spline 2D) e interp_kind sólo Polar 2D (tipo de
+# spline 1D) — no tienen un equivalente real en los otros gráficos.
+DEFAULT_SMOOTHING = dict(
+    smoothing_method="gaussian", smoothing_window=3, interp_deg=2.0,
+    spline_factor=0.0, interp_kind="cubic",
+)
+
+
+def get_smoothing_settings() -> dict:
+    s = _settings()
+    out = dict(DEFAULT_SMOOTHING)
+    try:
+        out["smoothing_method"] = str(s.value("smoothing/method", out["smoothing_method"]))
+        out["smoothing_window"] = int(float(s.value("smoothing/window", out["smoothing_window"])))
+        out["interp_deg"]       = float(s.value("smoothing/interp_deg", out["interp_deg"]))
+        out["spline_factor"]    = float(s.value("smoothing/spline_factor", out["spline_factor"]))
+        out["interp_kind"]      = str(s.value("smoothing/interp_kind", out["interp_kind"]))
+    except (TypeError, ValueError):
+        return dict(DEFAULT_SMOOTHING)
+    return out
+
+
+def set_smoothing_settings(values: dict) -> None:
+    s = _settings()
+    s.setValue("smoothing/method", values["smoothing_method"])
+    s.setValue("smoothing/window", int(values["smoothing_window"]))
+    s.setValue("smoothing/interp_deg", float(values["interp_deg"]))
+    s.setValue("smoothing/spline_factor", float(values["spline_factor"]))
+    s.setValue("smoothing/interp_kind", values["interp_kind"])
+
+
 def logical_px(cm: float) -> int:
     """Centímetros → píxeles CSS/lógicos a 96 dpi (el tamaño del 'lienzo' al que se le aplica la escala del DPI)."""
     return int(round(cm / 2.54 * 96))
