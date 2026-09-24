@@ -56,7 +56,7 @@ _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
-                 "show_ref_plane": True, "show_hemisphere_grid": True},
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear"},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
     "polar2d":  {
@@ -443,6 +443,22 @@ class _ViewSection(QWidget):
             form.addRow("Min (dB):", le_min)
             form.addRow("Max (dB):", le_max)
             fields['min_db'], fields['max_db'] = le_min, le_max
+            if self._mode == "3d":
+                combo_dist = QComboBox()
+                combo_dist.addItem("Lineal", "linear")
+                combo_dist.addItem("Ecualizada (percentil)", "equalized")
+                combo_dist.setCurrentIndex(max(0, combo_dist.findData(self._style.get('color_distribution', 'linear'))))
+                combo_dist.setToolTip(
+                    "Cómo se reparte el color de la malla entre el mínimo y el máximo.\n"
+                    "Lineal: proporcional al dB (dos valores a la misma distancia en dB quedan al\n"
+                    "  mismo 'salto' de color). Recomendado para comparar valores a simple vista.\n"
+                    "Ecualizada: reparte el color según cómo se distribuyen los valores medidos\n"
+                    "  (más contraste donde se agrupa la mayoría de la superficie), en vez de\n"
+                    "  proporcional al dB. La barra de color sigue mostrando la paleta lineal;\n"
+                    "  sólo cambia el color que le toca a cada punto de la malla."
+                )
+                form.addRow("Distribución de color:", combo_dist)
+                fields['color_distribution'] = combo_dist
             outer.addWidget(box)
 
         if self._mode in ("3d", "sphere"):
@@ -655,6 +671,8 @@ class _ViewSection(QWidget):
                 pass
 
             new_style = dict(self._style)
+            if 'color_distribution' in fields:
+                new_style['color_distribution'] = fields['color_distribution'].currentData()
 
             if self._mode in ("3d", "sphere"):
                 self._axis_color = fields['grid_color'].color_hex

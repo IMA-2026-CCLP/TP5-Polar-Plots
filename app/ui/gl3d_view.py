@@ -99,11 +99,24 @@ def _colorscale_stops(name: str):
     return np.array(ts), np.array(rgbs)
 
 
-def _map_colors(values: np.ndarray, vmin: float, vmax: float, colorscale: str) -> np.ndarray:
-    """values (N,) en dB → colores RGBA (N,4) en 0–1."""
+def _map_colors(values: np.ndarray, vmin: float, vmax: float, colorscale: str,
+                 distribution: str = 'linear', ref_sorted: np.ndarray | None = None) -> np.ndarray:
+    """values (N,) en dB → colores RGBA (N,4) en 0–1.
+
+    distribution: 'linear' (por defecto) reparte el color proporcional al valor — dos valores a
+    la misma distancia en dB quedan a la misma distancia de color. 'equalized' (ecualización por
+    percentil, ver Escala en Propiedades) en cambio reparte el color según cómo se distribuyen
+    los valores REALMENTE medidos en toda la superficie (ref_sorted, ver _render_inner): la zona
+    donde se agrupa la mayoría de los valores gana más contraste visual, a costa de que ya no sea
+    proporcional al dB — la barra de color sigue mostrando la paleta lineal (es la referencia de
+    la escala), pero el mapeo de la malla no lo es."""
     ts, rgbs = _colorscale_stops(colorscale)
-    span = (vmax - vmin) or 1.0
-    t = np.clip((values - vmin) / span, 0.0, 1.0)
+    if distribution == 'equalized' and ref_sorted is not None and len(ref_sorted) > 1:
+        t = np.searchsorted(ref_sorted, values, side='left') / (len(ref_sorted) - 1)
+        t = np.clip(t, 0.0, 1.0)
+    else:
+        span = (vmax - vmin) or 1.0
+        t = np.clip((values - vmin) / span, 0.0, 1.0)
     rgba = np.empty((len(values), 4), dtype=np.float32)
     rgba[:, 0] = np.interp(t, ts, rgbs[:, 0])
     rgba[:, 1] = np.interp(t, ts, rgbs[:, 1])
@@ -214,7 +227,7 @@ class GL3DView(QWidget):
 
     def _reposition_overlays(self):
         if self._colorbar.isVisible():
-            self._colorbar.move(self.width() - self._colorbar.width() - 28, 10)
+            self._colorbar.move(self.width() - self._colorbar.width() - 20, 10)
 
     # — no aplican a este modo, pero _ViewSection los llama para los 4 tipos de vista —
     def set_view_mode(self, mode):
@@ -372,7 +385,8 @@ class GL3DView(QWidget):
 
         self._last_grid = dict(X=X, Y=Y, Z=Z, C=C, cmin=cmin, cmax=cmax,
                                 zenith_dB=zenith_dB, vmin=vmin, span=span,
-                                elev_deg=np.degrees(elev_rad))   # una fila del grid por elevación medida/interpolada
+                                elev_deg=np.degrees(elev_rad),   # una fila del grid por elevación medida/interpolada
+                                C_sorted=np.sort(C.reshape(-1)))  # ver distribution='equalized' en _map_colors
 
         for it in self._current_items:
             self._gl.removeItem(it)
@@ -452,7 +466,9 @@ class GL3DView(QWidget):
         X, Y, Z, C = g['X'], g['Y'], g['Z'], g['C']
         n_e, n_p = X.shape
         verts  = np.stack([X, Y, Z], axis=-1).reshape(-1, 3)
-        colors = _map_colors(C.reshape(-1), g['cmin'], g['cmax'], self._colorscale)
+        colors = _map_colors(C.reshape(-1), g['cmin'], g['cmax'], self._colorscale,
+                             distribution=self._style.get('color_distribution', 'linear'),
+                             ref_sorted=g.get('C_sorted'))
 
         i = np.arange(n_e - 1)[:, None]
         j = np.arange(n_p - 1)[None, :]
@@ -503,20 +519,38 @@ class GL3DView(QWidget):
         return items
 
     def _update_colorbar(self, cmin: float, cmax: float):
-        w, h = 18, 120
+        """Barra de color con etiquetas de valor (máx/medio/mín) al lado — antes sólo tenía el
+        degradé, sin decir qué dB le corresponde a cada color (se veía por tooltip nada más, hay
+        que pasar el mouse para enterarse)."""
+        bar_w, h = 18, 120
+        label_w = 46
+        w = bar_w + 4 + label_w
+        from PyQt6.QtGui import QPainter, QFont as _QFont
+        from PyQt6.QtCore import Qt as _Qt
         ts, rgbs = _colorscale_stops(self._colorscale)
         img = QImage(w, h, QImage.Format.Format_ARGB32)
+        img.fill(QColor(0, 0, 0, 0))
         for y in range(h):
             t = 1.0 - y / (h - 1)
             r = float(np.interp(t, ts, rgbs[:, 0]))
             gg = float(np.interp(t, ts, rgbs[:, 1]))
             b = float(np.interp(t, ts, rgbs[:, 2]))
             color = QColor(int(r * 255), int(gg * 255), int(b * 255))
-            for x in range(w):
+            for x in range(bar_w):
                 img.setPixelColor(x, y, color)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        p.setPen(QColor("#1a1a1a"))
+        p.setFont(_QFont("Segoe UI", 8))
+        mid = (cmax + cmin) / 2
+        for value, y in ((cmax, 0), (mid, h // 2), (cmin, h)):
+            ty = max(6, min(h - 4, y))   # no recortar el texto arriba/abajo del todo
+            p.drawText(bar_w + 4, ty - 6, label_w, 12,
+                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, f"{value:.1f}")
+        p.end()
         self._colorbar.setPixmap(QPixmap.fromImage(img))
         self._colorbar.setFixedSize(w, h)
-        self._colorbar.move(self.width() - w - 28, 10)
+        self._colorbar.move(self.width() - w - 20, 10)
         self._colorbar.setToolTip(f"{cmax:.1f} dB (arriba) — {cmin:.1f} dB (abajo)")
         self._colorbar.show()
 
