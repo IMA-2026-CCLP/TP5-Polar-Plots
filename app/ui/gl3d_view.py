@@ -290,6 +290,13 @@ class GL3DView(QWidget):
             smoothing_method=style.get('smoothing_method', DEFAULT_SMOOTH_METHOD),
             smoothing_window=int(style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW)),
         )
+        # El spline de interpolación (RectBivariateSpline, en _build_hemisphere_grid) puede
+        # devolver NaN/inf en condiciones borde (huecos de datos, mic caído, etc.) — un vértice
+        # así queda en una posición/color indefinidos, que la GPU suele pintar blanco con
+        # triángulos degenerados y filosos justo ahí (visto cerca del cénit, donde el spline es
+        # más delicado). Se reemplaza por vmin: no "inventa" un valor alto, achica ese punto.
+        if not np.isfinite(R_dB).all():
+            R_dB = np.nan_to_num(R_dB, nan=vmin, posinf=vmax, neginf=vmin)
 
         cmin = self._min_db if self._min_db is not None else vmin
         cmax = self._max_db if self._max_db is not None else vmax
@@ -308,7 +315,7 @@ class GL3DView(QWidget):
         # triangulación estándar en abanico cierra siempre sola, sin depender de que el último
         # anillo sea plano (no lo es: sigue la forma del dato, y un cap separado con un solo
         # punto ápice podía quedar más bajo que partes del anillo y dejar un hueco visible).
-        if zenith_dB is not None:
+        if zenith_dB is not None and np.isfinite(zenith_dB):
             n_p = X.shape[1]
             z_norm  = float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
             z_color = float(np.clip(zenith_dB, cmin, cmax))
