@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
-from ui.balloon_view import BalloonView
 from ui.gl3d_view import GL3DView
 from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
@@ -29,12 +28,15 @@ from plot.balloon import (COLORSCALES, _COMPARE_COLORS, FONT_SIZE, DEFAULT_SMOOT
 from core.data_store import freq_label
 from core.worker import Worker, begin as _begin, end as _end, report as _report
 
-# polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView); 3d migró a
-# pyqtgraph.opengl (GL3DView, ver ui/gl3d_view.py) como piloto de la migración fuera de
-# Plotly/QWebEngineView; esfera sigue en Plotly (BalloonView) hasta confirmar el piloto.
+# polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView); 3d y esfera
+# migraron a pyqtgraph.opengl (GL3DView, ver ui/gl3d_view.py) — es la MISMA clase para las dos:
+# "radio constante = 1, sólo color" (antes Plotly build_sphere_html) resultó ser un caso
+# particular más del mismo geometry_mode que ya tenía Superficie 3D, así que Esfera es sólo
+# una instancia de GL3DView con geometry_mode='sphere' de entrada (ver _DEFAULT_STYLE_BY_MODE).
+# BalloonView (Plotly/QWebEngineView) queda sin usar en toda la app a partir de este cambio.
 _VIEW_CLASS_BY_MODE = {
     "3d":       GL3DView,
-    "sphere":   BalloonView,
+    "sphere":   GL3DView,
     "polar2d":  Polar2DView,
     "spectrum": SpectrumView,
 }
@@ -58,7 +60,9 @@ _DEFAULT_STYLE_BY_MODE = {
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
                  "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear"},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
-                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
+                 "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear"},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -443,7 +447,7 @@ class _ViewSection(QWidget):
             form.addRow("Min (dB):", le_min)
             form.addRow("Max (dB):", le_max)
             fields['min_db'], fields['max_db'] = le_min, le_max
-            if self._mode == "3d":
+            if self._mode in ("3d", "sphere"):
                 combo_dist = QComboBox()
                 combo_dist.addItem("Lineal", "linear")
                 combo_dist.addItem("Ecualizada (percentil)", "equalized")
@@ -482,7 +486,7 @@ class _ViewSection(QWidget):
             spin_axis_w.setValue(self._style.get('axis_line_width', 3))
             spin_axis_w.setToolTip("Grosor de las líneas de los ejes X/Y/Z. Valor típico: 2 a 4. Por defecto: 3.")
             form_ax.addRow("Grosor líneas X/Y/Z:", spin_axis_w)
-            if self._mode == "3d":
+            if self._mode == "3d":   # el corte/"Intersectar" (barra izquierda) sólo existe para Superficie 3D
                 chk_plane = QCheckBox("Mostrar plano translúcido de referencia")
                 chk_plane.setChecked(bool(self._style.get('show_ref_plane', True)))
                 chk_plane.setToolTip(
@@ -491,11 +495,12 @@ class _ViewSection(QWidget):
                     "'Intersectar'; esto lo saca sin desactivar la curva de corte."
                 )
                 form_ax.addRow(chk_plane)
+                fields['show_ref_plane'] = chk_plane
+            if self._mode in ("3d", "sphere"):
                 chk_grid = QCheckBox("Mostrar grilla hemisférica")
                 chk_grid.setChecked(bool(self._style.get('show_hemisphere_grid', True)))
                 chk_grid.setToolTip("Los círculos de latitud/longitud de referencia alrededor de la superficie.")
                 form_ax.addRow(chk_grid)
-                fields['show_ref_plane']       = chk_plane
                 fields['show_hemisphere_grid'] = chk_grid
 
             fields['grid_color']     = btn_grid
@@ -504,18 +509,22 @@ class _ViewSection(QWidget):
             fields['axis_line_width'] = spin_axis_w
             outer.addWidget(box_ax)
 
-        if self._mode == "3d":
+        if self._mode in ("3d", "sphere"):
             box_calc = QGroupBox("Método de cálculo")
             form_calc = QFormLayout(box_calc)
             combo_geom = QComboBox()
             combo_geom.addItem("Radial al origen", "origin")
             combo_geom.addItem("Radial al eje Z", "zaxis")
-            combo_geom.setCurrentIndex(max(0, combo_geom.findData(self._style.get('geometry_mode', 'origin'))))
+            combo_geom.addItem("Esfera (radio 1, sólo color)", "sphere")
+            default_geom = "sphere" if self._mode == "sphere" else "origin"
+            combo_geom.setCurrentIndex(max(0, combo_geom.findData(self._style.get('geometry_mode', default_geom))))
             combo_geom.setToolTip(
                 "Cómo se construye la superficie a partir del nivel medido.\n"
                 "Radial al origen: el nivel escala todo el vector desde el centro (balloon clásico).\n"
                 "Radial al eje Z: el nivel sólo escala la parte horizontal; la altura depende nada "
-                "más del ángulo de elevación — un corte horizontal coincide exacto con una elevación."
+                "más del ángulo de elevación — un corte horizontal coincide exacto con una elevación.\n"
+                "Esfera: radio siempre 1, el nivel sólo se ve en el color (la vista Esfera de toda "
+                "la vida). Se puede usar en cualquiera de los dos gráficos 3D."
             )
             form_calc.addRow("Construcción:", combo_geom)
             fields['geometry_mode'] = combo_geom
@@ -680,9 +689,9 @@ class _ViewSection(QWidget):
                 new_style['axis_label_size'] = fields['axis_label_size'].value()
                 new_style['axis_line_width'] = fields['axis_line_width'].value()
                 if self._mode == "3d":
-                    new_style['show_ref_plane']       = fields['show_ref_plane'].isChecked()
-                    new_style['show_hemisphere_grid'] = fields['show_hemisphere_grid'].isChecked()
-                    new_style['geometry_mode']        = fields['geometry_mode'].currentData()
+                    new_style['show_ref_plane'] = fields['show_ref_plane'].isChecked()
+                new_style['show_hemisphere_grid'] = fields['show_hemisphere_grid'].isChecked()
+                new_style['geometry_mode']        = fields['geometry_mode'].currentData()
             elif self._mode == "polar2d":
                 self._tick_font_size = fields['tick_font_size'].value()
                 new_style['ring_font_size']    = fields['ring_font_size'].value()

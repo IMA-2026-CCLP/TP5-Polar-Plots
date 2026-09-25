@@ -156,10 +156,13 @@ class GL3DView(QWidget):
         self._show_ref_plane:      bool = True   # plano translúcido — sólo si _cut_visible también
         self._show_hemisphere_grid: bool = True  # círculos de referencia lat/long, independiente del corte
         # 'origin': el nivel escala el vector ENTERO desde (0,0,0) — balloon plot clásico
-        #           (CLIO, GLL Viewer, EASE...), el que ya tenía este programa.
+        #           (CLIO, GLL Viewer, EASE...), el que ya tenía este programa. Modo Superficie 3D.
         # 'zaxis':  el nivel sólo escala la parte horizontal; la altura Z depende nada más del
         #           ángulo de elevación — con esto un plano horizontal SÍ coincide exacto con
         #           una elevación fija (ver charla con el usuario sobre "Radial al eje Z").
+        # 'sphere': radio SIEMPRE 1 — el nivel no toca la geometría en absoluto, sólo el color.
+        #           Modo Esfera (antes su propio renderer aparte con Plotly, build_sphere_html;
+        #           es el mismo caso particular "radio constante" de esta misma clase).
         self._geometry_mode: str = 'origin'
         # último grid calculado (para reconstruir los mismos items al exportar sin
         # recalcular la malla — ver export_image)
@@ -351,11 +354,17 @@ class GL3DView(QWidget):
         R_r    = np.clip((R_dB - vmin) / span, 0.01, 1.0)
 
         E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
-        X = R_r * np.cos(E) * np.cos(P)
-        Y = R_r * np.cos(E) * np.sin(P)
-        if self._geometry_mode == 'zaxis':
+        if self._geometry_mode == 'sphere':
+            X = np.cos(E) * np.cos(P)   # radio siempre 1: el nivel no toca la geometría, sólo el color
+            Y = np.cos(E) * np.sin(P)
+            Z = np.sin(E)
+        elif self._geometry_mode == 'zaxis':
+            X = R_r * np.cos(E) * np.cos(P)
+            Y = R_r * np.cos(E) * np.sin(P)
             Z = np.sin(E)   # sólo depende de la elevación (fila): no lo escala el nivel
         else:
+            X = R_r * np.cos(E) * np.cos(P)
+            Y = R_r * np.cos(E) * np.sin(P)
             Z = R_r * np.sin(E)   # 'origin': vector entero escalado por el nivel (balloon clásico)
         C = R_clip
 
@@ -376,7 +385,7 @@ class GL3DView(QWidget):
         if zenith_dB is not None and np.isfinite(zenith_dB):
             n_p = X.shape[1]
             # 'zaxis': el polo está siempre en Z=1 (90° de elevación), sin importar el nivel.
-            z_pole = 1.0 if self._geometry_mode == 'zaxis' else float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
+            z_pole = 1.0 if self._geometry_mode in ('zaxis', 'sphere') else float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
             z_color = float(np.clip(zenith_dB, cmin, cmax))
             X = np.vstack([X, np.zeros(n_p)])
             Y = np.vstack([Y, np.zeros(n_p)])
