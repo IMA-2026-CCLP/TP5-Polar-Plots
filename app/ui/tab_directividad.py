@@ -830,8 +830,9 @@ class _ViewSection(QWidget):
         self._apply_snapshot(c)
         self._compare_indices = c.get('compare_indices')
         self._compare_styles = {int(k): v for k, v in (c.get('compare_styles') or {}).items()}
-        self.view.set_compare_bands(self._compare_indices)
-        self.view.set_compare_styles(self._compare_styles)
+        if self._mode == "polar2d":        # comparación de bandas: sólo existe en Polar 2D
+            self.view.set_compare_bands(self._compare_indices)
+            self.view.set_compare_styles(self._compare_styles)
 
     def set_data(self, **kwargs):
         self.view.set_data(**kwargs)
