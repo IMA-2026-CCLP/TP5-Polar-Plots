@@ -68,7 +68,7 @@ _CAMERA_PRESETS = {
     "iso":     dict(elevation=35.264,  azimuth=45.0),     # ángulo isométrico clásico
     "default": dict(elevation=24.23,   azimuth=36.87),
 }
-_DEFAULT_DISTANCE = 2.6
+_DEFAULT_DISTANCE = 4.6   # lejos: que entre toda la cúpula sin recortar
 _AXIS_LEN = 1.4
 _AXES = (  # (vector, etiqueta, color) — idéntico a plot/balloon.py::_axes_traces
     ((_AXIS_LEN, 0, 0), "X (0°)",    QColor("#ff6b6b")),

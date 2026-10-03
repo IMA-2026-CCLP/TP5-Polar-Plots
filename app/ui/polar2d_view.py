@@ -308,7 +308,7 @@ class Polar2DView(QWidget):
             curve = pg.PlotDataItem(x, y, pen=pg.mkPen(color, width=width, style=dash), name=name)
             self._plot.addItem(curve)
 
-        self._vb.setRange(xRange=(-1.15, 1.15), yRange=(-1.15, 1.15), padding=0)
+        self._vb.setRange(xRange=(-1.4, 1.4), yRange=(-1.4, 1.4), padding=0)   # margen para los números de grados
 
         r0 = rings[0]
         if multi:
