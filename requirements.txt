@@ -9,3 +9,4 @@ soundfile>=0.12
 plotly>=5.18
 pyqtgraph>=0.13
 numba>=0.59
+PyOpenGL>=3.1
