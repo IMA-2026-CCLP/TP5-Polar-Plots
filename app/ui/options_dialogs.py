@@ -1,5 +1,6 @@
 """ui/options_dialogs.py — Diálogos del menú Opciones ▸ Gráficos que no son de un gráfico en particular."""
 from PyQt6.QtWidgets import (
+    QGroupBox,
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
@@ -109,65 +110,69 @@ class ImageOptionsDialog(QDialog):
 
 
 class SmoothingOptionsDialog(QDialog):
-    """Suavizado — una sola configuración para Polar 2D, Superficie 3D y Esfera (Herramientas ▸
-    Suavizado…). Antes cada gráfico tenía su propio panel de Suavizado en Propiedades, duplicado
-    y a veces desalineado entre los tres; ahora es un único lugar que los tres respetan igual."""
+    """Suavizado (Herramientas ▸ Suavizado…): configuración independiente para cada gráfico —
+    Superficie 3D, Esfera y Polar 2D — cada uno con su tipo de suavizado e intensidad."""
+
+    _METHOD_TIP = (
+        "Sólo importa si la 'Intensidad' es mayor a 0.\n"
+        "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
+        "savgol (Savitzky-Golay): usalo si el gaussiano 'redondea' demasiado\n"
+        "  un lóbulo o nulo que sabés que es real.\n"
+        "moving_average: el más simple, puede generar ondulaciones que no\n"
+        "  existen en la medición real.\n"
+        "none: sin suavizar, ignora la intensidad.")
+    _WINDOW_TIP = (
+        "Cantidad de puntos vecinos que se promedian entre sí.\n"
+        "0 = sin suavizar. 1 a 2 = leve/medio. 3 a 5 = fuerte. Más de 5 puede\n"
+        "borrar lóbulos/nulos reales.")
+    _TITLES = {"3d": "Superficie 3D", "sphere": "Esfera", "polar2d": "Polar 2D"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Suavizado")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
         lay = QVBoxLayout(self)
+        self._fields: dict[str, dict] = {}
 
-        intro = QLabel("Se aplica por igual a Polar 2D, Superficie 3D y Esfera.")
-        intro.setWordWrap(True)
-        lay.addWidget(intro)
+        for mode in eu.SMOOTHING_MODES:
+            box = QGroupBox(self._TITLES[mode])
+            form = QFormLayout(box)
+            f = {}
+            f["smoothing_method"] = QComboBox()
+            f["smoothing_method"].addItems(['gaussian', 'savgol', 'moving_average', 'none'])
+            f["smoothing_method"].setToolTip(self._METHOD_TIP)
+            form.addRow("Tipo de suavizado:", f["smoothing_method"])
 
-        form = QFormLayout()
-        self._method = QComboBox()
-        self._method.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-        self._method.setToolTip(
-            "Sólo importa si la 'Intensidad' de abajo es mayor a 0.\n"
-            "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
-            "savgol (Savitzky-Golay): usalo si el gaussiano 'redondea' demasiado\n"
-            "  un lóbulo o nulo que sabés que es real.\n"
-            "moving_average: el más simple, puede generar ondulaciones que no\n"
-            "  existen en la medición real.\n"
-            "none: sin suavizar, ignora la intensidad.")
-        form.addRow("Tipo de suavizado:", self._method)
+            f["smoothing_window"] = NumEdit()
+            f["smoothing_window"].setDecimals(0)
+            f["smoothing_window"].setRange(0, 15)
+            f["smoothing_window"].setToolTip(self._WINDOW_TIP)
+            form.addRow("Intensidad (0 = sin suavizar):", f["smoothing_window"])
 
-        self._window = NumEdit()
-        self._window.setDecimals(0)
-        self._window.setRange(0, 15)
-        self._window.setToolTip(
-            "Cantidad de puntos vecinos que se promedian entre sí.\n"
-            "0 = sin suavizar. 3 a 5 = leve. 7 a 9 = fuerte (cuidado, puede\n"
-            "borrar lóbulos/nulos reales). No recomendado pasar de 10.")
-        form.addRow("Intensidad (0 = sin suavizar):", self._window)
+            f["interp_deg"] = NumEdit()
+            f["interp_deg"].setRange(0.1, 10.0)
+            f["interp_deg"].setToolTip(
+                "Qué tan fina se dibuja la curva/superficie entre los puntos medidos.\n"
+                "No cambia los datos. Recomendado: 1 a 2.")
+            form.addRow("Paso de interpolación (°):", f["interp_deg"])
 
-        self._interp_deg = NumEdit()
-        self._interp_deg.setRange(0.1, 10.0)
-        self._interp_deg.setToolTip(
-            "Qué tan fina se dibuja la curva/superficie entre los puntos medidos.\n"
-            "No cambia los datos. Recomendado: 1 a 2. Bajalo para exportar con más\n"
-            "nitidez; subilo si sentís que el gráfico va lento.")
-        form.addRow("Paso de interpolación (°):", self._interp_deg)
+            if mode == "polar2d":
+                f["interp_kind"] = QComboBox()
+                f["interp_kind"].addItems(['cubic', 'quadratic', 'linear', 'none'])
+                f["interp_kind"].setToolTip(
+                    "Tipo de spline 1D. cubic: recomendado. linear: se ve 'picudo'. none: sólo\n"
+                    "los puntos medidos, sin curva.")
+                form.addRow("Tipo de interpolación:", f["interp_kind"])
+            else:
+                f["spline_factor"] = NumEdit()
+                f["spline_factor"].setRange(0.0, 500.0)
+                f["spline_factor"].setToolTip(
+                    "0 = pasa exacto por los datos medidos (recomendado). Valores altos (200+)\n"
+                    "empiezan a deformar la forma real — subilo de a poco si hace falta.")
+                form.addRow("Suavizado de la malla 3D:", f["spline_factor"])
 
-        self._interp_kind = QComboBox()
-        self._interp_kind.addItems(['cubic', 'quadratic', 'linear', 'none'])
-        self._interp_kind.setToolTip(
-            "Sólo Polar 2D (su curva es 1D). cubic: recomendado. linear: se ve\n"
-            "'picudo'. none: sólo los puntos medidos, sin curva.")
-        form.addRow("Tipo de interpolación (Polar 2D):", self._interp_kind)
-
-        self._spline_factor = NumEdit()
-        self._spline_factor.setRange(0.0, 500.0)
-        self._spline_factor.setToolTip(
-            "Sólo Superficie 3D/Esfera (su malla es una spline 2D). 0 = pasa exacto\n"
-            "por los datos medidos (recomendado). Valores altos (200+) empiezan a\n"
-            "deformar la forma real — subilo de a poco si hace falta.")
-        form.addRow("Suavizado de la malla 3D:", self._spline_factor)
-        lay.addLayout(form)
+            self._fields[mode] = f
+            lay.addWidget(box)
 
         row = QDialogButtonBox()
         b_reset = row.addButton("Restaurar por defecto", QDialogButtonBox.ButtonRole.ResetRole)
@@ -179,27 +184,27 @@ class SmoothingOptionsDialog(QDialog):
         row.rejected.connect(self.reject)
         lay.addWidget(row)
 
-        self._load(eu.get_smoothing_settings())
+        self._load({m: eu.get_smoothing_settings(m) for m in eu.SMOOTHING_MODES})
 
-    def _load(self, v: dict):
-        self._method.setCurrentText(v["smoothing_method"])
-        self._window.setValue(v["smoothing_window"])
-        self._interp_deg.setValue(v["interp_deg"])
-        self._interp_kind.setCurrentText(v["interp_kind"])
-        self._spline_factor.setValue(v["spline_factor"])
+    def _load(self, by_mode: dict):
+        for mode, v in by_mode.items():
+            for k, w in self._fields[mode].items():
+                if isinstance(w, QComboBox):
+                    w.setCurrentText(str(v[k]))
+                else:
+                    w.setValue(v[k])
 
     def _reset(self):
-        self._load(eu.DEFAULT_SMOOTHING)
+        self._load(eu.DEFAULT_SMOOTHING_BY_MODE)
 
     def values(self) -> dict:
-        return dict(
-            smoothing_method=self._method.currentText(),
-            smoothing_window=self._window.value(),
-            interp_deg=self._interp_deg.value(),
-            interp_kind=self._interp_kind.currentText(),
-            spline_factor=self._spline_factor.value(),
-        )
+        """{modo: {smoothing_method, smoothing_window, interp_deg, spline_factor | interp_kind}}"""
+        return {mode: {k: (w.currentText() if isinstance(w, QComboBox)
+                           else int(w.value()) if k == 'smoothing_window' else w.value())
+                       for k, w in f.items()}
+                for mode, f in self._fields.items()}
 
     def _accept(self):
-        eu.set_smoothing_settings(self.values())
+        for mode, v in self.values().items():
+            eu.set_smoothing_settings(mode, v)
         self.accept()

@@ -78,38 +78,39 @@ def set_export_defaults(dpi: int, fmt: str) -> None:
     s.setValue("export/format", fmt)
 
 
-# ── Suavizado (Herramientas ▸ Suavizado…) — una sola configuración para Polar 2D, Superficie 3D
-# y Esfera (antes cada gráfico tenía su propio "Suavizado"/"Interpolación" duplicado y desalineado
-# en Propiedades). smoothing_method/smoothing_window/interp_deg son comunes a los 3; spline_factor
-# sólo lo usan Superficie 3D/Esfera (factor de la spline 2D) e interp_kind sólo Polar 2D (tipo de
-# spline 1D) — no tienen un equivalente real en los otros gráficos.
-DEFAULT_SMOOTHING = dict(
-    smoothing_method="gaussian", smoothing_window=3, interp_deg=2.0,
-    spline_factor=0.0, interp_kind="cubic",
-)
+# ── Suavizado (Herramientas ▸ Suavizado…) — configuración INDEPENDIENTE por gráfico: cada uno
+# tiene su tipo de suavizado e intensidad. spline_factor sólo lo usan Superficie 3D/Esfera (factor
+# de la spline 2D) e interp_kind sólo Polar 2D (tipo de spline 1D).
+SMOOTHING_MODES = ("3d", "sphere", "polar2d")
+DEFAULT_SMOOTHING_BY_MODE = {
+    "3d":      dict(smoothing_method="gaussian", smoothing_window=1, interp_deg=2.0, spline_factor=0.0),
+    "sphere":  dict(smoothing_method="gaussian", smoothing_window=2, interp_deg=2.0, spline_factor=0.0),
+    "polar2d": dict(smoothing_method="gaussian", smoothing_window=1, interp_deg=2.0, interp_kind="cubic"),
+}
 
 
-def get_smoothing_settings() -> dict:
+def get_smoothing_settings(mode: str) -> dict:
     s = _settings()
-    out = dict(DEFAULT_SMOOTHING)
+    base = DEFAULT_SMOOTHING_BY_MODE[mode]
+    out = dict(base)
     try:
-        out["smoothing_method"] = str(s.value("smoothing/method", out["smoothing_method"]))
-        out["smoothing_window"] = int(float(s.value("smoothing/window", out["smoothing_window"])))
-        out["interp_deg"]       = float(s.value("smoothing/interp_deg", out["interp_deg"]))
-        out["spline_factor"]    = float(s.value("smoothing/spline_factor", out["spline_factor"]))
-        out["interp_kind"]      = str(s.value("smoothing/interp_kind", out["interp_kind"]))
+        for k in base:
+            raw = s.value(f"smoothing/{mode}/{k}", base[k])
+            if k in ("smoothing_method", "interp_kind"):
+                out[k] = str(raw)
+            elif k == "smoothing_window":
+                out[k] = int(float(raw))
+            else:
+                out[k] = float(raw)
     except (TypeError, ValueError):
-        return dict(DEFAULT_SMOOTHING)
+        return dict(base)
     return out
 
 
-def set_smoothing_settings(values: dict) -> None:
+def set_smoothing_settings(mode: str, values: dict) -> None:
     s = _settings()
-    s.setValue("smoothing/method", values["smoothing_method"])
-    s.setValue("smoothing/window", int(values["smoothing_window"]))
-    s.setValue("smoothing/interp_deg", float(values["interp_deg"]))
-    s.setValue("smoothing/spline_factor", float(values["spline_factor"]))
-    s.setValue("smoothing/interp_kind", values["interp_kind"])
+    for k in DEFAULT_SMOOTHING_BY_MODE[mode]:
+        s.setValue(f"smoothing/{mode}/{k}", values[k])
 
 
 def logical_px(cm: float) -> int:
