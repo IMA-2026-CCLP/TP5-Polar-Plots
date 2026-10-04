@@ -249,29 +249,6 @@ class _Radial(QWidget):
             p.setPen(pen)
             p.setBrush(QBrush(self._color(v)))
             p.drawPath(pp)
-        # nombre del archivo de cada medición dentro de la celda (tamaño ajustado a la celda)
-        for key, (v, ms) in self._cells.items():
-            names = [f"mic_{int(round(t / 10)) + 1}_ang_forte_{int(g)}.wav" for t, g, _ in ms]
-            if key[0] == 0:
-                rm, arc, dr = 2.5 / 90.0 * R, 5 / 90.0 * R * 2, 5 / 90.0 * R * 2
-                mid = 0.0
-                names = ["mic_10 · promedio de los giros"]
-            else:
-                d, hor = key
-                rm = d / 90.0 * R
-                arc = rm * math.radians(10)
-                dr = 10 / 90.0 * R
-                mid = math.radians(90 + hor)
-            cxm, cym = (cx + rm * math.cos(mid), cy - rm * math.sin(mid)) if key[0] else (cx, cy)
-            longest = max(len(n) for n in names)
-            fs = min(9.0, min(arc, dr) / (0.62 * longest / max(len(names), 1)) if len(names) == 1 else min(arc, dr) / (0.62 * longest) / len(names))
-            if fs < 4:
-                continue
-            p.setFont(QFont('Segoe UI', max(4, int(fs)))); p.setPen(QColor('#111'))
-            lh = fs * 1.25
-            y0 = cym - lh * (len(names) - 1) / 2
-            for i, n in enumerate(names):
-                p.drawText(QRectF(cxm - 200, y0 + i * lh - lh / 2, 400, lh), Qt.AlignmentFlag.AlignCenter, n)
         p.setPen(QPen(QColor('#444'), 1, Qt.PenStyle.DashLine)); p.setBrush(Qt.BrushStyle.NoBrush)
         for d in range(10, 91, 10):
             p.drawEllipse(QPointF(cx, cy), r_of(d), r_of(d))
@@ -322,7 +299,8 @@ class _Radial(QWidget):
         v, ms = self._cells[key]
         lines = [f"d={key[0]}°" + ("" if key[1] is None else f" · HOR {key[1]}°"), f"valor (energía): {v:.1f} dB"]
         for t, g, dbv in ms:
-            lines.append(f"  θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB")
+            k = int(round(t / 10)) + 1
+            lines.append(f"  mic_{k}_ang_forte_{int(g)}.wav · θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB")
         if key in self._overrides:
             t_src, g_src = self._overrides[key]
             lines.append(f"↔ reemplazada por espejo: θ={t_src:.0f}° · giro {g_src:.0f}°")
