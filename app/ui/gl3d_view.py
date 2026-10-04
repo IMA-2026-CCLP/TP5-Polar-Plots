@@ -748,10 +748,10 @@ class GL3DView(QWidget):
         return self._export_clone
 
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, size_cm=None):
-        """Tamaño físico fijo (Opciones ▸ Gráficos ▸ Imágenes); el DPI sólo define los píxeles
-        (ver ui/export_utils.py). Se renderiza en un GLViewWidget fuera de pantalla (reusado
-        entre llamadas, ver _get_export_clone), al tamaño final exacto — no es una captura del
-        panel en pantalla."""
+        """Exporta EXACTAMENTE lo que se ve en pantalla: captura el gráfico tal como está (mismo
+        tamaño de panel, misma cámara, mismos ejes y caja), lo escala por el DPI y le agrega la
+        escala de colores con las mismas proporciones. size_cm se ignora en 3D (el tamaño sale
+        del panel)."""
         if self._last_grid is None:
             self.log.emit("[Dir] Sin datos para exportar.")
             if on_done:
@@ -759,66 +759,41 @@ class GL3DView(QWidget):
             return
         fmt = fmt if fmt in self._EXPORT_FORMATS else 'png'
 
-        from ui.export_utils import get_export_size_cm, logical_px, set_png_dpi
-        w_cm, h_cm = size_cm or get_export_size_cm()
+        from ui.export_utils import set_png_dpi
         k = dpi / 96.0
-        W = max(1, int(round(logical_px(w_cm) * k)))
-        H = max(1, int(round(logical_px(h_cm) * k)))
-
-        clone = self._get_export_clone()
-        clone.setBackgroundColor(self._style.get('bg_color') or '#ffffff')
-        clone.resize(W, H)
-        for item in list(clone.items):
-            clone.removeItem(item)
-        # Los textos y líneas de GL son en píxeles: en el panel tienen tamaño de pantalla y en la
-        # exportación hay más píxeles (16×10 cm a 300 DPI). Se escalan por la misma razón que la
-        # geometría (que sí escala con el viewport) para que la imagen se vea igual que el panel.
-        self._px_scale = W / max(1, self._gl.width())
-        try:
-            for item in self._build_items(self._last_grid):
-                clone.addItem(item)
-        finally:
-            self._px_scale = 1.0
-        # Cámara VIVA (self._gl.cameraParams()), no la del último preset aplicado (self._camera):
-        # si no, la imagen exportada no coincidía con la rotación/zoom hechos a mano con el mouse.
-        clone.setCameraParams(**self._gl.cameraParams())
+        scene_w = max(1, self._gl.width())
+        scene_h = max(1, self._gl.height())
+        W = max(1, int(round(scene_w * k)))
+        H = max(1, int(round(scene_h * k)))
+        g = self._last_grid
 
         def _grab():
             ok = False
-            # grabFramebuffer() puede capturar el cursor del mouse dentro de la imagen (bug
-            # conocido de Qt/Windows con QOpenGLWidget, no algo que dibuje esta vista) — se oculta
-            # el cursor justo antes de capturar y se restaura enseguida después.
+            # El cursor puede quedar capturado dentro de la imagen (bug de Qt/Windows con
+            # QOpenGLWidget): se oculta justo antes de capturar.
             QApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
             try:
-                img = clone.grabFramebuffer()
-                if not img.isNull() and self._colorbar.isVisible() and self._last_grid is not None:
-                    # La barra de color vive en el overlay de pantalla, no en la escena GL. En el
-                    # export va en una franja a la derecha (no encima del gráfico), ocupando todo
-                    # el alto de la imagen.
-                    from PyQt6.QtGui import QPainter
-                    g = self._last_grid
-                    k = W / max(1, self._gl.width())   # _px_scale ya volvió a 1.0 acá
-                    # Altura REAL de la imagen capturada (puede no coincidir con H pedido).
-                    pad = int(8 * k)
-                    font_px = self._colorbar_pt() / 72.0 * dpi
-                    cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=img.height() - 2 * pad,
-                                              font_px=font_px)
-                    gap = int(12 * k)
-                    out = QImage(img.width() + gap + cb.width(), img.height(), QImage.Format.Format_ARGB32)
-                    out.fill(QColor(self._style.get('bg_color') or '#ffffff'))
-                    p = QPainter(out)
-                    p.drawImage(0, 0, img)
-                    p.drawImage(img.width() + gap, 0, cb)
-                    p.end()
-                    img = out
-                ok = (not img.isNull()) and img.save(path)
+                from PyQt6.QtGui import QPainter
+                scene = self._gl.grabFramebuffer()
+                scene = scene.scaled(W, H, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
+                pad = int(8 * k)
+                cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=H - 2 * pad,
+                                          font_px=self._colorbar_pt() / 72.0 * 96)
+                gap = int(12 * k)
+                out = QImage(W + gap + cb.width(), H, QImage.Format.Format_ARGB32)
+                out.fill(QColor(self._style.get('bg_color') or '#ffffff'))
+                p = QPainter(out)
+                p.drawImage(0, 0, scene)
+                p.drawImage(W + gap, 0, cb)
+                p.end()
+                ok = (not out.isNull()) and out.save(path)
                 if ok and fmt != 'svg':
                     set_png_dpi(path, dpi)
                 if ok:
                     self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, {fmt})")
                 else:
-                    self.log.emit(f"[ERROR] No se pudo guardar la imagen en {path} "
-                                   "(¿sin soporte OpenGL en este equipo?)")
+                    self.log.emit(f"[ERROR] No se pudo guardar la imagen en {path}")
             except Exception as exc:
                 self.log.emit(f"[ERROR] Exportando 3D: {exc}")
             finally:
@@ -826,6 +801,4 @@ class GL3DView(QWidget):
                 if on_done:
                     on_done(ok)
 
-        # Da tiempo a que la ventana nativa fuera de pantalla se realice / el contexto se
-        # inicialice antes de pedirle el framebuffer.
-        QTimer.singleShot(250, _grab)
+        QTimer.singleShot(50, _grab)
