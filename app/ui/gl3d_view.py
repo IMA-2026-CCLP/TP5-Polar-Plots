@@ -162,6 +162,19 @@ def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
     return new_lev, new_th
 
 
+def _gl_view():
+    """GLViewWidget con buffer de profundidad propio (los ejes quedan tapados por la superficie).
+    Va en el widget y NO como formato por defecto de la app: un default global también cambia el
+    contexto de QtWebEngine (Plotly), que se veía negro."""
+    from PyQt6.QtGui import QSurfaceFormat
+    fmt = QSurfaceFormat()
+    fmt.setDepthBufferSize(24)
+    fmt.setStencilBufferSize(8)
+    view = gl.GLViewWidget()
+    view.setFormat(fmt)
+    return view
+
+
 def _colorscale_stops(name: str):
     """(t_stops, rgb_stops 0–1) desde COLORSCALES (listas [pos, color] de plot/balloon.py,
     mismas que usa Plotly) — listo para np.interp."""
@@ -248,7 +261,7 @@ class GL3DView(QWidget):
         layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self._gl = gl.GLViewWidget()
+        self._gl = _gl_view()
         self._gl.setBackgroundColor('#ffffff')
         self._gl.installEventFilter(self)
 
@@ -700,7 +713,7 @@ class GL3DView(QWidget):
         (move a coordenadas negativas) en vez de WA_DontShowOnScreen: un QOpenGLWidget necesita
         una ventana nativa real para poder crear su contexto OpenGL."""
         if self._export_clone is None:
-            self._export_clone = gl.GLViewWidget()
+            self._export_clone = _gl_view()
             self._export_clone.move(-4000, -4000)
             self._export_clone.show()
         return self._export_clone
