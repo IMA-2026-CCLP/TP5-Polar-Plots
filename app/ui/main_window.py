@@ -170,6 +170,7 @@ class MainWindow(QMainWindow):
         self.view_prepro.log.connect(self._append_log)
         self.view_prepro.view_chosen.connect(self._on_view_choice)
         self.view_prepro.corr_requested.connect(self._on_corr_request)
+        QTimer.singleShot(0, self.ribbon._b.emitPlotParams)   # al abrir: matriz radial (esqueleto si no hay datos)
         self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
 
         self.view_notas.ma_updated.connect(self._on_ma_ready)
@@ -411,6 +412,8 @@ class MainWindow(QMainWindow):
         self.view_dir.corr_ref_th = 'ref' if val == 'ref' else int(val)
         self._append_log(f"[Corrección] Referencia: {val}. Recalculando…")
         self.ribbon._b.computeDir()
+
+    def _on_view_choice(self, key):
         """Desplegable de Procesamiento (arriba a la derecha): cambia la misma vista que el menú Vista."""
         st = self.ribbon._b.state
         st.update(matrix=key == 'matrix', db=key == 'db', envelope=key in ('db', 'envelope'))
@@ -434,9 +437,10 @@ class MainWindow(QMainWindow):
         """Crea (la primera vez) o pone al día el panel de la matriz radial en Procesamiento."""
         from ui.matrix_dialog import MatrixPanel
         m = self.view_dir.matrix_bands()
-        if m is None:
-            self._append_log("[Matriz] No hay datos: calculá la directividad o cargá los audios.")
-            return None
+        if m is None:                       # sin datos: esqueleto en blanco (se llena al cargar o calcular)
+            import numpy as np
+            ang = np.arange(0, 181, 10.0)
+            m = (np.full((len(ang), len(ang), 1), np.nan), ang, ang, [None], None, 'sin datos')
         levels, az, th, freqs, src, unit = m
         if self._matrix_win is None:
             self._matrix_win = MatrixPanel(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,

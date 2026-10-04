@@ -236,6 +236,22 @@ class _Radial(QWidget):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         cx, cy, R = self._geom()
         r_of = lambda d: d / 90.0 * R
+        # esqueleto: todas las celdas del mallado, con o sin dato
+        p.setPen(QPen(QColor('#bdbdbd'), 0.5)); p.setBrush(QBrush(QColor('#ffffff')))
+        for d in range(10, 91, 10):
+            for hor in range(0, 360, 10):
+                if (d, hor) in self._cells:
+                    continue
+                d1, d2 = d - 5, min(90, d + 5)
+                m1, m2 = 90 + (hor - 5), 90 + (hor + 5)
+                outer = QRectF(cx - r_of(d2), cy - r_of(d2), 2 * r_of(d2), 2 * r_of(d2))
+                inner = QRectF(cx - r_of(d1), cy - r_of(d1), 2 * r_of(d1), 2 * r_of(d1))
+                pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, 10.0)
+                pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
+                p.drawPath(pp)
+        if (0, None) not in self._cells:
+            p.setPen(QPen(QColor('#bdbdbd'), 0.5)); p.setBrush(QBrush(QColor('#ffffff')))
+            p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
         for key, (v, ms) in self._cells.items():
             if key[0] == 0:
                 # cénit: promedio energético de los giros; se marca si la dispersión supera el umbral
