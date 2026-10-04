@@ -922,10 +922,19 @@ class TabDirectividad(QWidget):
             tensor = getattr(self._ma, 'tensor', None) if self._ma is not None else None
             if tensor is None:
                 return None
+            def _num(v):
+                try:
+                    float(v)
+                    return True
+                except (TypeError, ValueError):
+                    return False
+            # thetas/angles pueden traer rótulos no numéricos (p. ej. 'ref', el micrófono de referencia)
+            ia = [i for i, v in enumerate(self._ma.angles) if _num(v)]
+            it = [j for j, v in enumerate(self._ma.thetas) if _num(v)]
             rms = np.sqrt(np.mean(np.asarray(tensor, dtype=float) ** 2, axis=-1))
-            levels = 20.0 * np.log10(rms + 1e-12)          # (azimut, elevación), dB relativo
-            return (levels, np.asarray(self._ma.angles, dtype=float),
-                    np.asarray(self._ma.thetas, dtype=float),
+            levels = 20.0 * np.log10(rms[np.ix_(ia, it)] + 1e-12)   # (azimut, elevación), dB relativo
+            return (levels, np.asarray([float(self._ma.angles[i]) for i in ia]),
+                    np.asarray([float(self._ma.thetas[j]) for j in it]),
                     "nivel RMS de cada toma (sin calcular el patrón)", None)
         bi = min(self._current_band_idx, self._full_levels.shape[2] - 1)
         hz = float(self._full_bands[bi])
