@@ -595,6 +595,14 @@ class MainWindow(QMainWindow):
 
     def _on_ma_ready(self, ma):
         self._ma = ma
+        # Escala Y por defecto de las señales dB: sin calibrar −60…0 dB, calibrada 40…100 dB.
+        # Sólo se cambia cuando cambia el estado de calibración (no pisa lo que el usuario escribió).
+        cal = ma.calibration is not None
+        if cal != getattr(self, '_last_cal', None):
+            self._last_cal = cal
+            self.ribbon._b.state['ymin'], self.ribbon._b.state['ymax'] = (40.0, 100.0) if cal else (-60.0, 0.0)
+            for load in self.ribbon._loaders:
+                load()
         shape = ma.tensor.shape
         self.statusBar().showMessage(
             f"Tensor {shape}  ·  sr {ma.sr} Hz  ·  "
