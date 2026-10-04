@@ -162,6 +162,11 @@ def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
     return new_lev, new_th
 
 
+def eu_colorbar_pt() -> float:
+    from ui.export_utils import get_colorbar_pt
+    return get_colorbar_pt()
+
+
 def _gl_view():
     """GLViewWidget con buffer de profundidad propio (los ejes quedan tapados por la superficie).
     Va en el widget y NO como formato por defecto de la app: un default global también cambia el
@@ -631,17 +636,19 @@ class GL3DView(QWidget):
         en 'ver en grande' crece), siempre dentro de un rango legible."""
         return max(70, min(220, int(self.height() * 0.42)))
 
-    def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0, bar_h: int | None = None) -> QImage:
+    def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0, bar_h: int | None = None,
+                        font_px: float | None = None) -> QImage:
         """Barra de color estilo Plotly (como la v4): barra alta y angosta con marco fino, marcas
         y valores en números redondos dentro del rango, y "dB" girado al costado. `s` escala todo
         (para el export, ver export_image); en pantalla s=1."""
+        fs = font_px if font_px else 12 * s     # tamaño del texto en píxeles de esta imagen
         bar_w = int(16 * s)
         bar_h = int(bar_h if bar_h is not None else 300 * s)
         pad = int(8 * s)
         tick_len = int(5 * s)
-        label_w = int(46 * s)
-        title_w = int(20 * s)
-        gap = int(4 * s)
+        label_w = int(fs * 3.4)
+        title_w = int(fs * 1.6)
+        gap = int(fs * 0.3)
         w = bar_w + tick_len + gap + label_w + title_w
         h = bar_h + 2 * pad
         from PyQt6.QtGui import QPainter, QFont as _QFont, QPen
@@ -670,7 +677,8 @@ class GL3DView(QWidget):
         raw = span / 6.0
         mag = 10 ** np.floor(np.log10(raw))
         step = min((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw), default=10 * mag)
-        font = _QFont("Segoe UI", max(1, round(8 * s)))
+        font = _QFont("Segoe UI")
+        font.setPixelSize(max(1, round(fs)))
         p.setFont(font)
         p.setPen(QColor("#1a1a1a"))
         first = np.ceil(cmin / step) * step
@@ -679,7 +687,7 @@ class GL3DView(QWidget):
             y = pad + (cmax - v) / span * bar_h
             p.drawLine(x0 + bar_w, int(y), x0 + bar_w + tick_len, int(y))
             label = f"{v:.0f}" if step >= 1 else f"{v:.1f}"
-            p.drawText(x0 + bar_w + tick_len + gap, int(y - 7 * s), label_w, int(14 * s),
+            p.drawText(x0 + bar_w + tick_len + gap, int(y - fs * 0.6), label_w, int(fs * 1.2),
                        _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, label)
             v += step
         # título "dB" girado, a la derecha de los valores (como la v4)
@@ -771,7 +779,9 @@ class GL3DView(QWidget):
                     k = W / max(1, self._gl.width())   # _px_scale ya volvió a 1.0 acá
                     # Altura REAL de la imagen capturada (puede no coincidir con H pedido).
                     pad = int(8 * k)
-                    cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=img.height() - 2 * pad)
+                    font_px = eu_colorbar_pt() / 72.0 * dpi
+                    cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=img.height() - 2 * pad,
+                                              font_px=font_px)
                     gap = int(12 * k)
                     out = QImage(img.width() + gap + cb.width(), img.height(), QImage.Format.Format_ARGB32)
                     out.fill(QColor(self._style.get('bg_color') or '#ffffff'))
