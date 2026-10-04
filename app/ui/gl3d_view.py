@@ -769,8 +769,9 @@ class GL3DView(QWidget):
                     from PyQt6.QtGui import QPainter
                     g = self._last_grid
                     k = W / max(1, self._gl.width())   # _px_scale ya volvió a 1.0 acá
+                    # Altura REAL de la imagen capturada (puede no coincidir con H pedido).
                     pad = int(8 * k)
-                    cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=H - 2 * pad)
+                    cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=img.height() - 2 * pad)
                     gap = int(12 * k)
                     out = QImage(img.width() + gap + cb.width(), img.height(), QImage.Format.Format_ARGB32)
                     out.fill(QColor(self._style.get('bg_color') or '#ffffff'))
