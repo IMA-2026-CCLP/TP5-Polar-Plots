@@ -45,7 +45,7 @@ API pública: espejo del subconjunto de BalloonView que usa TabDirectividad para
 import numpy as np
 from PyQt6.QtWidgets import QWidget, QStackedLayout, QLabel, QApplication
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QImage, QColor, QPixmap
+from PyQt6.QtGui import QFont, QImage, QColor, QPixmap, QVector3D
 
 import pyqtgraph.opengl as gl
 
@@ -68,6 +68,7 @@ _CAMERA_PRESETS = {
     "iso":     dict(elevation=35.264,  azimuth=45.0),     # ángulo isométrico clásico
     "default": dict(elevation=24.23,   azimuth=36.87),
 }
+_CAMERA_CENTER_Z = 0.5
 _DEFAULT_DISTANCE = 4.6   # lejos: que entre toda la cúpula sin recortar
 _AXIS_LEN = 1.4
 _AXES = (  # (vector, etiqueta, color) — idéntico a plot/balloon.py::_axes_traces
@@ -315,7 +316,10 @@ class GL3DView(QWidget):
         self._apply_camera()
 
     def _apply_camera(self):
-        self._gl.setCameraPosition(distance=_DEFAULT_DISTANCE, **self._camera)
+        # El centro baja a z=0.5: la escena (cúpula + eje Z hasta 1.4) queda centrada en vertical,
+        # y la etiqueta "Z (cénit)" no se corta arriba del panel.
+        self._gl.setCameraPosition(pos=QVector3D(0, 0, _CAMERA_CENTER_Z),
+                                   distance=_DEFAULT_DISTANCE, **self._camera)
 
     # ── Render ───────────────────────────────────────────────────────────
 
