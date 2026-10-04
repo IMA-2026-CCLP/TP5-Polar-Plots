@@ -22,10 +22,11 @@ def _num(v):
 
 
 class CompareDialog(QDialog):
-    def __init__(self, ma_getter, view_params=None, parent=None):
+    def __init__(self, ma_getter, view_params=None, pairs=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Comparar mediciones")
         self.resize(960, 600)
+        self._pairs = pairs            # [(θ, giro), ...] desde la matriz; si viene, se usa en vez de las casillas
         self._get = ma_getter
         self._view = view_params or (lambda: {'env': True, 'db': False, 'smooth': 20.0, 'yrange': None})
         self._ma = ma_getter()
@@ -109,13 +110,15 @@ class CompareDialog(QDialog):
             self._plot.addLegend()
         except Exception:
             pass
-        giro = self._giro.currentData()
-        ia = int(np.argmin(np.abs(np.asarray([_num(a) or 0 for a in ma.angles]) - (giro or 0))))
         v = self._view()
+        if self._pairs is not None:
+            todo = list(self._pairs)                       # (θ, giro) de la matriz
+        else:
+            giro = self._giro.currentData()
+            todo = [(tv, giro) for tv, it in self._items.items() if it.checkState() == Qt.CheckState.Checked]
         k = 0
-        for tv, it in self._items.items():
-            if it.checkState() != Qt.CheckState.Checked:
-                continue
+        for tv, giro in todo:
+            ia = int(np.argmin(np.abs(np.asarray([_num(a) or 0 for a in ma.angles]) - (giro or 0))))
             j = [i for i, t in enumerate(ma.thetas) if _num(t) is not None and abs(_num(t) - tv) < 0.5]
             if not j:
                 continue

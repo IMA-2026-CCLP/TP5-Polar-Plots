@@ -239,7 +239,8 @@ class MainWindow(QMainWindow):
                 return
             levels, az, th, freqs, src = m
             MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
-                         apply_cb=self._apply_mirror_replacements, parent=self).exec()
+                         apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
+                         parent=self).exec()
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
@@ -353,6 +354,19 @@ class MainWindow(QMainWindow):
             self._append_log(f"[ERROR] Al guardar sesión: {e}")
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
+
+    def _compare_pairs(self, pairs):
+        """Comparar selección (desde la matriz radial): superpone las mediciones elegidas."""
+        from ui.compare_dialog import CompareDialog
+        def _vp():
+            st = self.ribbon._b.state
+            ymin, ymax = st.get('ymin'), st.get('ymax')
+            return {'env': bool(st.get('envelope', True)), 'db': bool(st.get('db', False)),
+                    'smooth': float(st.get('smooth', 20.0)),
+                    'yrange': [float(ymin), float(ymax)] if ymin is not None and ymax is not None else None}
+        self._compare_win = CompareDialog(lambda: self.view_dir._get_current_ma(), view_params=_vp,
+                                          pairs=pairs, parent=self)
+        self._compare_win.show()
 
     def _apply_mirror_replacements(self, pairs):
         """Aplica los reemplazos de la matriz al audio y vuelve a dibujar la señal en el tiempo."""

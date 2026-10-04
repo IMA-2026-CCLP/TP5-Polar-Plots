@@ -114,6 +114,15 @@ class _Radial(QWidget):
     def clear_selection(self):
         self._sel.clear(); self.update()
 
+    def selected_pairs(self):
+        """(θ, giro) de la medición que representa cada celda seleccionada (la primera si hay dos)."""
+        out = []
+        for key in sorted(self._sel, key=lambda k: (k[0], k[1] or 0)):
+            if key in self._cells:
+                t, g, _ = self._cells[key][1][0]
+                out.append((float(t), float(g)))
+        return out
+
     def pending_pairs(self):
         """Reemplazos a aplicar al audio: (θ destino, giro destino, θ fuente, giro fuente).
         Destino: HOR h ≤ 180 → (90 − d, h); HOR h > 180 → (90 + d, h − 180)."""
@@ -328,9 +337,11 @@ class _PlayerBar(QWidget):
 
 
 class MatrixDialog(QDialog):
-    def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None, parent=None):
+    def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None,
+                 compare_cb=None, parent=None):
         super().__init__(parent)
         self._apply_cb = apply_cb
+        self._compare_cb = compare_cb
         self.resize(780, 720)
         self._levels3d = np.asarray(levels3d, dtype=float)
         self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
@@ -367,6 +378,16 @@ class MatrixDialog(QDialog):
         b_mir = QPushButton("Reemplazar selección por espejo")
         b_und = QPushButton("Deshacer reemplazo")
         b_cln = QPushButton("Limpiar selección")
+        b_cmp = QPushButton("Comparar selección")
+        b_cmp.setToolTip("Abre la comparación de las mediciones de las celdas seleccionadas.")
+        def _cmp():
+            pairs = self._radial.selected_pairs()
+            if not pairs:
+                self._status.setText("Seleccioná celdas (Ctrl + clic) para comparar."); return
+            if self._compare_cb is not None:
+                self._compare_cb(pairs)
+        b_cmp.clicked.connect(_cmp)
+        bar.addWidget(b_cmp)
         b_app = QPushButton("Aplicar al audio (persistente)")
         b_app.setToolTip("Escribe los reemplazos en la señal de cada micrófono en memoria. Después, Calcular "
                          "usa esos datos. Se pierden al cerrar la app si no se guarda la sesión.")
