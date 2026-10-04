@@ -285,6 +285,8 @@ class NativeRibbon(QWidget):
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
         act('data_matrix', "Matriz radial…", "Mallado radial de las mediciones: anillo = distancia al cénit, sector = HOR; promedio energético en cénit y costura",
             lambda: self.sig_open_options.emit('data_matrix'))
+        act('compare',     "Comparar mediciones…", "Superpone las señales de los micrófonos elegidos (por distancia al cénit) para comparar",
+            lambda: self.sig_open_options.emit('compare'))
         act('smoothing',   "Suavizado…",      "Suavizado e interpolación — se aplica por igual a Polar 2D, Superficie 3D y Esfera",
             lambda: self.sig_open_options.emit('smoothing'))
 
@@ -391,7 +393,7 @@ class NativeRibbon(QWidget):
         for n in ('align_takes', 'align_mics'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('notas', 'edit_scale', 'smoothing', 'data_matrix', 'save_mask', 'load_mask'):
+        for n in ('notas', 'edit_scale', 'smoothing', 'data_matrix', 'compare', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
 
         m = mb.addMenu("&Opciones")
