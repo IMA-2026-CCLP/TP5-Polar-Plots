@@ -413,11 +413,6 @@ class MatrixPanel(QWidget):
         top.addWidget(self._combo)
         top.addStretch(1)
         lay.addLayout(top)
-        intro = QLabel(
-            f"origen: {origin}. Anillo = distancia al cénit |θ − 90°|, sector = HOR (10°). "
-            "Pasá el mouse para ver las mediciones de cada celda. Click: reproduce esa toma (si hay audio).")
-        intro.setWordWrap(True)
-        lay.addWidget(intro)
         self._status = QLabel("")
         lay.addWidget(self._status)
         def _click(g, t):
