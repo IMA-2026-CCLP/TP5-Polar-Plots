@@ -3,7 +3,11 @@
 ; Requiere que ya exista dist\PolarPatternAnalyzer\ (build_exe.bat / PyInstaller).
 
 #ifndef AppVersion
+<<<<<<< HEAD
   #define AppVersion "5.1.0"
+=======
+  #define AppVersion "5.1.0"
+>>>>>>> 877e8b4 (Export 3D: barra de color usa la altura real de la imagen capturada. Version 5.1.6)
 #endif
 #define AppName "Polar Pattern CCLP"
 #define AppExe  "PolarPatternAnalyzer.exe"
