@@ -31,8 +31,8 @@ COLORSCALES = {
     "Turbo":    _seq("Turbo"),
     "Hot":      "Hot",
     # Misma paleta que la v4 (Plotly RdBu invertida: azul oscuro abajo, rojo arriba)
-    # Azul → rojo directo (mezcla en el medio, sin blanco).
-    "RdBu v4":  _cs(["#1d3f9a", "#c81d25"]),
+    # Azul → magenta → rojo (sin blanco; el magenta evita el tono gris-apagado de mezclar azul y rojo).
+    "RdBu v4":  _cs(["#1d3f9a", "#9a1fa6", "#c81d25"]),
 }
 
 # ── Helpers comunes ───────────────────────────────────────────────────────────
