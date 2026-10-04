@@ -895,25 +895,20 @@ class TabDirectividad(QWidget):
 
         self._build_ui()
         from ui.export_utils import get_smoothing_settings
-        self.apply_smoothing_settings({m: get_smoothing_settings(m) for m in ('3d', 'sphere', 'polar2d')})   # última config guardada (Herramientas ▸ Suavizado…)
+        self.apply_smoothing_settings(get_smoothing_settings())   # última config guardada (Herramientas ▸ Suavizado…)
 
     def apply_smoothing_settings(self, values: dict):
-        """Suavizado independiente por gráfico (Herramientas ▸ Suavizado…): values = {modo: {...}}
-        con los campos de export_utils.DEFAULT_SMOOTHING_BY_MODE de cada modo."""
+        """Una sola configuración de suavizado para Polar 2D, Superficie 3D y Esfera (Herramientas
+        ▸ Suavizado…, ver ui/options_dialogs.py::SmoothingOptionsDialog) — reemplaza los paneles
+        de Suavizado/Interpolación que antes tenía cada Propiedades por separado, duplicados y
+        potencialmente desalineados entre sí."""
+        common = {k: values[k] for k in ('smoothing_method', 'smoothing_window', 'interp_deg')}
         for mode in ('3d', 'sphere'):
-            v = values[mode]
             sec = self._sections[mode]
-            sec._style.update(smoothing_method=v['smoothing_method'],
-                              smoothing_window=v['smoothing_window'],
-                              interp_deg=v['interp_deg'],
-                              smoothing=v['spline_factor'])
+            sec._style.update(common, smoothing=values['spline_factor'])
             sec.view.set_style(sec._style)
-        v = values['polar2d']
         sec = self._sections['polar2d']
-        sec._style.update(smoothing_method=v['smoothing_method'],
-                          smoothing_window=v['smoothing_window'],
-                          interp_deg=v['interp_deg'],
-                          interp_kind=v['interp_kind'])
+        sec._style.update(common, interp_kind=values['interp_kind'])
         sec.view.set_style(sec._style)
 
     # ── Construcción UI ───────────────────────────────────────────────────
