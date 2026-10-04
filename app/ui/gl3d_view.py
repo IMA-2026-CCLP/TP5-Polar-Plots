@@ -95,12 +95,19 @@ def _parse_color(c: str) -> list:
 _LIGHT_DIR = np.array([-0.4, -0.5, 0.77]) / np.linalg.norm([-0.4, -0.5, 0.77])
 
 
+# Reflejo especular fijo (media entre la luz y la vista frontal), como el brillo de la v4 en Plotly.
+_SPEC_DIR = _LIGHT_DIR + np.array([0.0, 0.0, 1.0])
+_SPEC_DIR = _SPEC_DIR / np.linalg.norm(_SPEC_DIR)
+
+
 def _shade_vertex_colors(md) -> np.ndarray:
-    """Colores de vértice con sombreado Lambert suave (ver _make_surface_item)."""
+    """Colores de vértice con sombreado: base luminosa (0.85..1.0 como la v4) + reflejo especular
+    blanco suave (ver _make_surface_item)."""
     colors = md.vertexColors().copy()
     normals = md.vertexNormals()
     lambert = np.clip(normals @ _LIGHT_DIR, 0.0, 1.0)
-    colors[:, :3] *= (0.65 + 0.35 * lambert)[:, None]
+    spec = np.clip(normals @ _SPEC_DIR, 0.0, 1.0) ** 24 * 0.35
+    colors[:, :3] = np.clip(colors[:, :3] * (0.85 + 0.15 * lambert)[:, None] + spec[:, None], 0.0, 1.0)
     return colors
 
 
