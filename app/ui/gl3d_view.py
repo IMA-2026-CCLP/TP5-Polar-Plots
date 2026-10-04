@@ -71,6 +71,9 @@ _CAMERA_PRESETS = {
 _CAMERA_CENTER_Z = 0.5
 _DEFAULT_DISTANCE = 4.6   # lejos: que entre toda la cúpula sin recortar
 _AXIS_LEN = 1.4
+# Micrófonos rotos del array (theta en grados). Sus datos se reemplazan por los del mic
+# opuesto (180° - theta), que es el "otro lado" del patrón; ver _replace_broken_mics.
+BROKEN_MIC_THETAS = (80.0,)
 _LABEL_OFFSET = 1.12   # factor sobre _AXIS_LEN para separar la etiqueta de la punta del eje
 _AXES = (  # (vector, etiqueta, color) — idéntico a plot/balloon.py::_axes_traces
     ((_AXIS_LEN, 0, 0), "X (0°)",    QColor("#ff6b6b")),
@@ -99,6 +102,20 @@ def _shade_vertex_colors(md) -> np.ndarray:
     lambert = np.clip(normals @ _LIGHT_DIR, 0.0, 1.0)
     colors[:, :3] *= (0.65 + 0.35 * lambert)[:, None]
     return colors
+
+
+def _replace_broken_mics(lev_2d: np.ndarray, thetas) -> np.ndarray:
+    """Un mic roto deja su columna (theta) con datos falsos en todos los azimuts, y la grilla lo
+    combina con su par frontal/trasero (theta y 180-theta) → media superficie se hunde. Se
+    "miente" el dato: la columna rota toma la del mic opuesto (180-theta)."""
+    thetas = np.asarray(thetas, dtype=float)
+    out = lev_2d.astype(float).copy()
+    for bad in BROKEN_MIC_THETAS:
+        i_bad = int(np.argmin(np.abs(thetas - bad)))
+        i_opp = int(np.argmin(np.abs(thetas - (180.0 - bad))))
+        if i_bad != i_opp and np.abs(thetas[i_bad] - bad) <= 1.0 and np.abs(thetas[i_opp] - (180.0 - bad)) <= 1.0:
+            out[:, i_bad] = out[:, i_opp]
+    return out
 
 
 def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
@@ -384,7 +401,7 @@ class GL3DView(QWidget):
         lev_2d = self._levels[:, :, self._band_index]
         band_hz = float(self._bands[self._band_index])
 
-        lev_2d, thetas = _fill_missing_thetas(lev_2d, self._elevations)
+        lev_2d, thetas = _fill_missing_thetas(_replace_broken_mics(lev_2d, self._elevations), self._elevations)
         R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
             lev_2d, self._azimuths, thetas,
             interp_deg=style.get('interp_deg', DEFAULT_INTERP_DEG),
