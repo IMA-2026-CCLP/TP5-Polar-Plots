@@ -16,7 +16,7 @@ def _energy_mean(values):
     return float(10 * np.log10(np.mean(10 ** (v / 10.0))))
 
 
-def radial_cells(levels, azimuths, thetas):
+def radial_cells(levels, azimuths, thetas, overrides=None):
     """Devuelve {(d, hor): (valor, [(θ, giro, dB), ...])} con la regla de la matriz radial:
     d = |θ − 90°| (anillo), hor = giro/HOR de 10°. Delante (θ = 90 − d) mide HOR = giro;
     atrás (θ = 90 + d) mide HOR = giro + 180. En HOR 0° y 180° hay dos mediciones: se promedian
@@ -36,6 +36,12 @@ def radial_cells(levels, azimuths, thetas):
     for d in range(10, 91, 10):
         tf, tb = 90.0 - d, 90.0 + d
         for hor in range(0, 360, 10):
+            if overrides and (d, hor) in overrides:          # celda reemplazada por su espejo
+                t_src, g_src = overrides[(d, hor)]
+                m = get(g_src, t_src)
+                if m:
+                    cells[(d, hor)] = (m[0], [(m[2], m[1], m[0])])
+                continue
             ms = []
             if hor <= 180 and get(hor, tf): ms.append(get(hor, tf))
             if hor >= 180 and get(hor - 180, tb): ms.append(get(hor - 180, tb))
@@ -53,6 +59,9 @@ class _Radial(QWidget):
         self._cells = radial_cells(levels, azimuths, thetas)
         self._source = source
         self._on_click = on_click
+        self._levels = np.asarray(levels, dtype=float)
+        self._overrides = {}      # (d, HOR) -> (θ de la fuente, giro de la fuente): celdas reemplazadas por espejo
+        self._sel = set()         # celdas seleccionadas (Ctrl + clic)
         self._zoom = 1.0          # zoom con la rueda del mouse
         self._cx = self._cy = None  # centro del mallado (se mueve al arrastrar / hacer zoom)
         self._drag = None
@@ -64,11 +73,46 @@ class _Radial(QWidget):
 
     def set_levels(self, levels):
         """Cambia la banda mostrada (recalcula las celdas y la escala de color)."""
-        self._cells = radial_cells(levels, self._az, self._th)
+        self._levels = np.asarray(levels, dtype=float)
+        self._recalc()
+
+    def _recalc(self):
+        self._cells = radial_cells(self._levels, self._az, self._th, self._overrides)
         vals = [v for v, _ in self._cells.values()]
         self._vmin = min(vals) if vals else -12.0
         self._vmax = max(vals) if vals else 0.0
         self.update()
+
+    @staticmethod
+    def _mirror_source(key):
+        """Fuente espejo izquierda-derecha: HOR h ≤ 180 ← del micrófono de atrás en el giro 180 − h;
+        HOR h > 180 ← del micrófono de delante en el giro 360 − h."""
+        d, h = key
+        if h <= 180:
+            return (90.0 + d, 180.0 - h)
+        return (90.0 - d, 360.0 - h)
+
+    def replace_selected_mirror(self):
+        n = 0
+        for key in list(self._sel):
+            if key[0] == 0 or key[1] is None:
+                continue
+            src = self._mirror_source(key)
+            if any(abs(float(a) - src[1]) < 0.5 for a in self._az):
+                self._overrides[key] = src; n += 1
+        self._sel.clear(); self._recalc()
+        return n
+
+    def undo_selected(self):
+        n = 0
+        for key in list(self._sel):
+            if self._overrides.pop(key, None) is not None:
+                n += 1
+        self._sel.clear(); self._recalc()
+        return n
+
+    def clear_selection(self):
+        self._sel.clear(); self.update()
 
     def _geom(self):
         if self._cx is None:
@@ -95,6 +139,12 @@ class _Radial(QWidget):
     def mousePressEvent(self, ev):
         if ev.button() == Qt.MouseButton.RightButton:
             self._drag = ev.position()
+            return
+        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:   # Ctrl + clic: seleccionar celda
+            key = self._key_at(ev.position())
+            if key and key in self._cells and key[0] != 0:
+                self._sel ^= {key}
+                self.update()
             return
         self._click_at(ev)
 
@@ -137,7 +187,13 @@ class _Radial(QWidget):
             pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, 10.0)
             pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
             flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
-            p.setPen(QPen(QColor('#d62728') if flag else QColor('#ffffff'), 2 if flag else 0.5))
+            if key in self._sel:
+                pen = QPen(QColor('#ffd400'), 3)
+            elif key in self._overrides:
+                pen = QPen(QColor('#7b2cbf'), 2.5)
+            else:
+                pen = QPen(QColor('#d62728') if flag else QColor('#ffffff'), 2 if flag else 0.5)
+            p.setPen(pen)
             p.setBrush(QBrush(self._color(v)))
             p.drawPath(pp)
         # nombre del archivo de cada medición dentro de la celda (tamaño ajustado a la celda)
@@ -191,6 +247,9 @@ class _Radial(QWidget):
         lines = [f"d={key[0]}°" + ("" if key[1] is None else f" · HOR {key[1]}°"), f"valor (energía): {v:.1f} dB"]
         for t, g, dbv in ms:
             lines.append(f"  θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB")
+        if key in self._overrides:
+            t_src, g_src = self._overrides[key]
+            lines.append(f"↔ reemplazada por espejo: θ={t_src:.0f}° · giro {g_src:.0f}°")
         if len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB:
             lines.append(f"⚠ diferencia > {THR_DB:g} dB entre mediciones")
         QToolTip.showText(ev.globalPosition().toPoint(), chr(10).join(lines), self)
@@ -291,6 +350,18 @@ class MatrixDialog(QDialog):
         self._on_click_cb = _click if on_click else None
         self._radial = _Radial(self._levels3d[:, :, 0], azimuths, thetas, source, on_click=self._on_click_cb)
         lay.addWidget(self._radial, 1)
+        bar = QHBoxLayout()
+        b_mir = QPushButton("Reemplazar selección por espejo")
+        b_und = QPushButton("Deshacer reemplazo")
+        b_cln = QPushButton("Limpiar selección")
+        b_mir.setToolTip("Ctrl + clic selecciona celdas. Cada una se reemplaza por su medición espejo izquierda-derecha.")
+        b_mir.clicked.connect(lambda: self._status.setText(f"Reemplazadas {self._radial.replace_selected_mirror()} celdas por espejo."))
+        b_und.clicked.connect(lambda: self._status.setText(f"Deshechos {self._radial.undo_selected()} reemplazos."))
+        b_cln.clicked.connect(self._radial.clear_selection)
+        for b in (b_mir, b_und, b_cln):
+            bar.addWidget(b)
+        bar.addStretch(1)
+        lay.addLayout(bar)
         if on_click is not None:
             lay.addWidget(_PlayerBar())
         row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
