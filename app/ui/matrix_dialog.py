@@ -11,13 +11,12 @@ from PyQt6.QtGui import QPainterPath
 
 def _halo(p, path, color, width, glow_width):
     """Borde con halo suave: una línea ancha semitransparente por debajo y el borde firme encima."""
+    # solo el contorno: el relleno (color en dB) lo pone quien llama con el pincel de la celda
     g = QColor(color); g.setAlphaF(0.35)
-    p.setBrush(Qt.BrushStyle.NoBrush)
     p.setPen(QPen(g, glow_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
     p.drawPath(path)
     p.setPen(QPen(QColor(color), width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
     p.drawPath(path)
-    p.setBrush(QBrush())
 
 
 THR_DB = 3.0   # diferencia máxima entre mediciones de una misma celda antes de marcarla
