@@ -100,6 +100,10 @@ def main():
     # sí (pantalla negra con contenido de otros paneles filtrándose adentro) — hay que
     # setearlo ANTES de construir la QApplication, no alcanza con setearlo después.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+    # Qt Quick (WebEngine/Plotly) y QOpenGLWidget (pyqtgraph 3D) sólo pueden componer juntos en la
+    # misma ventana si los dos usan OpenGL; con el backend D3D11 por defecto en Windows, uno queda negro.
+    import os
+    os.environ.setdefault("QSG_RHI_BACKEND", "opengl")
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
