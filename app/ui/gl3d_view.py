@@ -652,12 +652,12 @@ class GL3DView(QWidget):
             e = np.radians(elev_deg)
             r = np.cos(e)
             pts = np.stack([r * np.cos(phi), r * np.sin(phi), np.full_like(phi, np.sin(e))], axis=-1)
-            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True))
+            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
         theta = np.linspace(0, np.pi / 2, 37)
         for az_deg in range(0, 360, 45):
             a = np.radians(az_deg)
             pts = np.stack([np.cos(theta) * np.cos(a), np.cos(theta) * np.sin(a), np.sin(theta)], axis=-1)
-            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True))
+            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
         return items
 
     def _colorbar_pt(self) -> float:
