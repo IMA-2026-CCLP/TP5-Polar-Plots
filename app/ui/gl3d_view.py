@@ -602,13 +602,13 @@ class GL3DView(QWidget):
             items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True))
         return items
 
-    def _update_colorbar(self, cmin: float, cmax: float):
-        """Barra de color con etiquetas de valor (máx/medio/mín) al lado — antes sólo tenía el
-        degradé, sin decir qué dB le corresponde a cada color (se veía por tooltip nada más, hay
-        que pasar el mouse para enterarse)."""
-        bar_w, h = 18, 120
-        label_w = 46
-        w = bar_w + 4 + label_w
+    def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0) -> QImage:
+        """Barra de color con etiquetas de valor (máx/medio/mín) al lado. `s` escala todo (para
+        el export, ver export_image); en pantalla s=1."""
+        bar_w, h = int(18 * s), int(120 * s)
+        label_w = int(46 * s)
+        gap = int(4 * s)
+        w = bar_w + gap + label_w
         from PyQt6.QtGui import QPainter, QFont as _QFont
         from PyQt6.QtCore import Qt as _Qt
         ts, rgbs = _colorscale_stops(self._colorscale)
@@ -625,13 +625,19 @@ class GL3DView(QWidget):
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         p.setPen(QColor("#1a1a1a"))
-        p.setFont(_QFont("Segoe UI", 8))
+        p.setFont(_QFont("Segoe UI", max(1, round(8 * s))))
         mid = (cmax + cmin) / 2
         for value, y in ((cmax, 0), (mid, h // 2), (cmin, h)):
             ty = max(6, min(h - 4, y))   # no recortar el texto arriba/abajo del todo
-            p.drawText(bar_w + 4, ty - 6, label_w, 12,
+            p.drawText(bar_w + gap, ty - int(6 * s), label_w, int(12 * s),
                        _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, f"{value:.1f}")
         p.end()
+        return img
+
+    def _update_colorbar(self, cmin: float, cmax: float):
+        """La barra se dibuja en el overlay de la pantalla y también se compone en el export."""
+        img = self._colorbar_image(cmin, cmax)
+        w, h = img.width(), img.height()
         self._colorbar.setPixmap(QPixmap.fromImage(img))
         self._colorbar.setFixedSize(w, h)
         self._colorbar.move(self.width() - w - 20, 10)
@@ -698,6 +704,16 @@ class GL3DView(QWidget):
             QApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
             try:
                 img = clone.grabFramebuffer()
+                if not img.isNull() and self._colorbar.isVisible() and self._last_grid is not None:
+                    # La barra de color vive en el overlay de pantalla, no en la escena GL: se
+                    # compone encima de la imagen exportada, escalada igual que el resto.
+                    from PyQt6.QtGui import QPainter
+                    g = self._last_grid
+                    k = W / max(1, self._gl.width())   # _px_scale ya volvió a 1.0 acá
+                    cb = self._colorbar_image(g['cmin'], g['cmax'], k)
+                    p = QPainter(img)
+                    p.drawImage(img.width() - cb.width() - int(20 * k), int(10 * k), cb)
+                    p.end()
                 ok = (not img.isNull()) and img.save(path)
                 if ok and fmt != 'svg':
                     set_png_dpi(path, dpi)
