@@ -4,10 +4,14 @@
 
 #ifndef AppVersion
 <<<<<<< HEAD
+<<<<<<< HEAD
   #define AppVersion "5.1.0"
 =======
   #define AppVersion "5.1.0"
 >>>>>>> 877e8b4 (Export 3D: barra de color usa la altura real de la imagen capturada. Version 5.1.6)
+=======
+  #define AppVersion "5.1.0"
+>>>>>>> 1c1e80f (Escala de colores 3D: texto en pt configurable (Opciones > Imagenes), mas grande en export y pantalla. Version 5.1.7)
 #endif
 #define AppName "Polar Pattern CCLP"
 #define AppExe  "PolarPatternAnalyzer.exe"

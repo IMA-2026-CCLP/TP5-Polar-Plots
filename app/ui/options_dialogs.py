@@ -49,6 +49,12 @@ class ImageOptionsDialog(QDialog):
         self._fmt.addItem("PNG (imagen)", "png")
         self._fmt.addItem("SVG (vectorial, sólo Polar 2D)", "svg")
         form.addRow("Formato por defecto:", self._fmt)
+
+        self._cb_pt = NumEdit()
+        self._cb_pt.setRange(6, 40)
+        self._cb_pt.setDecimals(1)
+        self._cb_pt.setToolTip("Tamaño de los valores (dB) de la escala de colores en la imagen exportada.")
+        form.addRow("Texto de la escala de colores (pt):", self._cb_pt)
         lay.addLayout(form)
 
         self._preview = QLabel()
@@ -78,6 +84,7 @@ class ImageOptionsDialog(QDialog):
         self._h.setValue(h)
         self._dpi.setValue(dpi)
         self._fmt.setCurrentIndex(max(0, self._fmt.findData(fmt)))
+        self._cb_pt.setValue(eu.get_colorbar_pt())
         idx = next((i for i in range(self._preset.count() - 1)
                     if self._preset.itemData(i) == (w, h)), self._preset.count() - 1)
         self._preset.blockSignals(True)
@@ -100,11 +107,13 @@ class ImageOptionsDialog(QDialog):
 
     def _reset(self):
         self._load(*eu.DEFAULT_SIZE_CM, eu.DEFAULT_DPI, "png")
+        self._cb_pt.setValue(eu.DEFAULT_COLORBAR_PT)
         self._update_preview()
 
     def _accept(self):
         eu.set_export_size_cm(self._w.value(), self._h.value())
         eu.set_export_defaults(int(self._dpi.value()), self._fmt.currentData())
+        eu.set_colorbar_pt(self._cb_pt.value())
         self.accept()
 
 

@@ -40,6 +40,22 @@ def set_export_size_cm(w: float, h: float) -> None:
     s.setValue("export/height_cm", float(h))
 
 
+DEFAULT_COLORBAR_PT = 12.0
+
+
+def get_colorbar_pt() -> float:
+    """Tamaño (pt) de los valores de la escala de colores en las imágenes exportadas."""
+    try:
+        v = float(_settings().value("export/colorbar_pt", DEFAULT_COLORBAR_PT))
+    except (TypeError, ValueError):
+        return DEFAULT_COLORBAR_PT
+    return max(6.0, min(40.0, v))
+
+
+def set_colorbar_pt(v: float) -> None:
+    _settings().setValue("export/colorbar_pt", float(v))
+
+
 def get_last_export_dir() -> str:
     """Última carpeta usada para guardar imágenes (persiste entre sesiones vía QSettings).
 
