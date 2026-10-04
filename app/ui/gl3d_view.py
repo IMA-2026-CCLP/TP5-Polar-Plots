@@ -296,6 +296,7 @@ class GL3DView(QWidget):
         self._info_label.hide()
 
         self._colorbar = QLabel()          # franja derecha (ver outer), no encima del gráfico
+        self._colorbar.setStyleSheet("background:#ffffff; border:none;")   # sin el gris de la app
         self._colorbar.hide()
         outer.addWidget(self._colorbar)
 
