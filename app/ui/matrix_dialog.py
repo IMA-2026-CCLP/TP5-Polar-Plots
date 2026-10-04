@@ -275,9 +275,6 @@ class _Radial(QWidget):
         p.setPen(QPen(QColor('#444'), 1, Qt.PenStyle.DashLine)); p.setBrush(Qt.BrushStyle.NoBrush)
         for d in range(10, 91, 10):
             p.drawEllipse(QPointF(cx, cy), r_of(d), r_of(d))
-        p.setFont(QFont('Segoe UI', 8)); p.setPen(QColor('#111'))
-        for d in range(10, 91, 10):
-            p.drawText(QPointF(cx + 4, cy - r_of(d) - 2), f"d={d}°")
         p.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
         for hor in range(0, 360, 30):
             t = math.radians(hor)
@@ -304,14 +301,13 @@ class _Radial(QWidget):
             p.setPen(QPen(QColor('#666'), 0.5))
             p.setBrush(QBrush(self._color(v_mid)))
             p.drawRect(QRectF(x, top + i * hstep, w, hstep))
+        # valor de cada paso en su centro, sin decimales
         p.setFont(QFont('Segoe UI', 8)); p.setPen(QColor('#111'))
-        for i in range(N + 1):
-            v = vmax - i * (vmax - vmin) / N
-            y = top + i * hstep
-            p.drawLine(QPointF(x + w, y), QPointF(x + w + 5, y))
-            bold = i in (0, N)
-            p.setFont(QFont('Segoe UI', 9 if bold else 8, QFont.Weight.Bold if bold else QFont.Weight.Normal))
-            p.drawText(QPointF(x + w + 8, y + 4), f"{v:.1f}")
+        for i in range(N):
+            v_mid = vmax - (i + 0.5) * (vmax - vmin) / N
+            y = top + (i + 0.5) * hstep
+            p.drawText(QRectF(x + w + 6, y - 8, 40, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                       f"{v_mid:.0f}")
 
     def mouseMoveEvent(self, ev):
         if self._drag is not None:                        # arrastre con botón derecho: mover el mallado
