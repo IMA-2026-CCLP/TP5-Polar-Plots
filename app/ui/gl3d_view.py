@@ -574,8 +574,10 @@ class GL3DView(QWidget):
         items = []
         for vec, label, color in _AXES:
             rgba = (color.redF(), color.greenF(), color.blueF(), 1.0)
+            # glOptions='opaque': con el 'translucent' por defecto el eje se dibuja encima de la
+            # superficie aunque esté detrás; con 'opaque' respeta la profundidad (queda tapado).
             items.append(gl.GLLinePlotItem(pos=np.array([[0, 0, 0], vec]), color=rgba,
-                                            width=width, antialias=True))
+                                            width=width, antialias=True, glOptions='opaque'))
             # Etiqueta un poco más allá de la punta: si no, el texto arranca encima de la línea.
             items.append(gl.GLTextItem(pos=np.array(vec, dtype=float) * _LABEL_OFFSET, text=label, color=color,
                                         font=QFont("Segoe UI", label_size)))
