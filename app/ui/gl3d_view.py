@@ -232,7 +232,7 @@ class GL3DView(QWidget):
         self._show_ref_plane:      bool = True   # plano translúcido — sólo si _cut_visible también
         self._show_hemisphere_grid: bool = True  # círculos de referencia lat/long, independiente del corte
         self._show_box_grid: bool = True         # planos de fondo con grilla (casilla propia)
-        self._box_items: list = []
+        self._gl_line_items: list = []   # líneas de fondo (grilla de la esfera + planos): van en GL
         # 'origin': el nivel escala el vector ENTERO desde (0,0,0) — balloon plot clásico
         #           (CLIO, GLL Viewer, EASE...), el que ya tenía este programa. Modo Superficie 3D.
         # 'zaxis':  el nivel sólo escala la parte horizontal; la altura Z depende nada más del
@@ -520,11 +520,13 @@ class GL3DView(QWidget):
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
+        self._gl_line_items = []
         if self._show_hemisphere_grid:
-            items += self._make_grid_items()
+            self._gl_line_items += self._make_grid_items()
+            items += self._gl_line_items
         if self._show_box_grid:
-            self._box_items = self._make_box_items()
-            items += self._box_items
+            self._gl_line_items += self._make_box_items()
+            items += self._gl_line_items
         if self._cut_visible:
             items += self._make_cut_ring_items(g)
             if self._show_ref_plane:
@@ -769,7 +771,7 @@ class GL3DView(QWidget):
         export_items = self._build_items(self._last_grid)
         # Superficie y caja de planos van en GL (con profundidad); ejes y textos se dibujan
         # encima con QPainter, ocluidos con el mismo depth buffer.
-        gl_items = [it for it in export_items if type(it).__name__ == 'GLMeshItem' or it in self._box_items]
+        gl_items = [it for it in export_items if type(it).__name__ == 'GLMeshItem' or it in self._gl_line_items]
         for it in on_screen:
             view.removeItem(it)
         for it in gl_items:
@@ -834,7 +836,7 @@ class GL3DView(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         for it in export_items:
             name = type(it).__name__
-            if it in self._box_items:
+            if it in self._gl_line_items:
                 continue
             if name == 'GLLinePlotItem' and it.pos is not None:
                 c = it.color if np.ndim(it.color) == 1 else np.asarray(it.color)[0]
