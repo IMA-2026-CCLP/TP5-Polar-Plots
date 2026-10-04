@@ -238,9 +238,12 @@ class MainWindow(QMainWindow):
                 self._append_log("[Matriz] No hay datos de directividad calculados.")
                 return
             levels, az, th, freqs, src = m
-            MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
-                         apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
-                         parent=self).exec()
+            # no modal: la matriz queda abierta junto a la ventana principal (y a la comparación)
+            self._matrix_win = MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
+                                            apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
+                                            parent=self)
+            self._matrix_win.setModal(False)
+            self._matrix_win.show()
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
