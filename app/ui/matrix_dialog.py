@@ -7,6 +7,18 @@ from PyQt6.QtCore import Qt, QSize, QPointF, QRectF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox,
                              QToolTip, QPushButton, QComboBox)
+from PyQt6.QtGui import QPainterPath
+
+def _halo(p, path, color, width, glow_width):
+    """Borde con halo suave: una línea ancha semitransparente por debajo y el borde firme encima."""
+    g = QColor(color); g.setAlphaF(0.35)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.setPen(QPen(g, glow_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.drawPath(path)
+    p.setPen(QPen(QColor(color), width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.drawPath(path)
+    p.setBrush(QBrush())
+
 
 THR_DB = 3.0   # diferencia máxima entre mediciones de una misma celda antes de marcarla
 
@@ -60,6 +72,7 @@ class _Radial(QWidget):
         self._source = source
         self._on_click = on_click
         self._levels = np.asarray(levels, dtype=float)
+        self._unit = 'dB'
         self._overrides = {}      # (d, HOR) -> (θ de la fuente, giro de la fuente): celdas reemplazadas por espejo
         self._sel = set()         # celdas seleccionadas (Ctrl + clic)
         self._sel_order = []     # las mismas, en el orden en que se eligieron
@@ -228,9 +241,13 @@ class _Radial(QWidget):
             if key[0] == 0:
                 # cénit: promedio energético de los giros; se marca si la dispersión supera el umbral
                 flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
-                p.setPen(QPen(QColor('#ffd400') if flag else QColor('#555'), 2 if flag else 1))
                 p.setBrush(QBrush(self._color(v)))
-                p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
+                if flag:
+                    cc = QPainterPath(); cc.addEllipse(QPointF(cx, cy), r_of(5), r_of(5))
+                    _halo(p, cc, '#ffd400', 4.0, 3.0)
+                    p.setPen(Qt.PenStyle.NoPen); p.drawPath(cc)
+                else:
+                    p.setPen(QPen(QColor('#555'), 1)); p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
                 continue
             d, hor = key
             d1, d2 = d - 5, min(90, d + 5)
@@ -240,15 +257,18 @@ class _Radial(QWidget):
             pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, 10.0)
             pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
             flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
-            if key in self._sel:
-                pen = QPen(QColor('#00b3ff'), 3)
-            elif key in self._overrides:
-                pen = QPen(QColor('#7b2cbf'), 2.5)
-            else:
-                pen = QPen(QColor('#ffd400') if flag else QColor('#ffffff'), 2 if flag else 0.5)
-            p.setPen(pen)
             p.setBrush(QBrush(self._color(v)))
-            p.drawPath(pp)
+            if key in self._sel:
+                _halo(p, pp, '#2ca02c', 3.0, 2.2)              # selección: verde leve
+            elif key in self._overrides:
+                p.setPen(QPen(QColor('#7b2cbf'), 2.5)); p.drawPath(pp)
+                continue
+            elif flag:
+                _halo(p, pp, '#ffd400', 4.0, 3.0)              # diferencia > 3 dB: amarillo marcado
+            else:
+                p.setPen(QPen(QColor('#ffffff'), 0.5)); p.drawPath(pp)
+                continue
+            p.setPen(Qt.PenStyle.NoPen); p.drawPath(pp)
         p.setPen(QPen(QColor('#444'), 1, Qt.PenStyle.DashLine)); p.setBrush(Qt.BrushStyle.NoBrush)
         for d in range(10, 91, 10):
             p.drawEllipse(QPointF(cx, cy), r_of(d), r_of(d))
@@ -258,7 +278,7 @@ class _Radial(QWidget):
             p.drawText(QPointF(cx - (R + 22) * math.sin(t) - 12, cy - (R + 22) * math.cos(t) + 4), f"{hor}°")
         self._paint_colorbar(p)
         p.setFont(QFont('Segoe UI', 9))
-        p.drawText(QPointF(12, self.height() - 12), f"amarillo = diferencia > {THR_DB:g} dB entre mediciones · unidad: {self._unit}")
+        p.drawText(QPointF(12, self.height() - 12), f"amarillo = diferencia > {THR_DB:g} dB entre mediciones · verde = selección · unidad: {self._unit}")
         p.end()
 
     def _paint_colorbar(self, p):
