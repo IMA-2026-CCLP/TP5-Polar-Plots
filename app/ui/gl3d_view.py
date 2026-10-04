@@ -496,7 +496,7 @@ class GL3DView(QWidget):
 
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
-        items += self._make_axis_items()
+        items += self._make_axis_items(g)
         if self._show_hemisphere_grid:
             items += self._make_grid_items()
         if self._cut_visible:
@@ -568,13 +568,21 @@ class GL3DView(QWidget):
         # Sin aristas dibujadas: superficie continua con normales suavizadas (look tipo Plotly).
         return gl.GLMeshItem(meshdata=md, smooth=True, glOptions='opaque')
 
-    def _make_axis_items(self) -> list:
+    def _make_axis_items(self, g: dict) -> list:
         width = float(self._style.get('axis_line_width', 3)) * self._px_scale
         label_size = max(1, round(int(self._style.get('axis_label_size', FONT_SIZE)) * self._px_scale))
         items = []
+        pts = np.stack([g['X'], g['Y'], g['Z']], axis=-1).reshape(-1, 3)
         for vec, label, color in _AXES:
             rgba = (color.redF(), color.greenF(), color.blueF(), 1.0)
-            items.append(gl.GLLinePlotItem(pos=np.array([[0, 0, 0], vec]), color=rgba,
+            # El eje arranca donde sale de la superficie/esfera (no desde el origen): se busca el
+            # vértice de la malla en esa dirección y se corta la línea en su distancia.
+            u = np.asarray(vec, dtype=float) / np.linalg.norm(vec)
+            radii = np.linalg.norm(pts, axis=1)
+            cos = (pts / np.maximum(radii, 1e-9)[:, None]) @ u
+            r_start = float(radii[np.argmax(cos)]) * 1.02
+            start = u * min(r_start, _AXIS_LEN * 0.9)
+            items.append(gl.GLLinePlotItem(pos=np.array([start, vec]), color=rgba,
                                             width=width, antialias=True))
             # Etiqueta un poco más allá de la punta: si no, el texto arranca encima de la línea.
             items.append(gl.GLTextItem(pos=np.array(vec, dtype=float) * _LABEL_OFFSET, text=label, color=color,
