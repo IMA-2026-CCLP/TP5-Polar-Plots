@@ -649,7 +649,7 @@ class NativeRibbon(QWidget):
                                           ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp))]),
             ("Paleta de color", [
                 (None, self._combo('colorscale', 84, "Paleta de colores de los gráficos 3D y esfera",
-                                   [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis")], disp))]),
+                                   [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis", "RdBu v4")], disp))]),
             ("Corte (Superficie 3D)", [
                 ("Elevación (°)", self._num('cut3d_elevation', 52,
                     "Elevación del plano/curva de referencia (0° a 90°)")),

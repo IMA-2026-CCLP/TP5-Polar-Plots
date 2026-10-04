@@ -122,9 +122,8 @@ class SmoothingOptionsDialog(QDialog):
         "  existen en la medición real.\n"
         "none: sin suavizar, ignora la intensidad.")
     _WINDOW_TIP = (
-        "Cantidad de puntos vecinos que se promedian entre sí.\n"
-        "0 = sin suavizar. 1 a 2 = leve/medio. 3 a 5 = fuerte. Más de 5 puede\n"
-        "borrar lóbulos/nulos reales.")
+        "Con gaussian es la σ del filtro: 1 = leve, 2 = medio, 3 = fuerte.\n"
+        "0 = sin suavizar. Con savgol/moving_average es el tamaño de la ventana.")
     _TITLES = {"3d": "Superficie 3D", "sphere": "Esfera", "polar2d": "Polar 2D"}
 
     def __init__(self, parent=None):

@@ -30,6 +30,8 @@ COLORSCALES = {
     "Cividis":  _seq("Cividis"),
     "Turbo":    _seq("Turbo"),
     "Hot":      "Hot",
+    # Misma paleta que la v4 (Plotly RdBu invertida: azul oscuro abajo, rojo arriba)
+    "RdBu v4":  _cs(__import__("plotly.colors", fromlist=["x"]).diverging.RdBu, reverse=True),
 }
 
 # ── Helpers comunes ───────────────────────────────────────────────────────────
@@ -206,17 +208,20 @@ def _smooth_circular(y: np.ndarray, window: int, method: str = 'gaussian') -> np
                         puede introducir ondulaciones artificiales).
       'none'            sin suavizar.
 
-    window : tamaño de la ventana en puntos (a mayor ventana, más suavizado).
-             <2 no hace nada.
+    window : gaussian: intensidad = σ del filtro en puntos (1 = leve, 2 = medio, ...).
+             savgol/moving_average: tamaño de la ventana en puntos; <2 no hace nada.
+             0 no hace nada con ningún método.
     """
     n = len(y)
-    if window < 2 or window >= n or method == 'none':
+    if window <= 0 or method == 'none':
         return y
 
     if method == 'gaussian':
         from scipy.ndimage import gaussian_filter1d
-        sigma = window / 3.0   # ventana ≈ 3σ cubre casi toda la campana
-        return gaussian_filter1d(y, sigma=sigma, mode='wrap')
+        return gaussian_filter1d(y, sigma=float(window), mode='wrap')
+
+    if window < 2 or window >= n:
+        return y
 
     if method == 'savgol':
         from scipy.signal import savgol_filter
@@ -299,7 +304,7 @@ def _build_hemisphere_grid(
         valid90   = col90[np.isfinite(col90)]
         zenith_dB = float(10 * np.log10(np.mean(10 ** (valid90 / 10)))) if len(valid90) else 0.0
 
-    if smoothing_window >= 2:
+    if smoothing_window > 0:
         for i_row in range(R_dB.shape[0]):
             R_dB[i_row, :] = _smooth_circular(R_dB[i_row, :], smoothing_window,
                                               method=smoothing_method)
@@ -841,7 +846,7 @@ def compute_polar2d_ring(lev_2d, band_index, band_hz, azimuths, elevations,
     # ── Suavizado circular opcional (previo a interpolar) ─────────────────
     smoothing_window = int(style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
     smoothing_method = style.get('smoothing_method', DEFAULT_SMOOTH_METHOD)
-    if smoothing_window >= 2:
+    if smoothing_window > 0:
         r_full = _smooth_circular(r_full, smoothing_window, method=smoothing_method)
 
     # ── Interpolación 1D (idem plot_polar_2d en patron.py) ───────────────
