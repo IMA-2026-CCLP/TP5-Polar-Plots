@@ -102,32 +102,37 @@ def _shade_vertex_colors(md) -> np.ndarray:
 
 
 def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
-    """Completa los thetas que faltan en la grilla medida (mic roto/quitado) con una
-    interpolación lineal en dB entre sus vecinos medidos, por azimut. Sin esto, la grilla
-    toma el theta medido más cercano por error y media superficie queda hundida.
+    """Repara el dato de micrófonos rotos antes de la grilla: los thetas ausentes y los valores
+    no finitos (NaN/-inf) se reemplazan por interpolación lineal en dB con los vecinos válidos
+    del mismo azimut. Sin esto, _render_inner toma esos NaN como vmin y la superficie se hunde.
     Devuelve (lev_2d, thetas) con la grilla regular completa."""
     thetas = np.asarray(thetas, dtype=float)
     if len(thetas) < 3:
         return lev_2d, thetas
     order = np.argsort(thetas)
     th = thetas[order]
-    lev = lev_2d[:, order]
+    lev = lev_2d[:, order].astype(float)
     step = float(np.median(np.diff(th)))
     if step <= 0:
         return lev_2d, thetas
     grid = np.arange(th[0], th[-1] + step * 0.5, step)
     missing = [g for g in grid if np.min(np.abs(th - g)) > step * 0.6]
-    if not missing:
-        return lev_2d, thetas
-    new_lev = np.empty((lev.shape[0], len(th) + len(missing)))
-    new_th = np.concatenate([th, missing])
-    for a in range(lev.shape[0]):
-        row = lev[a]
-        ok = np.isfinite(row)
-        new_lev[a, :len(th)] = row
-        new_lev[a, len(th):] = np.interp(missing, th[ok], row[ok]) if ok.any() else 0.0
+    new_th = np.concatenate([th, missing]) if missing else th
+    new_lev = np.empty((lev.shape[0], len(new_th)))
+    new_lev[:, :len(th)] = lev
+    new_lev[:, len(th):] = np.nan
+    # Valores no finitos (mic sin dato / -inf) y thetas ausentes: se "miente" el dato
+    # interpolando en theta con los vecinos válidos del mismo azimut, en vez de dejar que
+    # entren como vmin y hundan la superficie.
     o = np.argsort(new_th)
-    return new_lev[:, o], new_th[o]
+    new_th = new_th[o]
+    new_lev = new_lev[:, o]
+    for a in range(new_lev.shape[0]):
+        row = new_lev[a]
+        ok = np.isfinite(row)
+        if not ok.all() and ok.any():
+            row[~ok] = np.interp(new_th[~ok], new_th[ok], row[ok])
+    return new_lev, new_th
 
 
 def _colorscale_stops(name: str):
