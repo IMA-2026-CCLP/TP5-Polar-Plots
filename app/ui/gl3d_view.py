@@ -763,16 +763,22 @@ class GL3DView(QWidget):
             try:
                 img = clone.grabFramebuffer()
                 if not img.isNull() and self._colorbar.isVisible() and self._last_grid is not None:
-                    # La barra de color vive en el overlay de pantalla, no en la escena GL: se
-                    # compone encima de la imagen exportada, escalada igual que el resto.
+                    # La barra de color vive en el overlay de pantalla, no en la escena GL. En el
+                    # export va en una franja a la derecha (no encima del gráfico), ocupando todo
+                    # el alto de la imagen.
                     from PyQt6.QtGui import QPainter
                     g = self._last_grid
                     k = W / max(1, self._gl.width())   # _px_scale ya volvió a 1.0 acá
-                    cb = self._colorbar_image(g['cmin'], g['cmax'], k,
-                                              bar_h=int(self._panel_bar_h() * k))
-                    p = QPainter(img)
-                    p.drawImage(img.width() - cb.width() - int(8 * k), int(8 * k), cb)
+                    pad = int(8 * k)
+                    cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=H - 2 * pad)
+                    gap = int(12 * k)
+                    out = QImage(img.width() + gap + cb.width(), img.height(), QImage.Format.Format_ARGB32)
+                    out.fill(QColor(self._style.get('bg_color') or '#ffffff'))
+                    p = QPainter(out)
+                    p.drawImage(0, 0, img)
+                    p.drawImage(img.width() + gap, 0, cb)
                     p.end()
+                    img = out
                 ok = (not img.isNull()) and img.save(path)
                 if ok and fmt != 'svg':
                     set_png_dpi(path, dpi)
