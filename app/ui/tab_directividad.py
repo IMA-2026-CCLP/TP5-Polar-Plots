@@ -1335,10 +1335,6 @@ class TabDirectividad(QWidget):
         for m, c in (cfg.get('sections') or {}).items():
             if m in self._sections:
                 self._sections[m].apply_config(c)
-        # El suavizado es una preferencia global (Herramientas ▸ Suavizado…): la sesión guardada
-        # puede traer valores viejos y no deben pisarla al cargar.
-        from ui.export_utils import get_smoothing_settings
-        self.apply_smoothing_settings({m: get_smoothing_settings(m) for m in ('3d', 'sphere', 'polar2d')})
         self._current_band_idx = int(cfg.get('band_index', 0))
         self._refresh_display()
         self.band_selector.set_index(self._current_band_idx)
