@@ -151,6 +151,7 @@ class GL3DView(QWidget):
         self._style:      dict = {}
         self._camera      = dict(_CAMERA_PRESETS["default"])
         self._current_items: list = []
+        self._px_scale = 1.0        # escala de los elementos en píxeles (ver export_image)
         self._export_clone = None   # GLViewWidget reusado entre exportaciones, ver _get_export_clone
         self._cut_elevation: float = 0.0   # elevación elegida (0°–90°), ver _make_cut_ring_items
         self._cut_visible:   bool  = False   # muestra la curva (y, si show_ref_plane, el plano)
@@ -449,9 +450,9 @@ class GL3DView(QWidget):
         X, Y, Z = g['X'], g['Y'], g['Z']
         pts = np.stack([X[row], Y[row], Z[row]], axis=-1)
         color = (0.05, 0.05, 0.05, 1.0)   # casi negro: contraste fuerte contra cualquier color de la malla
-        ring = gl.GLLinePlotItem(pos=pts, color=color, width=5, antialias=True)
+        ring = gl.GLLinePlotItem(pos=pts, color=color, width=5 * self._px_scale, antialias=True)
         # Puntito en cada vértice: ayuda a ver que la curva sigue el relieve real (no es plana).
-        dots = gl.GLScatterPlotItem(pos=pts[::4], color=color, size=6, pxMode=True)
+        dots = gl.GLScatterPlotItem(pos=pts[::4], color=color, size=6 * self._px_scale, pxMode=True)
         return [ring, dots]
 
     def _make_reference_plane_item(self):
@@ -499,8 +500,8 @@ class GL3DView(QWidget):
         return gl.GLMeshItem(meshdata=md, smooth=True, glOptions='opaque')
 
     def _make_axis_items(self) -> list:
-        width = float(self._style.get('axis_line_width', 3))
-        label_size = int(self._style.get('axis_label_size', FONT_SIZE))
+        width = float(self._style.get('axis_line_width', 3)) * self._px_scale
+        label_size = max(1, round(int(self._style.get('axis_label_size', FONT_SIZE)) * self._px_scale))
         items = []
         for vec, label, color in _AXES:
             rgba = (color.redF(), color.greenF(), color.blueF(), 1.0)
@@ -523,12 +524,12 @@ class GL3DView(QWidget):
             e = np.radians(elev_deg)
             r = np.cos(e)
             pts = np.stack([r * np.cos(phi), r * np.sin(phi), np.full_like(phi, np.sin(e))], axis=-1)
-            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width, antialias=True))
+            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True))
         theta = np.linspace(0, np.pi / 2, 37)
         for az_deg in range(0, 360, 45):
             a = np.radians(az_deg)
             pts = np.stack([np.cos(theta) * np.cos(a), np.cos(theta) * np.sin(a), np.sin(theta)], axis=-1)
-            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width, antialias=True))
+            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True))
         return items
 
     def _update_colorbar(self, cmin: float, cmax: float):
@@ -606,8 +607,15 @@ class GL3DView(QWidget):
         clone.resize(W, H)
         for item in list(clone.items):
             clone.removeItem(item)
-        for item in self._build_items(self._last_grid):
-            clone.addItem(item)
+        # Los textos y líneas de GL son en píxeles: en el panel tienen tamaño de pantalla y en la
+        # exportación hay más píxeles (16×10 cm a 300 DPI). Se escalan por la misma razón que la
+        # geometría (que sí escala con el viewport) para que la imagen se vea igual que el panel.
+        self._px_scale = W / max(1, self._gl.width())
+        try:
+            for item in self._build_items(self._last_grid):
+                clone.addItem(item)
+        finally:
+            self._px_scale = 1.0
         # Cámara VIVA (self._gl.cameraParams()), no la del último preset aplicado (self._camera):
         # si no, la imagen exportada no coincidía con la rotación/zoom hechos a mano con el mouse.
         clone.setCameraParams(**self._gl.cameraParams())
