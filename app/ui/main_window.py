@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
             # no modal: la matriz queda abierta junto a la ventana principal (y a la comparación)
             self._matrix_win = MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
                                             apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
-                                            unit=unit, parent=self)
+                                            undo_cb=self._undo_replacement, unit=unit, parent=self)
             self._matrix_win.setModal(False)
             self._matrix_win.show()
             self.view_dir.on_data_changed = self._refresh_matrix
@@ -376,6 +376,12 @@ class MainWindow(QMainWindow):
         """Aplica los reemplazos de la matriz al audio y vuelve a dibujar la señal en el tiempo."""
         msg = self.view_dir.apply_mirror_replacements(pairs)
         self.ribbon._b.emitPlotParams()          # redibuja Procesamiento con los datos ya reemplazados
+        self._refresh_matrix()
+        return msg
+
+    def _undo_replacement(self):
+        msg = self.view_dir.undo_replacements()
+        self.ribbon._b.emitPlotParams()
         self._refresh_matrix()
         return msg
 

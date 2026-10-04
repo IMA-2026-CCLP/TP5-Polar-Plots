@@ -62,6 +62,7 @@ class _Radial(QWidget):
         self._levels = np.asarray(levels, dtype=float)
         self._overrides = {}      # (d, HOR) -> (θ de la fuente, giro de la fuente): celdas reemplazadas por espejo
         self._sel = set()         # celdas seleccionadas (Ctrl + clic)
+        self._sel_order = []     # las mismas, en el orden en que se eligieron
         self._zoom = 1.0          # zoom con la rueda del mouse
         self._cx = self._cy = None  # centro del mallado (se mueve al arrastrar / hacer zoom)
         self._drag = None
@@ -110,7 +111,7 @@ class _Radial(QWidget):
             src = self._mirror_source(key)
             if any(abs(float(a) - src[1]) < 0.5 for a in self._az):
                 self._overrides[key] = src; n += 1
-        self._sel.clear(); self._recalc()
+        self._clear_sel(); self._recalc()
         return n
 
     def undo_selected(self):
@@ -118,16 +119,34 @@ class _Radial(QWidget):
         for key in list(self._sel):
             if self._overrides.pop(key, None) is not None:
                 n += 1
-        self._sel.clear(); self._recalc()
+        self._clear_sel(); self._recalc()
         return n
 
+    def _clear_sel(self):
+        self._sel.clear(); self._sel_order.clear()
+
+    def ordered_keys(self):
+        return list(self._sel_order)
+
+    def set_overrides(self, mapping):
+        """mapping: {(d, HOR): (θ fuente, giro fuente)} — reemplazos pendientes (se muestran en morado)."""
+        self._overrides = dict(mapping)
+        self._recalc()
+
+    def mirror_map(self, keys):
+        out = {}
+        for k in keys:
+            if k[0] != 0 and k[1] is not None:
+                out[k] = self._mirror_source(k)
+        return out
+
     def clear_selection(self):
-        self._sel.clear(); self.update()
+        self._clear_sel(); self.update()
 
     def selected_pairs(self):
         """(θ, giro) de la medición que representa cada celda seleccionada (la primera si hay dos)."""
         out = []
-        for key in sorted(self._sel, key=lambda k: (k[0], k[1] or 0)):
+        for key in list(self._sel_order):
             if key in self._cells:
                 t, g, _ = self._cells[key][1][0]
                 out.append((float(t), float(g)))
@@ -143,7 +162,7 @@ class _Radial(QWidget):
         return out
 
     def clear_overrides(self):
-        self._overrides.clear(); self._sel.clear(); self._recalc()
+        self._overrides.clear(); self._clear_sel(); self._recalc()
 
     def _geom(self):
         if self._cx is None:
@@ -174,7 +193,10 @@ class _Radial(QWidget):
         if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:   # Ctrl + clic: seleccionar celda
             key = self._key_at(ev.position())
             if key and key in self._cells and key[0] != 0:
-                self._sel ^= {key}
+                if key in self._sel:
+                    self._sel.discard(key); self._sel_order.remove(key)
+                else:
+                    self._sel.add(key); self._sel_order.append(key)
                 self.update()
             return
         self._click_at(ev)
@@ -375,8 +397,9 @@ class _PlayerBar(QWidget):
 
 class MatrixDialog(QDialog):
     def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None,
-                 compare_cb=None, unit='dB', parent=None):
+                 compare_cb=None, undo_cb=None, unit='dB', parent=None):
         super().__init__(parent)
+        self._undo_cb = undo_cb
         self._apply_cb = apply_cb
         self._compare_cb = compare_cb
         self._unit = unit
@@ -414,9 +437,10 @@ class MatrixDialog(QDialog):
         self._radial.set_unit(unit)
         lay.addWidget(self._radial, 1)
         bar = QHBoxLayout()
-        b_mir = QPushButton("Reemplazar selección por espejo")
-        b_und = QPushButton("Deshacer reemplazo")
-        b_cln = QPushButton("Limpiar selección")
+        self._b_rep = QPushButton("Reemplazar…")
+        self._b_rep.setToolTip("Ctrl + clic en las celdas a reemplazar (en orden). Luego: Reemplazar.")
+        self._b_rep.clicked.connect(self._open_menu)
+        bar.addWidget(self._b_rep)
         b_cmp = QPushButton("Comparar selección")
         b_cmp.setToolTip("Abre la comparación de las mediciones de las celdas seleccionadas.")
         def _cmp():
@@ -427,29 +451,10 @@ class MatrixDialog(QDialog):
                 self._compare_cb(pairs)
         b_cmp.clicked.connect(_cmp)
         bar.addWidget(b_cmp)
-        b_app = QPushButton("Aplicar al audio (persistente)")
-        b_app.setToolTip("Escribe los reemplazos en la señal de cada micrófono en memoria. Después, Calcular "
-                         "usa esos datos. Se pierden al cerrar la app si no se guarda la sesión.")
-        b_app.setEnabled(apply_cb is not None)
-        def _apply():
-            pairs = self._radial.pending_pairs()
-            if not pairs:
-                self._status.setText("No hay reemplazos pendientes."); return
-            n = self._apply_cb(pairs)
-            self._status.setText(n if isinstance(n, str) else
-                                 f"Aplicados {len(pairs)} reemplazos al audio. Presioná Calcular para recalcular.")
-            if not isinstance(n, str):
-                self._radial.clear_overrides()
-        b_app.clicked.connect(_apply)
-        bar.addWidget(b_app)
-        b_mir.setToolTip("Ctrl + clic selecciona celdas. Cada una se reemplaza por su medición espejo izquierda-derecha.")
-        b_mir.clicked.connect(lambda: self._status.setText(f"Reemplazadas {self._radial.replace_selected_mirror()} celdas por espejo."))
-        b_und.clicked.connect(lambda: self._status.setText(f"Deshechos {self._radial.undo_selected()} reemplazos."))
-        b_cln.clicked.connect(self._radial.clear_selection)
-        for b in (b_mir, b_und, b_cln):
-            bar.addWidget(b)
         bar.addStretch(1)
         lay.addLayout(bar)
+        self._pick_dest = None        # modo "Elegir tomas": celdas a reemplazar (en orden)
+        self._menu = None
         if on_click is not None:
             lay.addWidget(_PlayerBar())
         row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -457,6 +462,66 @@ class MatrixDialog(QDialog):
         row.accepted.connect(self.accept)
         lay.addWidget(row)
         self._update_title()
+
+    def _open_menu(self):
+        self._menu = ReplaceMenu(self)
+        self._menu.exec()
+
+    def _replace_action(self, mode):
+        """Acción del botón del menú. Devuelve el texto que debe tener el botón."""
+        if mode == 'mirror':
+            keys = self._radial.ordered_keys()
+            if not keys:
+                self._status.setText("Seleccioná las celdas a reemplazar (Ctrl + clic)."); return "Reemplazar"
+            self._radial.set_overrides(self._radial.mirror_map(keys))
+            self._status.setText(f"{len(keys)} celdas con espejo listas. Presioná Aplicar Reemplazo para aplicarlas al audio.")
+            return "Aplicar Reemplazo"
+        # 'pick': primero las destino, después las de origen (en el mismo orden)
+        if self._pick_dest is None:
+            keys = self._radial.ordered_keys()
+            if not keys:
+                self._status.setText("Seleccioná primero las celdas a reemplazar (Ctrl + clic)."); return "Reemplazar"
+            self._pick_dest = keys
+            self._radial.clear_selection()
+            self._status.setText(f"Destino: {len(keys)} celdas. Ahora Ctrl + clic en las tomas de origen, en orden, y volvé a Reemplazar.")
+            return "Reemplazar"
+        src = self._radial.ordered_keys()
+        if len(src) != len(self._pick_dest):
+            self._status.setText(f"Hay {len(self._pick_dest)} destinos y {len(src)} orígenes: tienen que coincidir.")
+            return "Reemplazar"
+        mapping = {}
+        for dst, sk in zip(self._pick_dest, src):
+            mapping[dst] = self._source_of(sk)
+        self._radial.set_overrides(mapping)
+        self._status.setText(f"{len(mapping)} reemplazos listos (orden de selección). Presioná Aplicar Reemplazo.")
+        return "Aplicar Reemplazo"
+
+    def _source_of(self, key):
+        """(θ, giro) de la toma de origen elegida en la matriz (su primera medición)."""
+        t, g, _ = self._radial._cells[key][1][0]
+        return (float(t), float(g))
+
+    def _apply_pending(self):
+        pairs = self._radial.pending_pairs()
+        if not pairs:
+            self._status.setText("No hay reemplazos pendientes."); return False
+        if self._apply_cb is None:
+            self._status.setText("No hay audio cargado para aplicar."); return False
+        n = self._apply_cb(pairs)
+        self._radial.clear_overrides()
+        self._pick_dest = None
+        self._status.setText(n if isinstance(n, str) else f"Aplicados {len(pairs)} reemplazos al audio.")
+        return True
+
+    def keyPressEvent(self, ev):
+        if ev.key() == Qt.Key.Key_Z and (ev.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            if self._radial._overrides:                       # pendientes: se descartan
+                self._radial.clear_overrides(); self._pick_dest = None
+                self._status.setText("Reemplazos pendientes descartados.")
+            elif self._undo_cb is not None:                   # aplicados: se deshace el último lote
+                self._status.setText(self._undo_cb())
+            return
+        super().keyPressEvent(ev)
 
     def _update_title(self):
         i = self._combo.currentData() or 0
@@ -486,3 +551,35 @@ class MatrixDialog(QDialog):
         i = self._combo.currentData() or 0
         self._radial.set_levels(self._levels3d[:, :, i])
         self._update_title()
+
+
+class ReplaceMenu(QDialog):
+    """Menú del botón Reemplazar: elegir zona espejo o elegir tomas, y el botón de acción."""
+    def __init__(self, owner):
+        super().__init__(owner)
+        self._owner = owner
+        self.setWindowTitle("Reemplazar")
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Reemplazar por:"))
+        self._mode = QComboBox()
+        self._mode.addItem("Zona espejo (lado opuesto, misma celda)", "mirror")
+        self._mode.addItem("Elegir tomas (en el orden de selección)", "pick")
+        lay.addWidget(self._mode)
+        self._act = QPushButton("Reemplazar")
+        self._act.clicked.connect(self._on_act)
+        lay.addWidget(self._act)
+        self._close = QPushButton("Cerrar")
+        self._close.clicked.connect(self.accept)
+        lay.addWidget(self._close)
+        if owner._radial._overrides:
+            self._act.setText("Aplicar Reemplazo")
+
+    def _on_act(self):
+        if self._act.text() == "Aplicar Reemplazo":
+            self._owner._apply_pending()
+            self.accept()
+            return
+        text = self._owner._replace_action(self._mode.currentData())
+        self._act.setText(text)
+        if text == "Aplicar Reemplazo":
+            self._mode.setEnabled(False)

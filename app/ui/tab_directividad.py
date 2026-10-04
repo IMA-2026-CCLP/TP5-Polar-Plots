@@ -958,16 +958,30 @@ class TabDirectividad(QWidget):
                     continue
             return None
         n = 0
+        snap = []                                  # copia de lo que se pisa, para poder deshacer
         for t_d, g_d, t_s, g_s in pairs:
             i_d, j_d = _idx(ma.angles, g_d), _idx(ma.thetas, t_d)
             i_s, j_s = _idx(ma.angles, g_s), _idx(ma.thetas, t_s)
             if None in (i_d, j_d, i_s, j_s):
                 continue
+            snap.append((i_d, j_d, tensor[i_d, j_d, :].copy()))
             tensor[i_d, j_d, :] = tensor[i_s, j_s, :]
             n += 1
+        if snap:
+            self._undo_stack = getattr(self, '_undo_stack', []) + [snap]
         log = getattr(ma, 'mirror_log', [])
         ma.mirror_log = log + [p for p in pairs]
         return f"Aplicados {n} reemplazos al audio. Presioná Calcular para recalcular."
+
+    def undo_replacements(self):
+        """Deshace el último lote de reemplazos aplicados al audio (Ctrl+Z)."""
+        stack = getattr(self, '_undo_stack', [])
+        if not stack or self._ma is None or getattr(self._ma, 'tensor', None) is None:
+            return "Nada para deshacer."
+        snap = stack.pop()
+        for i_d, j_d, old in snap:
+            self._ma.tensor[i_d, j_d, :] = old
+        return f"Deshecho el último reemplazo ({len(snap)} tomas)."
 
     def matrix_bands(self):
         """(niveles[azimut, elevación, banda], azimuts, elevaciones, frecuencias Hz, origen) para la
