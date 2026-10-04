@@ -105,6 +105,57 @@ class _Heatmap(QWidget):
         p.end()
 
 
+def _fmt_ms(ms: int) -> str:
+    s = max(0, int(ms // 1000))
+    return f"{s // 60:02d}:{s % 60:02d}"
+
+
+class _PlayerBar(QWidget):
+    """Barra de reproducción estándar: play/pausa, deslizador de posición y tiempo."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QSlider
+        from PyQt6.QtMultimedia import QMediaPlayer
+        from ui.audio_play import player
+        self._pl = player()
+        self._btn = QPushButton("▶")
+        self._btn.setFixedWidth(36)
+        self._btn.clicked.connect(self._toggle)
+        self._slider = QSlider(Qt.Orientation.Horizontal)
+        self._slider.setRange(0, 0)
+        self._slider.sliderMoved.connect(self._pl.setPosition)
+        self._time = QLabel("00:00 / 00:00")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self._btn)
+        row.addWidget(self._slider, 1)
+        row.addWidget(self._time)
+        self._pl.positionChanged.connect(self._on_pos)
+        self._pl.durationChanged.connect(self._on_dur)
+        self._pl.playbackStateChanged.connect(self._on_state)
+
+    def _toggle(self):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        if self._pl.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self._pl.pause()
+        else:
+            self._pl.play()
+
+    def _on_pos(self, ms):
+        if not self._slider.isSliderDown():
+            self._slider.setValue(ms)
+        self._time.setText(f"{_fmt_ms(ms)} / {_fmt_ms(self._pl.duration())}")
+
+    def _on_dur(self, ms):
+        self._slider.setRange(0, ms)
+        self._time.setText(f"{_fmt_ms(self._pl.position())} / {_fmt_ms(ms)}")
+
+    def _on_state(self, st):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        self._btn.setText("❚❚" if st == QMediaPlayer.PlaybackState.PlayingState else "▶")
+
+
 class MatrixDialog(QDialog):
     def _stop_audio(self):
         from ui.audio_play import stop
@@ -131,13 +182,10 @@ class MatrixDialog(QDialog):
             return msg
         self._heat = _Heatmap(levels, azimuths, thetas, source, on_click=_click if on_click else None)
         lay.addWidget(self._heat, 1)
-        bar = QHBoxLayout()
         self._status = QLabel("Click en una celda para escuchar esa toma.")
-        bar.addWidget(self._status, 1)
-        b_stop = QPushButton("■ Detener")
-        b_stop.clicked.connect(self._stop_audio)
-        bar.addWidget(b_stop)
-        lay.addLayout(bar)
+        lay.addWidget(self._status)
+        if on_click is not None:
+            lay.addWidget(_PlayerBar())
         row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         row.rejected.connect(self.reject)
         row.accepted.connect(self.accept)

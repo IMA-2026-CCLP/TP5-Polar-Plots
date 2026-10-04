@@ -1267,11 +1267,21 @@ class TabDirectividad(QWidget):
         tensor = getattr(ma, 'tensor', None) if ma is not None else None
         if tensor is None:
             return "Esta sesión no tiene el audio cargado (es un .cclp). Cargá los audios para escuchar."
-        ia = int(np.argmin(np.abs(np.asarray(ma.angles, dtype=float) - azimuth)))
-        it = int(np.argmin(np.abs(np.asarray(ma.thetas, dtype=float) - theta)))
+        # sólo entradas numéricas (el micrófono de referencia 'ref' no tiene elevación)
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+        ang = [(i, _num(v)) for i, v in enumerate(ma.angles)]
+        ang = [(i, v) for i, v in ang if v is not None]
+        ths = [(j, _num(v)) for j, v in enumerate(ma.thetas)]
+        ths = [(j, v) for j, v in ths if v is not None]
+        ia, va = min(ang, key=lambda t: abs(t[1] - azimuth))
+        it, vt = min(ths, key=lambda t: abs(t[1] - theta))
         from ui.audio_play import play_signal
         play_signal(tensor[ia, it, :], ma.sr)
-        return f"Reproduciendo azimut {float(ma.angles[ia]):.0f}°, elevación {float(ma.thetas[it]):.0f}°"
+        return f"Reproduciendo azimut {va:.0f}°, elevación {vt:.0f}°"
 
     def _on_error(self, msg: str):
         self.log.emit(f"[ERROR]\n{msg}")
