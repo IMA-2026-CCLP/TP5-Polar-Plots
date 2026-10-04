@@ -12,7 +12,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QCheckBox, QScrollArea,
     QGridLayout, QFrame, QProgressDialog, QFileDialog, QPushButton, QGroupBox,
-    QMenu, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
+    QMenu, QDialog, QDialogButtonBox, QFormLayout, QComboBox, QStackedWidget,
     QColorDialog, QInputDialog, QSplitter, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
@@ -40,12 +40,19 @@ _VIEW_CLASS_BY_MODE = {
 }
 
 
-def _view_class(mode: str):
-    """Clase de la vista del modo. Superficie 3D y Esfera dependen del motor elegido
-    (Opciones ▸ Gráficos ▸ Motor 3D): GL3DView (OpenGL, por defecto) o BalloonView (Plotly)."""
+def _engine_key(mode: str) -> str:
+    """Clave de la vista en el apilado: el motor elegido para 3D, o el propio modo."""
     if mode in ("3d", "sphere"):
         from ui.export_utils import get_engine_3d
-        if get_engine_3d() == "plotly":
+        return get_engine_3d()
+    return mode
+
+
+def _view_class(mode: str, engine: str | None = None):
+    """Clase de la vista del modo. Superficie 3D y Esfera dependen del motor (Opciones ▸ Gráficos ▸
+    Motor 3D): GL3DView (OpenGL, por defecto) o BalloonView (Plotly)."""
+    if mode in ("3d", "sphere"):
+        if (engine or _engine_key(mode)) == "plotly":
             from ui.balloon_view import BalloonView
             return BalloonView
         return GL3DView
@@ -283,16 +290,27 @@ class _ViewSection(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        self.view = self._make_view()
-        lay.addWidget(self.view, 1)
+        # Las dos vistas de Superficie/Esfera (OpenGL y Plotly) viven apiladas: cambiar de motor
+        # sólo cambia cuál se muestra. Crear/destruir un QWebEngineView a mitad de sesión dejaba
+        # el gráfico Plotly en negro.
+        self._stack = QStackedWidget()
+        lay.addWidget(self._stack, 1)
+        self._views: dict = {}
+        self.view = self._add_view(_engine_key(self._mode))
 
         self.setMinimumHeight(80)
 
-    def _make_view(self):
-        """Crea la vista del modo (en 3D según el motor elegido) y la deja configurada igual que
-        antes: estilo, rango de dB, fuente y click derecho. Se usa al crear la sección y al
-        cambiar de motor (set_engine)."""
-        cls = _view_class(self._mode)
+    def _add_view(self, key: str):
+        """Crea la vista `key` (ver _engine_key), la deja configurada y la agrega al apilado."""
+        view = self._make_view(key)
+        self._views[key] = view
+        self._stack.addWidget(view)
+        return view
+
+    def _make_view(self, key: str):
+        """Crea la vista del modo y la deja configurada igual que antes: estilo, rango de dB,
+        fuente y click derecho."""
+        cls = _view_class(self._mode, key if key in ('opengl', 'plotly') else None)
         view = cls()
         view.set_view_mode(self._mode)
         view.log.connect(self.log)
@@ -308,18 +326,13 @@ class _ViewSection(QWidget):
         return view
 
     def set_engine(self, engine: str):
-        """Cambia el motor de Superficie 3D/Esfera: reemplaza la vista (los datos se vuelven a
-        empujar desde TabDirectividad._refresh_display)."""
+        """Cambia el motor de Superficie 3D/Esfera mostrando la vista de ese motor (se crea la
+        primera vez). Los datos se empujan desde TabDirectividad._refresh_display."""
         if self._mode not in ("3d", "sphere"):
             return
-        old = self.view
-        new = self._make_view()
-        lay = self.layout()
-        idx = lay.indexOf(old)
-        lay.removeWidget(old)
-        old.deleteLater()
-        lay.insertWidget(idx, new, 1)
-        self.view = new
+        view = self._views.get(engine) or self._add_view(engine)
+        self._stack.setCurrentWidget(view)
+        self.view = view
 
     def set_zoomed(self, on: bool):
         self._zoomed = on
