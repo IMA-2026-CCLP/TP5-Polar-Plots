@@ -162,11 +162,6 @@ def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
     return new_lev, new_th
 
 
-def eu_colorbar_pt() -> float:
-    from ui.export_utils import get_colorbar_pt
-    return get_colorbar_pt()
-
-
 def _colorscale_stops(name: str):
     """(t_stops, rgb_stops 0–1) desde COLORSCALES (listas [pos, color] de plot/balloon.py,
     mismas que usa Plotly) — listo para np.interp."""
@@ -625,6 +620,11 @@ class GL3DView(QWidget):
             items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True))
         return items
 
+    def _colorbar_pt(self) -> float:
+        """Tamaño (pt) de la escala: Propiedades ▸ Escala (por gráfico); si no hay, Opciones ▸ Imágenes."""
+        from ui.export_utils import get_colorbar_pt
+        return float(self._style.get('colorbar_pt', get_colorbar_pt()))
+
     def _panel_bar_h(self) -> int:
         """Alto de la barra de color en pantalla: proporcional al panel (en 4 paneles es chica,
         en 'ver en grande' crece), siempre dentro de un rango legible."""
@@ -635,7 +635,9 @@ class GL3DView(QWidget):
         """Barra de color estilo Plotly (como la v4): barra alta y angosta con marco fino, marcas
         y valores en números redondos dentro del rango, y "dB" girado al costado. `s` escala todo
         (para el export, ver export_image); en pantalla s=1."""
-        fs = font_px if font_px else 12 * s     # tamaño del texto en píxeles de esta imagen
+        if font_px is None:       # en pantalla: pt de Propiedades ▸ Escala (96 dpi)
+            font_px = self._colorbar_pt() / 72.0 * 96
+        fs = font_px * s
         bar_w = int(16 * s)
         bar_h = int(bar_h if bar_h is not None else 300 * s)
         pad = int(8 * s)
@@ -772,7 +774,7 @@ class GL3DView(QWidget):
                     k = W / max(1, self._gl.width())   # _px_scale ya volvió a 1.0 acá
                     # Altura REAL de la imagen capturada (puede no coincidir con H pedido).
                     pad = int(8 * k)
-                    font_px = eu_colorbar_pt() / 72.0 * dpi
+                    font_px = self._colorbar_pt() / 72.0 * dpi
                     cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=img.height() - 2 * pad,
                                               font_px=font_px)
                     gap = int(12 * k)

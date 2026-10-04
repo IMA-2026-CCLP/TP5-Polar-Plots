@@ -58,11 +58,13 @@ _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear"},
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear",
+                 "colorbar_pt": 12.0},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear"},
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear",
+                 "colorbar_pt": 12.0},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -463,6 +465,13 @@ class _ViewSection(QWidget):
                 )
                 form.addRow("Distribución de color:", combo_dist)
                 fields['color_distribution'] = combo_dist
+                spin_cb = _NumEdit()
+                spin_cb.setRange(6, 40)
+                spin_cb.setDecimals(1)
+                spin_cb.setValue(self._style.get('colorbar_pt', 12.0))
+                spin_cb.setToolTip("Tamaño (pt) de los valores de la escala de colores, en pantalla y en las imágenes exportadas.")
+                form.addRow("Tamaño de texto de la escala (pt):", spin_cb)
+                fields['colorbar_pt'] = spin_cb
             outer.addWidget(box)
 
         if self._mode in ("3d", "sphere"):
@@ -682,6 +691,8 @@ class _ViewSection(QWidget):
             new_style = dict(self._style)
             if 'color_distribution' in fields:
                 new_style['color_distribution'] = fields['color_distribution'].currentData()
+            if 'colorbar_pt' in fields:
+                new_style['colorbar_pt'] = fields['colorbar_pt'].value()
 
             if self._mode in ("3d", "sphere"):
                 self._axis_color = fields['grid_color'].color_hex
