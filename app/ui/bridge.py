@@ -29,6 +29,7 @@ class Bridge(QObject):
     sig_save_session_as    = pyqtSignal()       # ídem, siempre pregunta la ruta
     sig_load_session       = pyqtSignal()
     sig_apply_hpf          = pyqtSignal(float)
+    sig_corr_recalc        = pyqtSignal()
     sig_align_takes        = pyqtSignal(float, float, object, float)
     sig_align_ref          = pyqtSignal(object)
     sig_align_preview      = pyqtSignal(float, float, object)
@@ -52,6 +53,7 @@ class Bridge(QObject):
             'tab':        0,
             'theta':      'ref',  'az':        'Todos',
             'envelope':   True,   'db':         True,   'matrix': True,
+            'corr_ref':   'ref',  'corr_view':  '0',
             'smooth':     20.0,   'ymin':       -60.0,  'ymax': 0.0,
             'hpf_hz':     200.0,
             'onset':      1.0,    'thresh':    -40.0,   'window_ms': 50.0,
@@ -124,6 +126,9 @@ class Bridge(QObject):
         self.sig_plot_params.emit(theta, azimuth, env, db, yrange, smooth)
 
     @pyqtSlot()
+    def corrRecalc(self):
+        self.sig_corr_recalc.emit()
+
     def applyHpf(self):
         self.sig_apply_hpf.emit(float(self.state.get('hpf_hz', 200.0)))
 

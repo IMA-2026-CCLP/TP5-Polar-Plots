@@ -169,7 +169,8 @@ class MainWindow(QMainWindow):
         self.view_prepro.ma_updated.connect(self._on_ma_ready)
         self.view_prepro.log.connect(self._append_log)
         self.view_prepro.view_chosen.connect(self._on_view_choice)
-        self.view_prepro.corr_requested.connect(self._on_corr_request)
+        self.ribbon._b.sig_corr_recalc.connect(self._on_corr_recalc)
+        self.view_prepro._editor.set_corr_offset(self._corr_offset_db)
         QTimer.singleShot(0, self.ribbon._b.emitPlotParams)   # al abrir: matriz radial (esqueleto si no hay datos)
         self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
 
@@ -388,6 +389,24 @@ class MainWindow(QMainWindow):
         if m is not None:
             levels, az, th, freqs, src, unit = m
             win.refresh(levels, az, th, freqs, source=src, unit=unit)
+
+    def _corr_offset_db(self):
+        """Corrección por toma en dB por azimut (banda elegida), si está activada en el panel izquierdo."""
+        if str(self.ribbon._b.state.get('corr_view', '0')) != '1':
+            return None
+        ma = self.view_dir._ma
+        delta = getattr(ma, 'dir_delta', None)
+        if delta is None:
+            return None
+        bi = min(self.view_dir._current_band_idx, delta.shape[1] - 1)
+        return delta[:, bi]
+
+    def _on_corr_recalc(self):
+        """Panel izquierdo ▸ Corrección por toma ▸ Recalcular: usa la referencia elegida y recalcula."""
+        ref = str(self.ribbon._b.state.get('corr_ref', 'ref'))
+        self.view_dir.corr_ref_th = 'ref' if ref == 'ref' else int(float(ref))
+        self._append_log(f"[Corrección] Referencia: {ref}. Recalculando…")
+        self.ribbon._b.computeDir()
 
     def _on_corr_request(self):
         """Corrección por toma: elige el micrófono de referencia (paso 2) y recalcula la directividad."""

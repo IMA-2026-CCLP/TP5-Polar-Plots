@@ -115,6 +115,17 @@ class WaveformEditorWidget(QWidget):
 
     # ── API pública ─────────────────────────────────────────────────────────
 
+    def set_corr_offset(self, fn):
+        """fn() → desplazamiento dB por azimut (corrección por toma) o None."""
+        self._corr_offset = fn
+
+    def _off(self, i_az):
+        fn = getattr(self, '_corr_offset', None)
+        if not self._db or fn is None:
+            return 0.0
+        arr = fn()
+        return float(arr[i_az]) if arr is not None and i_az < len(arr) else 0.0
+
     def set_ma(self, ma):
         self._ma = ma
         self._onset_line = None
@@ -198,6 +209,7 @@ class WaveformEditorWidget(QWidget):
             # overlay de todas las tomas para un theta fijo
             for i in range(ma.n_angles):
                 t, y = self._prepare(ma.tensor[i, i_th, :])
+                y = y + self._off(i)
                 ys.append(y)
                 col   = _OVERLAY_PALETTE[i % len(_OVERLAY_PALETTE)]
                 curve = self._plot.plot(t, y, pen=pg.mkPen(color=(*col, 150), width=1))
@@ -211,6 +223,7 @@ class WaveformEditorWidget(QWidget):
                 return
             for i_th_idx in range(ma.n_thetas):
                 t, y = self._prepare(ma.tensor[i_az, i_th_idx, :])
+                y = y + self._off(i_az)
                 ys.append(y)
                 col   = _OVERLAY_PALETTE[i_th_idx % len(_OVERLAY_PALETTE)]
                 curve = self._plot.plot(t, y, pen=pg.mkPen(color=(*col, 150), width=1))
@@ -222,6 +235,7 @@ class WaveformEditorWidget(QWidget):
             except Exception:
                 return
             t, y = self._prepare(ma.tensor[i_az, i_th, :])
+            y = y + self._off(i_az)
             ys.append(y)
             p = _t.current()
             self._plot.plot(t, y, pen=pg.mkPen(p['accent'], width=1))

@@ -72,6 +72,7 @@ class NativeRibbon(QWidget):
     sig_save_session_as = pyqtSignal()
     sig_load_session    = pyqtSignal()
     sig_apply_hpf        = pyqtSignal(float)
+    sig_corr_recalc      = pyqtSignal()
     sig_align_takes      = pyqtSignal(float, float, object, float)
     sig_align_preview    = pyqtSignal(float, float, object)
     sig_align_ref        = pyqtSignal(object)
@@ -130,7 +131,7 @@ class NativeRibbon(QWidget):
         for name in (
             'tab_changed', 'sig_load_audio', 'sig_edit_patterns',
             'sig_save_session', 'sig_save_session_as', 'sig_load_session',
-            'sig_apply_hpf', 'sig_align_takes',
+            'sig_apply_hpf', 'sig_corr_recalc', 'sig_align_takes',
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
             'sig_save_mask', 'sig_load_mask', 'sig_compute_dir',
@@ -560,6 +561,13 @@ class NativeRibbon(QWidget):
                                     lambda: b.applyHpf(), 'hpf', enabled=False))]),
             ("Calibración", [
                 (None, self._tool('calibrar'))]),
+            ("Corrección por toma", [
+                ("Referencia", self._combo('corr_ref', 90, "Micrófono de referencia de la corrección de emisión por toma (paso 2)",
+                                           [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)])),
+                ("Aplicar en dB", self._combo('corr_view', 90, "Muestra la corrección por toma también en las vistas dB vs tiempo",
+                                              [('No', '0'), ('Sí', '1')], lambda: b.emitPlotParams())),
+                (None, self._button("Recalcular", "Recalcula la directividad con esta referencia (la matriz se actualiza)",
+                                    lambda: b.corrRecalc(), 'corr', enabled=True))]),
         ])
 
     # ── Alineaciones (opcionales): diálogos abiertos desde Herramientas ────
