@@ -3,7 +3,7 @@
 ; Requiere que ya exista dist\PolarPatternAnalyzer\ (build_exe.bat / PyInstaller).
 
 #ifndef AppVersion
-  #define AppVersion "5.1.25"
+  #define AppVersion "5.2.0"
 #endif
 #define AppName "Polar Pattern CCLP"
 #define AppExe  "PolarPatternAnalyzer.exe"

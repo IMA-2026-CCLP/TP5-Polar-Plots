@@ -220,6 +220,14 @@ class MainWindow(QMainWindow):
         """Opciones ▸ Gráficos ▸ …: el mismo modal de Propiedades del gráfico (o el de Imágenes).
         'smoothing' (Herramientas ▸ Suavizado…) es aparte: una sola configuración común a Polar 2D,
         Superficie 3D y Esfera, no un modal de Propiedades de un gráfico en particular."""
+        if kind == "data_matrix":
+            from ui.matrix_dialog import MatrixDialog
+            m = self.view_dir.current_matrix()
+            if m is None:
+                self._append_log("[Matriz] No hay datos de directividad calculados.")
+                return
+            MatrixDialog(*m, parent=self).exec()
+            return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
             ImageOptionsDialog(self).exec()

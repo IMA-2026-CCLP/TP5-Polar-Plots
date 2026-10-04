@@ -914,6 +914,16 @@ class TabDirectividad(QWidget):
         from ui.export_utils import get_smoothing_settings
         self.apply_smoothing_settings(get_smoothing_settings())   # última config guardada (Herramientas ▸ Suavizado…)
 
+    def current_matrix(self):
+        """(niveles[azimut, elevación], azimuts, elevaciones, rótulo de la banda) de la banda mostrada."""
+        if self._full_levels is None:
+            return None
+        bi = min(self._current_band_idx, self._full_levels.shape[2] - 1)
+        hz = float(self._full_bands[bi])
+        from core.data_store import freq_label
+        return (self._full_levels[:, :, bi], self._full_azimuths, self._full_thetas,
+                f"banda {freq_label(hz)} Hz")
+
     def apply_smoothing_settings(self, values: dict):
         """Una sola configuración de suavizado para Polar 2D, Superficie 3D y Esfera (Herramientas
         ▸ Suavizado…, ver ui/options_dialogs.py::SmoothingOptionsDialog) — reemplaza los paneles
