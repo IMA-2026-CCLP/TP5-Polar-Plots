@@ -7,6 +7,7 @@ from PyQt6.QtCore import QUrl
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 _player = None      # se mantiene vivo mientras suena
+_output = None      # salida de audio: DEBE vivir (si no, el reproductor queda sin destino y no suena)
 _last_file = None   # WAV de la reproducción anterior (se borra al empezar la siguiente)
 
 
@@ -42,7 +43,10 @@ def stop() -> None:
 def player() -> QMediaPlayer:
     """Reproductor compartido (para la barra de reproducción del diálogo)."""
     global _player
+    global _output
     if _player is None:
         _player = QMediaPlayer()
-        _player.setAudioOutput(QAudioOutput())
+        _output = QAudioOutput()
+        _output.setVolume(1.0)
+        _player.setAudioOutput(_output)
     return _player
