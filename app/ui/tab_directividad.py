@@ -97,12 +97,13 @@ class _ComputeAllWorker(QThread):
     all_done          = pyqtSignal()
     error             = pyqtSignal(str)
 
-    def __init__(self, ma, bands, ref_az, ref_th, parent=None):
+    def __init__(self, ma, bands, ref_az, ref_th, corr_ref='ref', parent=None):
         super().__init__(parent)
         self._ma     = ma
         self._bands  = bands
         self._ref_az = ref_az
         self._ref_th = ref_th
+        self._corr_ref = corr_ref
         self._item_index = 0
         self._item_total = 1
 
@@ -142,7 +143,7 @@ class _ComputeAllWorker(QThread):
                     bands          = self._bands,
                     ref_azimuth    = self._ref_az,
                     ref_theta_plot = self._ref_th,
-                    ref_theta      = self.corr_ref_th,
+                    ref_theta      = self._corr_ref,
                 )
                 self.log.emit(f"[Directividad] {label} — OK")
 
@@ -916,7 +917,7 @@ class TabDirectividad(QWidget):
         self._full_levels    = None
         self.source_file: str | None = None   # archivo .cclp cargado (None = calculado desde audio)
         self.on_data_changed = None
-        self.corr_ref_th = 'ref'              # micrófono de referencia de la corrección por toma (paso 2)           # callback: la matriz radial se pone al día al cambiar los datos
+        self.corr_ref_th = 'ref'              # micrófono de referencia de la corrección por toma (paso 2)
         self._full_azimuths  = None
         self._full_thetas    = None
         self._full_bands     = None
@@ -1431,7 +1432,7 @@ class TabDirectividad(QWidget):
 
         # El progreso se ve en la barra de estado (sin diálogo modal: una ventana extra que aparece y
         # desaparece hacía parpadear la aplicación).
-        self._worker = _ComputeAllWorker(self._ma, bands, ref_az, ref_th)
+        self._worker = _ComputeAllWorker(self._ma, bands, ref_az, ref_th, corr_ref=self.corr_ref_th)
         self._worker.log.connect(self.log)
         self._worker.all_done.connect(self._on_all_done)
         self._worker.error.connect(self._on_error)
