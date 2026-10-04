@@ -513,6 +513,7 @@ class GL3DView(QWidget):
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
+        items += self._make_box_items()
         if self._show_hemisphere_grid:
             items += self._make_grid_items()
         if self._cut_visible:
@@ -598,6 +599,31 @@ class GL3DView(QWidget):
             items.append(gl.GLTextItem(pos=np.array(vec, dtype=float) * _LABEL_OFFSET, text=label, color=color,
                                         font=QFont("Segoe UI", label_size)))
         return items
+
+    def _make_box_items(self) -> list:
+        """Caja de fondo con grilla en los planos XY (piso, z=0) y XZ / YZ (paredes en y=-1 y x=-1),
+        como la caja de Plotly. Mismo color y grosor que la grilla de Propiedades ▸ Ejes / grilla."""
+        qc = QColor(self._axis_color or '#8a8f9a')
+        color = (qc.redF(), qc.greenF(), qc.blueF(), 0.45)
+        width = float(self._axis_width or 1) * self._px_scale
+        t = np.linspace(-1.0, 1.0, 9)
+        h = np.linspace(0.0, 1.0, 5)
+        lines = []
+        for x in t:                                   # piso: líneas paralelas a Y
+            lines.append([[x, -1, 0], [x, 1, 0]])
+        for y in t:                                   # piso: líneas paralelas a X
+            lines.append([[-1, y, 0], [1, y, 0]])
+        for x in t:                                   # pared y=-1: líneas verticales y horizontales
+            lines.append([[x, -1, 0], [x, -1, 1]])
+        for z in h:
+            lines.append([[-1, -1, z], [1, -1, z]])
+        for y in t:                                   # pared x=-1
+            lines.append([[-1, y, 0], [-1, y, 1]])
+        for z in h:
+            lines.append([[-1, -1, z], [-1, 1, z]])
+        return [gl.GLLinePlotItem(pos=np.array(seg, dtype=float), color=color, width=width,
+                                  antialias=True, mode='lines', glOptions='translucent')
+                for seg in lines]
 
     def _make_grid_items(self) -> list:
         """Círculos de referencia (latitud/longitud) — ver nota de diseño en el docstring
