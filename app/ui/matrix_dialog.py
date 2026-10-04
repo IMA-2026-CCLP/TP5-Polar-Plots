@@ -53,6 +53,9 @@ class _Radial(QWidget):
         self._cells = radial_cells(levels, azimuths, thetas)
         self._source = source
         self._on_click = on_click
+        self._zoom = 1.0          # zoom con la rueda del mouse
+        self._cx = self._cy = None  # centro del mallado (se mueve al arrastrar / hacer zoom)
+        self._drag = None
         vals = [v for v, _ in self._cells.values()]
         self._vmin = min(vals) if vals else -12.0
         self._vmax = max(vals) if vals else 0.0
@@ -68,7 +71,35 @@ class _Radial(QWidget):
         self.update()
 
     def _geom(self):
-        return self.width() / 2, self.height() / 2 + 6, min(self.width(), self.height()) * 0.42
+        if self._cx is None:
+            self._cx, self._cy = self.width() / 2, self.height() / 2 + 6
+        return self._cx, self._cy, min(self.width(), self.height()) * 0.42 * self._zoom
+
+    def wheelEvent(self, ev):
+        factor = 1.2 if ev.angleDelta().y() > 0 else 1 / 1.2
+        new_zoom = min(8.0, max(0.5, self._zoom * factor))
+        if new_zoom == self._zoom:
+            return
+        cx, cy, R = self._geom()
+        px, py = ev.position().x(), ev.position().y()
+        wx, wy = (px - cx) / R, (py - cy) / R             # punto bajo el cursor, en unidades del mallado
+        self._zoom = new_zoom
+        R2 = min(self.width(), self.height()) * 0.42 * self._zoom
+        self._cx, self._cy = px - wx * R2, py - wy * R2   # el punto bajo el cursor no se mueve
+        self.update()
+
+    def mouseDoubleClickEvent(self, ev):
+        self._zoom = 1.0; self._cx = self._cy = None
+        self.update()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.RightButton:
+            self._drag = ev.position()
+            return
+        self._click_at(ev)
+
+    def mouseReleaseEvent(self, ev):
+        self._drag = None
 
     def _color(self, v):
         t = min(1.0, max(0.0, (v - self._vmin) / ((self._vmax - self._vmin) or 1.0)))
@@ -124,6 +155,12 @@ class _Radial(QWidget):
         p.end()
 
     def mouseMoveEvent(self, ev):
+        if self._drag is not None:                        # arrastre con botón derecho: mover el mallado
+            d = ev.position() - self._drag
+            self._cx += d.x(); self._cy += d.y()
+            self._drag = ev.position()
+            self.update()
+            return
         key = self._key_at(ev.position())
         if key is None or key not in self._cells:
             QToolTip.hideText(); return
@@ -135,7 +172,7 @@ class _Radial(QWidget):
             lines.append(f"⚠ diferencia > {THR_DB:g} dB entre mediciones")
         QToolTip.showText(ev.globalPosition().toPoint(), chr(10).join(lines), self)
 
-    def mousePressEvent(self, ev):
+    def _click_at(self, ev):
         key = self._key_at(ev.position())
         if key and key in self._cells and self._on_click is not None:
             _, ms = self._cells[key]
