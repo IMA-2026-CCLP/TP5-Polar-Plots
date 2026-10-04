@@ -65,7 +65,7 @@ class _Heatmap(QWidget):
             name = os.path.basename(self._source) if self._source else "cálculo desde audio (sin archivo)"
             full = self._source or "—"
         v = self._L[i, j]
-        text = (f"Archivo: {name}\n{full}\n"
+        text = (f"Archivo: {name}\n"
                 f"Azimut: {self._az[i]:.0f}°   Elevación: {self._th[j]:.0f}°\n"
                 f"Nivel: {v:.1f} dB" if np.isfinite(v) else f"Archivo: {name}\nSin dato")
         QToolTip.showText(ev.globalPosition().toPoint(), text, self)
