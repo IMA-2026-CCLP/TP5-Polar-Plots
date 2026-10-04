@@ -671,14 +671,14 @@ class GL3DView(QWidget):
         label_w = int(fs * 3.4)
         title_w = int(fs * 1.6)
         gap = int(fs * 0.3)
-        w = bar_w + tick_len + gap + label_w + title_w
+        w = title_w + bar_w + tick_len + gap + label_w
         h = bar_h + 2 * pad
         from PyQt6.QtGui import QPainter, QFont as _QFont, QPen
         from PyQt6.QtCore import Qt as _Qt
         ts, rgbs = _colorscale_stops(self._colorscale)
         img = QImage(w, h, QImage.Format.Format_ARGB32)
         img.fill(QColor(0, 0, 0, 0))
-        x0 = 0
+        x0 = title_w
         for y in range(bar_h):
             t = 1.0 - y / (bar_h - 1)
             r = float(np.interp(t, ts, rgbs[:, 0]))
@@ -712,13 +712,9 @@ class GL3DView(QWidget):
             p.drawText(x0 + bar_w + tick_len + gap, int(y - fs * 0.6), label_w, int(fs * 1.2),
                        _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, label)
             v += step
-        # título "dB" girado, a la derecha de los valores (como la v4)
-        p.save()
-        p.translate(w - title_w * 0.3, h / 2)
-        p.rotate(90)
-        p.drawText(int(-bar_h / 2), int(-title_w * 0.6), bar_h, int(title_w),
-                   _Qt.AlignmentFlag.AlignCenter, "dB")
-        p.restore()
+        # "dB" horizontal, a la izquierda de la barra, arriba (pegado a la barra)
+        p.drawText(0, pad, x0 - gap, int(fs * 1.2),
+                   _Qt.AlignmentFlag.AlignRight | _Qt.AlignmentFlag.AlignVCenter, "dB")
         p.end()
         return img
 
