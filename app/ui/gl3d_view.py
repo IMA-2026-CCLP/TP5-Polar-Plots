@@ -612,20 +612,23 @@ class GL3DView(QWidget):
         return items
 
     def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0) -> QImage:
-        """Barra de color vertical con 7 valores (dB) al lado. Tiene margen arriba y abajo para
-        que los números de los extremos no se recorten. `s` escala todo (para el export, ver
-        export_image); en pantalla s=1."""
-        bar_w, bar_h = int(18 * s), int(220 * s)
-        pad = int(10 * s)
-        label_w = int(52 * s)
-        gap = int(5 * s)
-        w = bar_w + gap + label_w
+        """Barra de color estilo Plotly (como la v4): barra alta y angosta con marco fino, marcas
+        y valores en números redondos dentro del rango, y "dB" girado al costado. `s` escala todo
+        (para el export, ver export_image); en pantalla s=1."""
+        bar_w, bar_h = int(22 * s), int(300 * s)
+        pad = int(12 * s)
+        tick_len = int(5 * s)
+        label_w = int(46 * s)
+        title_w = int(20 * s)
+        gap = int(4 * s)
+        w = bar_w + tick_len + gap + label_w + title_w
         h = bar_h + 2 * pad
-        from PyQt6.QtGui import QPainter, QFont as _QFont
+        from PyQt6.QtGui import QPainter, QFont as _QFont, QPen
         from PyQt6.QtCore import Qt as _Qt
         ts, rgbs = _colorscale_stops(self._colorscale)
         img = QImage(w, h, QImage.Format.Format_ARGB32)
         img.fill(QColor(0, 0, 0, 0))
+        x0 = 0
         for y in range(bar_h):
             t = 1.0 - y / (bar_h - 1)
             r = float(np.interp(t, ts, rgbs[:, 0]))
@@ -633,16 +636,38 @@ class GL3DView(QWidget):
             b = float(np.interp(t, ts, rgbs[:, 2]))
             color = QColor(int(r * 255), int(gg * 255), int(b * 255))
             for x in range(bar_w):
-                img.setPixelColor(x, pad + y, color)
+                img.setPixelColor(x0 + x, pad + y, color)
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        p.setPen(QColor("#1a1a1a"))
-        p.setFont(_QFont("Segoe UI", max(1, round(8 * s))))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # marco fino alrededor de la barra (como el colorbar de Plotly)
+        p.setPen(QPen(QColor("#444444"), max(1.0, 1.0 * s)))
+        p.setBrush(_Qt.BrushStyle.NoBrush)
+        p.drawRect(x0, pad, bar_w - 1, bar_h - 1)
+        # marcas y valores en números redondos dentro del rango (≈ 6 divisiones)
         span = (cmax - cmin) or 1.0
-        for value in np.linspace(cmax, cmin, 7):
-            y = pad + (cmax - value) / span * bar_h
-            p.drawText(bar_w + gap, int(y - 6 * s), label_w, int(12 * s),
-                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, f"{value:.1f}")
+        raw = span / 6.0
+        mag = 10 ** np.floor(np.log10(raw))
+        step = min((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw), default=10 * mag)
+        font = _QFont("Segoe UI", max(1, round(9 * s)))
+        p.setFont(font)
+        p.setPen(QColor("#1a1a1a"))
+        first = np.ceil(cmin / step) * step
+        v = first
+        while v <= cmax + 1e-9:
+            y = pad + (cmax - v) / span * bar_h
+            p.drawLine(x0 + bar_w, int(y), x0 + bar_w + tick_len, int(y))
+            label = f"{v:.0f}" if step >= 1 else f"{v:.1f}"
+            p.drawText(x0 + bar_w + tick_len + gap, int(y - 7 * s), label_w, int(14 * s),
+                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, label)
+            v += step
+        # título "dB" girado, a la derecha de los valores (como la v4)
+        p.save()
+        p.translate(w - title_w * 0.3, h / 2)
+        p.rotate(90)
+        p.drawText(int(-bar_h / 2), int(-title_w * 0.6), bar_h, int(title_w),
+                   _Qt.AlignmentFlag.AlignCenter, "dB")
+        p.restore()
         p.end()
         return img
 
