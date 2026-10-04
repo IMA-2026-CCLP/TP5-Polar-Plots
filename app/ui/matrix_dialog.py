@@ -9,8 +9,9 @@ _ML, _MT = 90, 60   # margen izquierdo / superior (rótulos de ejes)
 
 
 class _Heatmap(QWidget):
-    def __init__(self, levels, azimuths, thetas, source=None, parent=None):
+    def __init__(self, levels, azimuths, thetas, source=None, on_click=None, parent=None):
         super().__init__(parent)
+        self._on_click = on_click
         self._L = np.asarray(levels, dtype=float)      # (azimut, elevación)
         self._az = np.asarray(azimuths, dtype=float)
         self._th = np.asarray(thetas, dtype=float)
@@ -42,6 +43,14 @@ class _Heatmap(QWidget):
         if 0 <= i < len(self._az) and 0 <= j < len(self._th):
             return i, j
         return None
+
+    def mousePressEvent(self, ev):
+        hit = self._cell_at(ev.position().toPoint())
+        if hit is not None and self._on_click is not None:
+            i, j = hit
+            msg = self._on_click(float(self._az[i]), float(self._th[j]))
+            if msg:
+                QToolTip.showText(ev.globalPosition().toPoint(), msg, self)
 
     def mouseMoveEvent(self, ev):
         hit = self._cell_at(ev.position().toPoint())
@@ -93,7 +102,7 @@ class _Heatmap(QWidget):
 
 
 class MatrixDialog(QDialog):
-    def __init__(self, levels, azimuths, thetas, band_label: str, source=None, parent=None):
+    def __init__(self, levels, azimuths, thetas, band_label: str, source=None, on_click=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Matriz de datos — {band_label}")
         self.resize(760, 620)
@@ -101,10 +110,10 @@ class MatrixDialog(QDialog):
         origin = os.path.basename(source) if source else "cálculo desde audio"
         intro = QLabel(
             f"Dato medido (sin suavizar ni reparar) · {band_label} · origen: {origin}. "
-            "Pasá el mouse sobre una celda para ver el archivo de origen.")
+            "Pasá el mouse sobre una celda para ver el archivo de origen. Click en una celda: reproduce esa toma (si hay audio cargado).")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        self._heat = _Heatmap(levels, azimuths, thetas, source)
+        self._heat = _Heatmap(levels, azimuths, thetas, source, on_click=on_click)
         lay.addWidget(self._heat, 1)
         row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         row.rejected.connect(self.reject)
