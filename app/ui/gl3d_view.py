@@ -612,33 +612,36 @@ class GL3DView(QWidget):
         return items
 
     def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0) -> QImage:
-        """Barra de color con etiquetas de valor (máx/medio/mín) al lado. `s` escala todo (para
-        el export, ver export_image); en pantalla s=1."""
-        bar_w, h = int(18 * s), int(120 * s)
-        label_w = int(46 * s)
-        gap = int(4 * s)
+        """Barra de color vertical con 7 valores (dB) al lado. Tiene margen arriba y abajo para
+        que los números de los extremos no se recorten. `s` escala todo (para el export, ver
+        export_image); en pantalla s=1."""
+        bar_w, bar_h = int(18 * s), int(220 * s)
+        pad = int(10 * s)
+        label_w = int(52 * s)
+        gap = int(5 * s)
         w = bar_w + gap + label_w
+        h = bar_h + 2 * pad
         from PyQt6.QtGui import QPainter, QFont as _QFont
         from PyQt6.QtCore import Qt as _Qt
         ts, rgbs = _colorscale_stops(self._colorscale)
         img = QImage(w, h, QImage.Format.Format_ARGB32)
         img.fill(QColor(0, 0, 0, 0))
-        for y in range(h):
-            t = 1.0 - y / (h - 1)
+        for y in range(bar_h):
+            t = 1.0 - y / (bar_h - 1)
             r = float(np.interp(t, ts, rgbs[:, 0]))
             gg = float(np.interp(t, ts, rgbs[:, 1]))
             b = float(np.interp(t, ts, rgbs[:, 2]))
             color = QColor(int(r * 255), int(gg * 255), int(b * 255))
             for x in range(bar_w):
-                img.setPixelColor(x, y, color)
+                img.setPixelColor(x, pad + y, color)
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         p.setPen(QColor("#1a1a1a"))
         p.setFont(_QFont("Segoe UI", max(1, round(8 * s))))
-        mid = (cmax + cmin) / 2
-        for value, y in ((cmax, 0), (mid, h // 2), (cmin, h)):
-            ty = max(6, min(h - 4, y))   # no recortar el texto arriba/abajo del todo
-            p.drawText(bar_w + gap, ty - int(6 * s), label_w, int(12 * s),
+        span = (cmax - cmin) or 1.0
+        for value in np.linspace(cmax, cmin, 7):
+            y = pad + (cmax - value) / span * bar_h
+            p.drawText(bar_w + gap, int(y - 6 * s), label_w, int(12 * s),
                        _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, f"{value:.1f}")
         p.end()
         return img
