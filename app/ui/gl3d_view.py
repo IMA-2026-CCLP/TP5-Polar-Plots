@@ -111,6 +111,23 @@ def _shade_vertex_colors(md) -> np.ndarray:
     return colors
 
 
+def _clean_outliers(lev_2d: np.ndarray, thetas, drop_db: float = 12.0) -> np.ndarray:
+    """Valores falsos de un mic (muy por debajo de los dos vecinos en theta, mismo azimut) se
+    reemplazan por el promedio de esos vecinos. Así un mic con datos malos en algunos azimutes no
+    contamina la reparación de otro mic (ver _replace_broken_mics)."""
+    thetas = np.asarray(thetas, dtype=float)
+    order = np.argsort(thetas)
+    out = lev_2d.astype(float).copy()
+    lev = lev_2d[:, order].astype(float)
+    res = out[:, order].copy()
+    for i in range(1, lev.shape[1] - 1):
+        left, right = lev[:, i - 1], lev[:, i + 1]
+        bad = lev[:, i] < np.minimum(left, right) - drop_db
+        res[bad, i] = 0.5 * (left[bad] + right[bad])
+    out[:, order] = res
+    return out
+
+
 def _replace_broken_mics(lev_2d: np.ndarray, thetas, azimuths) -> np.ndarray:
     """Un mic roto deja su columna (theta) con datos falsos en todos los azimuts, y la grilla lo
     combina con su par frontal/trasero (theta y 180-theta) → media superficie se hunde. Se
@@ -427,6 +444,7 @@ class GL3DView(QWidget):
         lev_2d = self._levels[:, :, self._band_index]
         band_hz = float(self._bands[self._band_index])
 
+        lev_2d = _clean_outliers(lev_2d, self._elevations)
         lev_2d, thetas = _fill_missing_thetas(_replace_broken_mics(lev_2d, self._elevations, self._azimuths), self._elevations)
         R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
             lev_2d, self._azimuths, thetas,
