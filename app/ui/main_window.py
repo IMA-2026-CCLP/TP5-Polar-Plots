@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         rb.sig_compute_dir.connect(self._on_compute_dir)
         rb.sig_export_all_images.connect(self._on_export_all_images)
         rb.sig_dir_display_changed.connect(self._on_dir_display_changed)
+        rb.sig_engine_3d.connect(self._on_engine_3d)
         rb.sig_intersect_cut3d.connect(self._on_intersect_cut3d)
 
         # ── Tema
@@ -545,6 +546,11 @@ class MainWindow(QMainWindow):
             dpi = 300
         dpi = max(72, min(1200, dpi))
         self.view_dir.export_all_images(folder, prefix, dpi=dpi, modes=modes, fmt=combo_fmt.currentData())
+
+    def _on_engine_3d(self, engine: str):
+        """Opciones ▸ Gráficos ▸ Motor 3D: reconstruye Superficie 3D y Esfera con el motor elegido."""
+        self.view_dir.set_engine_3d(engine)
+        self.view_dir.apply_display_params(self.ribbon.get_dir_display_params())
 
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()

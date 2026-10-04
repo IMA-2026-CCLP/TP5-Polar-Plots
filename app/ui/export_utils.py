@@ -112,6 +112,21 @@ def set_smoothing_settings(values: dict) -> None:
     s.setValue("smoothing/interp_kind", values["interp_kind"])
 
 
+# ── Motor de los gráficos 3D (Superficie 3D y Esfera): "opengl" (pyqtgraph, por defecto) o
+# "plotly" (BalloonView, en QWebEngineView). Preferencia del usuario (Opciones ▸ Gráficos ▸ Motor 3D).
+ENGINES_3D = ("opengl", "plotly")
+
+
+def get_engine_3d() -> str:
+    e = str(_settings().value("view/engine_3d", "opengl"))
+    return e if e in ENGINES_3D else "opengl"
+
+
+def set_engine_3d(engine: str) -> None:
+    if engine in ENGINES_3D:
+        _settings().setValue("view/engine_3d", engine)
+
+
 def logical_px(cm: float) -> int:
     """Centímetros → píxeles CSS/lógicos a 96 dpi (el tamaño del 'lienzo' al que se le aplica la escala del DPI)."""
     return int(round(cm / 2.54 * 96))

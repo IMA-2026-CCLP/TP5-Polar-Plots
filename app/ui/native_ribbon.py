@@ -87,6 +87,7 @@ class NativeRibbon(QWidget):
     sig_compute_dir         = pyqtSignal(str, float, float, int, int)
     sig_export_all_images   = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
+    sig_engine_3d          = pyqtSignal(str)    # 'opengl' | 'plotly' (Opciones ▸ Gráficos ▸ Motor 3D)
     sig_intersect_cut3d     = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -353,6 +354,12 @@ class NativeRibbon(QWidget):
         load_smooth()
         self._act['smooth'] = sm
 
+    def _sync_engine_menu(self):
+        from ui.export_utils import get_engine_3d
+        cur = get_engine_3d()
+        for key, a in self._engine_actions.items():
+            a.setChecked(key == cur)
+
     def _set_palette(self, name: str):
         self._b.state['colorscale'] = name
         self._b.dirDisplayChanged()
@@ -413,6 +420,16 @@ class NativeRibbon(QWidget):
             a.triggered.connect(lambda _=False, n=name: self._set_palette(n))
             self._palette_actions[name] = a
         pal.aboutToShow.connect(self._sync_palette_menu)
+        eng = g.addMenu("Motor 3D (Superficie y Esfera)")
+        eng_group = QActionGroup(self)
+        self._engine_actions = {}
+        for key, label in (("opengl", "OpenGL (pyqtgraph) — por defecto"), ("plotly", "Plotly")):
+            a = eng.addAction(label)
+            a.setCheckable(True)
+            a.setActionGroup(eng_group)
+            a.triggered.connect(lambda _=False, k=key: self.sig_engine_3d.emit(k))
+            self._engine_actions[key] = a
+        eng.aboutToShow.connect(self._sync_engine_menu)
 
         m = mb.addMenu("A&yuda")
         m.addAction("Acerca de…", self._about)

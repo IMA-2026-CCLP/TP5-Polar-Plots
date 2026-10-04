@@ -35,11 +35,21 @@ from core.worker import Worker, begin as _begin, end as _end, report as _report
 # una instancia de GL3DView con geometry_mode='sphere' de entrada (ver _DEFAULT_STYLE_BY_MODE).
 # BalloonView (Plotly/QWebEngineView) queda sin usar en toda la app a partir de este cambio.
 _VIEW_CLASS_BY_MODE = {
-    "3d":       GL3DView,
-    "sphere":   GL3DView,
     "polar2d":  Polar2DView,
     "spectrum": SpectrumView,
 }
+
+
+def _view_class(mode: str):
+    """Clase de la vista del modo. Superficie 3D y Esfera dependen del motor elegido
+    (Opciones ▸ Gráficos ▸ Motor 3D): GL3DView (OpenGL, por defecto) o BalloonView (Plotly)."""
+    if mode in ("3d", "sphere"):
+        from ui.export_utils import get_engine_3d
+        if get_engine_3d() == "plotly":
+            from ui.balloon_view import BalloonView
+            return BalloonView
+        return GL3DView
+    return _VIEW_CLASS_BY_MODE[mode]
 
 _MODE_LABELS = {
     "3d":       "superficie_3d",
@@ -273,22 +283,43 @@ class _ViewSection(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        self.view = _VIEW_CLASS_BY_MODE[mode]()
-        self.view.set_view_mode(mode)
-        self.view.log.connect(self.log)
-        self.view.set_style(self._style)
-        self.view.set_db_range(self._min_db, self._max_db)
-        self.view.set_tick_font_size(self._tick_font_size)
+        self.view = self._make_view()
         lay.addWidget(self.view, 1)
 
-        # No se usa QWebEngineView.customContextMenuRequested: sobre el canvas
-        # WebGL de las escenas 3D, Plotly captura el botón derecho para
-        # panear la cámara y bloquea el contextmenu nativo, así que Qt nunca
-        # ve el evento ahí. En su lugar, el propio HTML reenvía el click
-        # derecho por consola (ver plot/balloon.py _wrap_html), capturado acá.
-        self.view.context_menu_requested.connect(self._show_context_menu)
-
         self.setMinimumHeight(80)
+
+    def _make_view(self):
+        """Crea la vista del modo (en 3D según el motor elegido) y la deja configurada igual que
+        antes: estilo, rango de dB, fuente y click derecho. Se usa al crear la sección y al
+        cambiar de motor (set_engine)."""
+        cls = _view_class(self._mode)
+        view = cls()
+        view.set_view_mode(self._mode)
+        view.log.connect(self.log)
+        view.set_style(self._style)
+        view.set_db_range(self._min_db, self._max_db)
+        view.set_tick_font_size(self._tick_font_size)
+        if self._mode in ("3d", "sphere"):
+            view.set_axis_style(self._axis_color, self._axis_width)
+        # No se usa QWebEngineView.customContextMenuRequested: sobre el canvas WebGL de las
+        # escenas Plotly, el botón derecho lo captura el propio gráfico, así que Qt no lo ve.
+        # En ese caso el HTML reenvía el click derecho por consola (ver plot/balloon.py).
+        view.context_menu_requested.connect(self._show_context_menu)
+        return view
+
+    def set_engine(self, engine: str):
+        """Cambia el motor de Superficie 3D/Esfera: reemplaza la vista (los datos se vuelven a
+        empujar desde TabDirectividad._refresh_display)."""
+        if self._mode not in ("3d", "sphere"):
+            return
+        old = self.view
+        new = self._make_view()
+        lay = self.layout()
+        idx = lay.indexOf(old)
+        lay.removeWidget(old)
+        old.deleteLater()
+        lay.insertWidget(idx, new, 1)
+        self.view = new
 
     def set_zoomed(self, on: bool):
         self._zoomed = on
@@ -896,6 +927,15 @@ class TabDirectividad(QWidget):
         self._build_ui()
         from ui.export_utils import get_smoothing_settings
         self.apply_smoothing_settings(get_smoothing_settings())   # última config guardada (Herramientas ▸ Suavizado…)
+
+    def set_engine_3d(self, engine: str):
+        """Motor de Superficie 3D y Esfera (OpenGL o Plotly): reconstruye esas dos vistas y vuelve
+        a cargar los datos. Llamar después a apply_display_params para reaplicar banda/paleta."""
+        from ui.export_utils import set_engine_3d
+        set_engine_3d(engine)
+        for m in ('3d', 'sphere'):
+            self._sections[m].set_engine(engine)
+        self._refresh_display()
 
     def apply_smoothing_settings(self, values: dict):
         """Una sola configuración de suavizado para Polar 2D, Superficie 3D y Esfera (Herramientas
