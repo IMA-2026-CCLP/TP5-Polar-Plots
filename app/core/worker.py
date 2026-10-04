@@ -71,6 +71,18 @@ def report(done: int, total: int):
     activity.progress.emit(int(done), int(total))
 
 
+_all_workers: list = []   # registro de workers creados (para detenerlos al cerrar la app)
+
+
+def stop_all_workers(timeout_ms: int = 3000) -> None:
+    """Pide parar a los workers que siguen corriendo y espera un momento. Sin esto, un hilo vivo
+    deja el proceso de Python abierto después de cerrar la ventana."""
+    for w in _all_workers:
+        if w.isRunning():
+            w.quit()
+            w.wait(timeout_ms)
+
+
 class Worker(QThread):
     """
     Ejecuta cualquier callable en un hilo separado.
@@ -83,6 +95,7 @@ class Worker(QThread):
 
     def __init__(self, fn, *args, **kwargs):
         super().__init__()
+        _all_workers.append(self)
         self._fn     = fn
         self._args   = args
         self._kwargs = kwargs
