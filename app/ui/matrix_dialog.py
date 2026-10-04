@@ -439,7 +439,7 @@ class MatrixDialog(QDialog):
         bar = QHBoxLayout()
         self._b_rep = QPushButton("Reemplazar…")
         self._b_rep.setToolTip("Ctrl + clic en las celdas a reemplazar (en orden). Luego: Reemplazar.")
-        self._b_rep.clicked.connect(self._open_menu)
+        self._b_rep.clicked.connect(self._on_replace_btn)
         bar.addWidget(self._b_rep)
         b_cmp = QPushButton("Comparar selección")
         b_cmp.setToolTip("Abre la comparación de las mediciones de las celdas seleccionadas.")
@@ -464,37 +464,44 @@ class MatrixDialog(QDialog):
         self._update_title()
 
     def _open_menu(self):
-        self._menu = ReplaceMenu(self)
-        self._menu.exec()
+        ReplaceMenu(self).exec()
 
-    def _replace_action(self, mode):
-        """Acción del botón del menú. Devuelve el texto que debe tener el botón."""
+    def _sync_button(self):
+        """El botón de abajo: 'Aplicar Reemplazo' si hay reemplazos listos, si no 'Reemplazar…'."""
+        self._b_rep.setText("Aplicar Reemplazo" if self._radial._overrides else "Reemplazar…")
+
+    def _menu_choice(self, mode):
+        """Elegido en el menú (cierra solo). 'Simétrico' aplica el espejo a la selección actual;
+        'Elegir tomas' guarda la selección como destino y espera las tomas de origen."""
         if mode == 'mirror':
             keys = self._radial.ordered_keys()
             if not keys:
-                self._status.setText("Seleccioná las celdas a reemplazar (Ctrl + clic)."); return "Reemplazar"
+                self._status.setText("Seleccioná las celdas a reemplazar (Ctrl + clic), y después elegí Simétrico."); return
             self._radial.set_overrides(self._radial.mirror_map(keys))
-            self._status.setText(f"{len(keys)} celdas con espejo listas. Presioná Aplicar Reemplazo para aplicarlas al audio.")
-            return "Aplicar Reemplazo"
-        # 'pick': primero las destino, después las de origen (en el mismo orden)
-        if self._pick_dest is None:
+            self._radial.clear_selection()
+            self._status.setText(f"{len(keys)} celdas con simétrico listas. Tocá Aplicar Reemplazo.")
+        else:
             keys = self._radial.ordered_keys()
             if not keys:
-                self._status.setText("Seleccioná primero las celdas a reemplazar (Ctrl + clic)."); return "Reemplazar"
+                self._status.setText("Seleccioná primero las celdas a reemplazar (Ctrl + clic), y después elegí Elegir tomas."); return
             self._pick_dest = keys
             self._radial.clear_selection()
-            self._status.setText(f"Destino: {len(keys)} celdas. Ahora Ctrl + clic en las tomas de origen, en orden, y volvé a Reemplazar.")
-            return "Reemplazar"
-        src = self._radial.ordered_keys()
-        if len(src) != len(self._pick_dest):
-            self._status.setText(f"Hay {len(self._pick_dest)} destinos y {len(src)} orígenes: tienen que coincidir.")
-            return "Reemplazar"
-        mapping = {}
-        for dst, sk in zip(self._pick_dest, src):
-            mapping[dst] = self._source_of(sk)
-        self._radial.set_overrides(mapping)
-        self._status.setText(f"{len(mapping)} reemplazos listos (orden de selección). Presioná Aplicar Reemplazo.")
-        return "Aplicar Reemplazo"
+            self._status.setText(f"Destino: {len(keys)} celdas. Ahora Ctrl + clic en las tomas de origen, en orden, y tocá Reemplazar…")
+        self._sync_button()
+
+    def _on_replace_btn(self):
+        if self._radial._overrides:
+            self._apply_pending(); return
+        if self._pick_dest is not None:
+            src = self._radial.ordered_keys()
+            if len(src) != len(self._pick_dest):
+                self._status.setText(f"Hay {len(self._pick_dest)} destinos y {len(src)} orígenes: tienen que coincidir."); return
+            mapping = {dst: self._source_of(sk) for dst, sk in zip(self._pick_dest, src)}
+            self._radial.set_overrides(mapping)
+            self._radial.clear_selection()
+            self._status.setText(f"{len(mapping)} reemplazos listos (orden de selección). Tocá Aplicar Reemplazo.")
+            self._sync_button(); return
+        self._open_menu()
 
     def _source_of(self, key):
         """(θ, giro) de la toma de origen elegida en la matriz (su primera medición)."""
@@ -510,6 +517,7 @@ class MatrixDialog(QDialog):
         n = self._apply_cb(pairs)
         self._radial.clear_overrides()
         self._pick_dest = None
+        self._sync_button()
         self._status.setText(n if isinstance(n, str) else f"Aplicados {len(pairs)} reemplazos al audio.")
         return True
 
@@ -554,32 +562,22 @@ class MatrixDialog(QDialog):
 
 
 class ReplaceMenu(QDialog):
-    """Menú del botón Reemplazar: elegir zona espejo o elegir tomas, y el botón de acción."""
+    """Menú del botón Reemplazar: dos opciones. Al elegir una, el menú se cierra."""
     def __init__(self, owner):
         super().__init__(owner)
         self._owner = owner
-        self.setWindowTitle("Reemplazar")
+        self.setWindowTitle("Reemplazar por")
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel("Reemplazar por:"))
-        self._mode = QComboBox()
-        self._mode.addItem("Zona espejo (lado opuesto, misma celda)", "mirror")
-        self._mode.addItem("Elegir tomas (en el orden de selección)", "pick")
-        lay.addWidget(self._mode)
-        self._act = QPushButton("Reemplazar")
-        self._act.clicked.connect(self._on_act)
-        lay.addWidget(self._act)
-        self._close = QPushButton("Cerrar")
-        self._close.clicked.connect(self.accept)
-        lay.addWidget(self._close)
-        if owner._radial._overrides:
-            self._act.setText("Aplicar Reemplazo")
+        b_sim = QPushButton("Simétrico")
+        b_sim.setToolTip("Cada celda seleccionada toma su medición espejo izquierda-derecha.")
+        b_sim.clicked.connect(lambda: self._choose('mirror'))
+        lay.addWidget(b_sim)
+        b_pick = QPushButton("Elegir tomas")
+        b_pick.setToolTip("Las celdas seleccionadas son el destino; después elegís las tomas de origen, en orden.")
+        b_pick.clicked.connect(lambda: self._choose('pick'))
+        lay.addWidget(b_pick)
 
-    def _on_act(self):
-        if self._act.text() == "Aplicar Reemplazo":
-            self._owner._apply_pending()
-            self.accept()
-            return
-        text = self._owner._replace_action(self._mode.currentData())
-        self._act.setText(text)
-        if text == "Aplicar Reemplazo":
-            self._mode.setEnabled(False)
+    def _choose(self, mode):
+        self.accept()
+        self._owner._menu_choice(mode)
