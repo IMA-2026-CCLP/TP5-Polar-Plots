@@ -283,8 +283,6 @@ class NativeRibbon(QWidget):
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
         act('export_all',  "Imágenes de directividad…", "Exporta las imágenes de los gráficos que elijas, para todas las bandas del rango", b.exportAllImages, False)
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
-        act('data_matrix', "Matriz radial…", "Mallado radial de las mediciones: anillo = distancia al cénit, sector = HOR; promedio energético en cénit y costura",
-            lambda: self.sig_open_options.emit('data_matrix'))
         act('compare',     "Comparar mediciones…", "Superpone las señales de los micrófonos elegidos (por distancia al cénit) para comparar",
             lambda: self.sig_open_options.emit('compare'))
         act('smoothing',   "Suavizado…",      "Suavizado e interpolación — se aplica por igual a Polar 2D, Superficie 3D y Esfera",
@@ -296,21 +294,22 @@ class NativeRibbon(QWidget):
 
         group = QActionGroup(self)          # exclusivas: siempre hay un modo elegido
 
-        def mode(name, text, tip, env, db):
+        def mode(name, text, tip, env, db, matrix=False):
             a = QAction(text, self)
             a.setCheckable(True)
             a.setToolTip(tip)
             group.addAction(a)
-            a.triggered.connect(lambda _=False: (b.state.update(envelope=env, db=db), plot()))
+            a.triggered.connect(lambda _=False: (b.state.update(envelope=env, db=db, matrix=matrix), plot()))
             self._act[name] = a
 
         mode('amp', "Amplitud", "Señal en amplitud lineal", False, False)
         mode('envelope', "Envolvente", "Envolvente de la señal (transformada de Hilbert), amplitud lineal", True, False)
         mode('db', "dB", "Envolvente en escala logarítmica (dB)", True, True)
+        mode('matrix', "Matriz radial", "Mallado radial de las mediciones (en lugar de la señal)", False, False, True)
 
         def load_mode():
             st = b.state
-            self._act['db' if st.get('db') else 'envelope' if st.get('envelope') else 'amp'].setChecked(True)
+            self._act['matrix' if st.get('matrix') else 'db' if st.get('db') else 'envelope' if st.get('envelope') else 'amp'].setChecked(True)
 
         self._loaders.append(load_mode)
         load_mode()
@@ -393,7 +392,7 @@ class NativeRibbon(QWidget):
         for n in ('align_takes', 'align_mics'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('notas', 'edit_scale', 'smoothing', 'data_matrix', 'compare', 'save_mask', 'load_mask'):
+        for n in ('notas', 'edit_scale', 'smoothing', 'compare', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
 
         m = mb.addMenu("&Opciones")

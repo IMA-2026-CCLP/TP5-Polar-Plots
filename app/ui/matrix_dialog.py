@@ -4,7 +4,7 @@ import math
 import os
 import numpy as np
 from PyQt6.QtCore import Qt, QSize, QPointF, QRectF
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox,
                              QToolTip, QPushButton, QComboBox)
 from PyQt6.QtGui import QPainterPath
@@ -389,7 +389,7 @@ class _PlayerBar(QWidget):
         self._btn.setText("❚❚" if st == QMediaPlayer.PlaybackState.PlayingState else "▶")
 
 
-class MatrixDialog(QDialog):
+class MatrixPanel(QWidget):
     def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None,
                  compare_cb=None, undo_cb=None, unit='dB', parent=None):
         super().__init__(parent)
@@ -397,7 +397,6 @@ class MatrixDialog(QDialog):
         self._apply_cb = apply_cb
         self._compare_cb = compare_cb
         self._unit = unit
-        self.resize(780, 720)
         self._levels3d = np.asarray(levels3d, dtype=float)
         self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
         lay = QVBoxLayout(self)
@@ -451,10 +450,7 @@ class MatrixDialog(QDialog):
         self._menu = None
         if on_click is not None:
             lay.addWidget(_PlayerBar())
-        row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        row.rejected.connect(self.reject)
-        row.accepted.connect(self.accept)
-        lay.addWidget(row)
+        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_key)
         self._update_title()
 
     def _open_menu(self):
@@ -515,15 +511,12 @@ class MatrixDialog(QDialog):
         self._status.setText(n if isinstance(n, str) else f"Aplicados {len(pairs)} reemplazos al audio.")
         return True
 
-    def keyPressEvent(self, ev):
-        if ev.key() == Qt.Key.Key_Z and (ev.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            if self._radial._overrides:                       # pendientes: se descartan
-                self._radial.clear_overrides(); self._pick_dest = None
-                self._status.setText("Reemplazos pendientes descartados.")
-            elif self._undo_cb is not None:                   # aplicados: se deshace el último lote
-                self._status.setText(self._undo_cb())
-            return
-        super().keyPressEvent(ev)
+    def _undo_key(self):
+        if self._radial._overrides:                           # pendientes: se descartan
+            self._radial.clear_overrides(); self._pick_dest = None
+            self._status.setText("Reemplazos pendientes descartados.")
+        elif self._undo_cb is not None:                       # aplicados: se deshace el último lote
+            self._status.setText(self._undo_cb())
 
     def _update_title(self):
         i = self._combo.currentData() or 0

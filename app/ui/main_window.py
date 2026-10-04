@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(QSS)
 
         self._ma       = None
+        self._matrix_win = None   # panel de la matriz radial (Procesamiento ▸ Vista)
         self._session_path: str | None = None   # último .cclp guardado/cargado — "Guardar" reusa esto
         self._settings = QSettings("AcousticTools", "PolarAnalyzerV2")
         import plot.balloon as _balloon
@@ -231,21 +232,6 @@ class MainWindow(QMainWindow):
             self._compare_win = CompareDialog(lambda: self.view_dir._get_current_ma(), view_params=_vp, parent=self)
             self._compare_win.show()
             return
-        if kind == "data_matrix":
-            from ui.matrix_dialog import MatrixDialog
-            m = self.view_dir.matrix_bands()
-            if m is None:
-                self._append_log("[Matriz] No hay datos de directividad calculados.")
-                return
-            levels, az, th, freqs, src, unit = m
-            # no modal: la matriz queda abierta junto a la ventana principal (y a la comparación)
-            self._matrix_win = MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
-                                            apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
-                                            undo_cb=self._undo_replacement, unit=unit, parent=self)
-            self._matrix_win.setModal(False)
-            self._matrix_win.show()
-            self.view_dir.on_data_changed = self._refresh_matrix
-            return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
             ImageOptionsDialog(self).exec()
@@ -386,9 +372,9 @@ class MainWindow(QMainWindow):
         return msg
 
     def _refresh_matrix(self):
-        """Si la matriz radial está abierta, la pone al día con los datos actuales."""
-        win = getattr(self, '_matrix_win', None)
-        if win is None or not win.isVisible():
+        """Pone al día el panel de la matriz radial (si existe) con los datos actuales."""
+        win = self._matrix_win
+        if win is None:
             return
         m = self.view_dir.matrix_bands()
         if m is not None:
@@ -396,7 +382,33 @@ class MainWindow(QMainWindow):
             win.refresh(levels, az, th, freqs, source=src, unit=unit)
 
     def _on_plot_params(self, theta, azimuth, env, db, yrange, smoothing):
+        if self.ribbon._b.state.get('matrix'):              # Vista ▸ Matriz radial
+            panel = self._ensure_matrix_panel()
+            if panel is not None:
+                self.view_prepro.show_matrix(panel)
+                return
+            self.ribbon._b.state['matrix'] = False          # sin datos: vuelve a la señal
+            self.ribbon._b.emitPlotParams()
+            return
+        self.view_prepro.show_waveform()
         self.view_prepro.refresh_plot(theta, azimuth, env, db, yrange, smoothing)
+
+    def _ensure_matrix_panel(self):
+        """Crea (la primera vez) o pone al día el panel de la matriz radial en Procesamiento."""
+        from ui.matrix_dialog import MatrixPanel
+        m = self.view_dir.matrix_bands()
+        if m is None:
+            self._append_log("[Matriz] No hay datos: calculá la directividad o cargá los audios.")
+            return None
+        levels, az, th, freqs, src, unit = m
+        if self._matrix_win is None:
+            self._matrix_win = MatrixPanel(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
+                                           apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
+                                           undo_cb=self._undo_replacement, unit=unit)
+            self.view_dir.on_data_changed = self._refresh_matrix
+        else:
+            self._matrix_win.refresh(levels, az, th, freqs, source=src, unit=unit)
+        return self._matrix_win
 
     def _on_apply_hpf(self, hz: float):
         self.view_prepro.apply_hpf(hz)

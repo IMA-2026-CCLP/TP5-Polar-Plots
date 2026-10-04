@@ -28,10 +28,21 @@ class TabPreprocesamiento(QWidget):
     def _build_ui(self):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        from PyQt6.QtWidgets import QStackedWidget
+        self._stack = QStackedWidget()          # Vista: señal (waveform) o matriz radial
         self._editor = WaveformEditorWidget()
         self._editor.log.connect(self.log)
         self._editor.onset_dragged.connect(self._on_onset_dragged)
-        lay.addWidget(self._editor)
+        self._stack.addWidget(self._editor)
+        lay.addWidget(self._stack)
+
+    def show_matrix(self, panel):
+        if self._stack.indexOf(panel) < 0:
+            self._stack.addWidget(panel)
+        self._stack.setCurrentWidget(panel)
+
+    def show_waveform(self):
+        self._stack.setCurrentWidget(self._editor)
 
     # ── API pública (llamada desde MainWindow / Ribbon) ───────────────────────
 
