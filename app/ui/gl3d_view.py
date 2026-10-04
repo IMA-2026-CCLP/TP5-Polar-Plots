@@ -231,6 +231,7 @@ class GL3DView(QWidget):
         self._cut_visible:   bool  = False   # muestra la curva (y, si show_ref_plane, el plano)
         self._show_ref_plane:      bool = True   # plano translúcido — sólo si _cut_visible también
         self._show_hemisphere_grid: bool = True  # círculos de referencia lat/long, independiente del corte
+        self._show_box_grid: bool = True         # planos de fondo con grilla (casilla propia)
         # 'origin': el nivel escala el vector ENTERO desde (0,0,0) — balloon plot clásico
         #           (CLIO, GLL Viewer, EASE...), el que ya tenía este programa. Modo Superficie 3D.
         # 'zaxis':  el nivel sólo escala la parte horizontal; la altura Z depende nada más del
@@ -392,6 +393,7 @@ class GL3DView(QWidget):
         self._geometry_mode = self._style.get('geometry_mode', 'origin')
         self._show_ref_plane       = bool(self._style.get('show_ref_plane', True))
         self._show_hemisphere_grid = bool(self._style.get('show_hemisphere_grid', True))
+        self._show_box_grid = bool(self._style.get('show_box_grid', True))
         if self._levels is not None:
             self._render()
 
@@ -516,8 +518,9 @@ class GL3DView(QWidget):
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
-        if self._show_hemisphere_grid:          # misma casilla: grilla de la esfera + caja de planos
+        if self._show_hemisphere_grid:
             items += self._make_grid_items()
+        if self._show_box_grid:
             items += self._make_box_items()
         if self._cut_visible:
             items += self._make_cut_ring_items(g)

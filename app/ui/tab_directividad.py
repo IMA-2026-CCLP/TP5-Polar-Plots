@@ -58,12 +58,12 @@ _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear",
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear",
                  "colorbar_pt": 12.0},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "color_distribution": "linear",
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear",
                  "colorbar_pt": 12.0},
     "polar2d":  {
         "bg_color":         "#ffffff",
@@ -511,6 +511,11 @@ class _ViewSection(QWidget):
                 chk_grid.setToolTip("Los círculos de latitud/longitud de referencia alrededor de la superficie.")
                 form_ax.addRow(chk_grid)
                 fields['show_hemisphere_grid'] = chk_grid
+                chk_box = QCheckBox("Mostrar planos de fondo con grilla")
+                chk_box.setChecked(bool(self._style.get('show_box_grid', True)))
+                chk_box.setToolTip("Piso y paredes con grilla detrás de la superficie (casi infinitos).")
+                form_ax.addRow(chk_box)
+                fields['show_box_grid'] = chk_box
 
             fields['grid_color']     = btn_grid
             fields['grid_width']     = spin_grid_w
@@ -702,6 +707,7 @@ class _ViewSection(QWidget):
                 if self._mode == "3d":
                     new_style['show_ref_plane'] = fields['show_ref_plane'].isChecked()
                 new_style['show_hemisphere_grid'] = fields['show_hemisphere_grid'].isChecked()
+                new_style['show_box_grid'] = fields['show_box_grid'].isChecked()
                 new_style['geometry_mode']        = fields['geometry_mode'].currentData()
             elif self._mode == "polar2d":
                 self._tick_font_size = fields['tick_font_size'].value()
