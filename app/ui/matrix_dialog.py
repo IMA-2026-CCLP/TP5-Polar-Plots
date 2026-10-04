@@ -92,7 +92,10 @@ class _Radial(QWidget):
         r_of = lambda d: d / 90.0 * R
         for key, (v, ms) in self._cells.items():
             if key[0] == 0:
-                p.setPen(QPen(QColor('#555'), 1)); p.setBrush(QBrush(self._color(v)))
+                # cénit: promedio energético de los giros; se marca si la dispersión supera el umbral
+                flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
+                p.setPen(QPen(QColor('#d62728') if flag else QColor('#555'), 2 if flag else 1))
+                p.setBrush(QBrush(self._color(v)))
                 p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
                 continue
             d, hor = key
