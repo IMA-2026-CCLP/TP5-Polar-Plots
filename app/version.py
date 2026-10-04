@@ -3,7 +3,7 @@
 Esquema: MAYOR.MENOR.PARCHE — subir PARCHE con cada arreglo/ajuste chico, MENOR con funciones nuevas,
 MAYOR con cambios grandes de uso (5.0.0 = interfaz rediseñada con menús y panel lateral).
 """
-__version__ = "5.7.2"
-__version__ = "5.7.2"
-__version__ = "5.7.2"
+__version__ = "5.7.3"
+__version__ = "5.7.3"
+__version__ = "5.7.3"
 APP_NAME = "Polar Pattern CCLP"

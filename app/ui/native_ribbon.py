@@ -564,8 +564,6 @@ class NativeRibbon(QWidget):
             ("Corrección por toma", [
                 ("Referencia", self._combo('corr_ref', 90, "Micrófono de referencia de la corrección de emisión por toma (paso 2)",
                                            [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)])),
-                ("Aplicar en dB", self._combo('corr_view', 90, "Muestra la corrección por toma también en las vistas dB vs tiempo",
-                                              [('No', '0'), ('Sí', '1')], lambda: b.emitPlotParams())),
                 (None, self._button("Recalcular", "Recalcula la directividad con esta referencia (la matriz se actualiza)",
                                     lambda: b.corrRecalc(), 'corr', enabled=True))]),
         ])

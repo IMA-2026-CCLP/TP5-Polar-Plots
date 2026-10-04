@@ -392,8 +392,6 @@ class MainWindow(QMainWindow):
 
     def _corr_offset_db(self):
         """Corrección por toma en dB por azimut (banda elegida), si está activada en el panel izquierdo."""
-        if str(self.ribbon._b.state.get('corr_view', '0')) != '1':
-            return None
         ma = self.view_dir._ma
         delta = getattr(ma, 'dir_delta', None)
         if delta is None:
