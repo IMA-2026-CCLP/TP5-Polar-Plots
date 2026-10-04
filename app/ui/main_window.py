@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
                 return
             levels, az, th, freqs, src = m
             MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
-                         apply_cb=self.view_dir.apply_mirror_replacements, parent=self).exec()
+                         apply_cb=self._apply_mirror_replacements, parent=self).exec()
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
@@ -342,6 +342,12 @@ class MainWindow(QMainWindow):
             self._append_log(f"[ERROR] Al guardar sesión: {e}")
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
+
+    def _apply_mirror_replacements(self, pairs):
+        """Aplica los reemplazos de la matriz al audio y vuelve a dibujar la señal en el tiempo."""
+        msg = self.view_dir.apply_mirror_replacements(pairs)
+        self.ribbon._b.emitPlotParams()          # redibuja Procesamiento con los datos ya reemplazados
+        return msg
 
     def _on_plot_params(self, theta, azimuth, env, db, yrange, smoothing):
         self.view_prepro.refresh_plot(theta, azimuth, env, db, yrange, smoothing)
