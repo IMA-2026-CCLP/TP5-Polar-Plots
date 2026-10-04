@@ -918,7 +918,15 @@ class TabDirectividad(QWidget):
     def current_matrix(self):
         """(niveles[azimut, elevación], azimuts, elevaciones, rótulo de la banda) de la banda mostrada."""
         if self._full_levels is None:
-            return None
+            # Sin patrón calculado: nivel RMS de cada toma directo de la señal (si hay audio cargado)
+            tensor = getattr(self._ma, 'tensor', None) if self._ma is not None else None
+            if tensor is None:
+                return None
+            rms = np.sqrt(np.mean(np.asarray(tensor, dtype=float) ** 2, axis=-1))
+            levels = 20.0 * np.log10(rms + 1e-12)          # (azimut, elevación), dB relativo
+            return (levels, np.asarray(self._ma.angles, dtype=float),
+                    np.asarray(self._ma.thetas, dtype=float),
+                    "nivel RMS de cada toma (sin calcular el patrón)", None)
         bi = min(self._current_band_idx, self._full_levels.shape[2] - 1)
         hz = float(self._full_bands[bi])
         from core.data_store import freq_label
