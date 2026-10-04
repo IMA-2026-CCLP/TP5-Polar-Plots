@@ -610,6 +610,10 @@ def build_balloon_html(
                            line_width=style.get('axis_line_width', 3))
     layout  = _scene_layout(grid_color=axis_color, grid_width=axis_width,
                             bg_color=style.get('bg_color'))
+    # Misma corrección que la esfera: con "cube" Plotly estira Z (0→1) al doble de X,Y (-1→1) y la
+    # superficie sale alargada. z=0.5 deja las proporciones reales (igual que pyqtgraph).
+    layout["scene"]["aspectmode"]  = "manual"
+    layout["scene"]["aspectratio"] = {"x": 1, "y": 1, "z": 0.5}
 
     zenith_str = f"<br><b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
     info = (
