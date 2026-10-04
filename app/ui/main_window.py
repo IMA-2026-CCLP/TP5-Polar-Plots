@@ -237,13 +237,14 @@ class MainWindow(QMainWindow):
             if m is None:
                 self._append_log("[Matriz] No hay datos de directividad calculados.")
                 return
-            levels, az, th, freqs, src = m
+            levels, az, th, freqs, src, unit = m
             # no modal: la matriz queda abierta junto a la ventana principal (y a la comparación)
             self._matrix_win = MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
                                             apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
-                                            parent=self)
+                                            unit=unit, parent=self)
             self._matrix_win.setModal(False)
             self._matrix_win.show()
+            self.view_dir.on_data_changed = self._refresh_matrix
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
@@ -375,7 +376,18 @@ class MainWindow(QMainWindow):
         """Aplica los reemplazos de la matriz al audio y vuelve a dibujar la señal en el tiempo."""
         msg = self.view_dir.apply_mirror_replacements(pairs)
         self.ribbon._b.emitPlotParams()          # redibuja Procesamiento con los datos ya reemplazados
+        self._refresh_matrix()
         return msg
+
+    def _refresh_matrix(self):
+        """Si la matriz radial está abierta, la pone al día con los datos actuales."""
+        win = getattr(self, '_matrix_win', None)
+        if win is None or not win.isVisible():
+            return
+        m = self.view_dir.matrix_bands()
+        if m is not None:
+            levels, az, th, freqs, src, unit = m
+            win.refresh(levels, az, th, freqs, source=src, unit=unit)
 
     def _on_plot_params(self, theta, azimuth, env, db, yrange, smoothing):
         self.view_prepro.refresh_plot(theta, azimuth, env, db, yrange, smoothing)
@@ -631,6 +643,7 @@ class MainWindow(QMainWindow):
 
     def _on_ma_ready(self, ma):
         self._ma = ma
+        self._refresh_matrix()
         # Escala Y por defecto de las señales dB: sin calibrar −60…0 dB, calibrada 40…100 dB.
         # Sólo se cambia cuando cambia el estado de calibración (no pisa lo que el usuario escribió).
         cal = ma.calibration is not None

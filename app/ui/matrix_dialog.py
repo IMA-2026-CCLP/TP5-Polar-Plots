@@ -71,6 +71,16 @@ class _Radial(QWidget):
         self.setMouseTracking(True)
         self.setMinimumSize(QSize(460, 460))
 
+    def set_unit(self, unit):
+        self._unit = unit
+        self.update()
+
+    def set_source(self, source):
+        self._source = source
+
+    def set_axes(self, azimuths, thetas):
+        self._az, self._th = azimuths, thetas
+
     def set_levels(self, levels):
         """Cambia la banda mostrada (recalcula las celdas y la escala de color)."""
         self._levels = np.asarray(levels, dtype=float)
@@ -250,9 +260,36 @@ class _Radial(QWidget):
         for hor in range(0, 360, 30):
             t = math.radians(hor)
             p.drawText(QPointF(cx - (R + 22) * math.sin(t) - 12, cy - (R + 22) * math.cos(t) + 4), f"{hor}°")
+        self._paint_colorbar(p)
         p.setFont(QFont('Segoe UI', 9))
-        p.drawText(QPointF(12, self.height() - 12), f"Colores: {self._vmin:.1f} a {self._vmax:.1f} dB · rojo = diferencia > {THR_DB:g} dB entre mediciones")
+        p.drawText(QPointF(12, self.height() - 12), f"rojo = diferencia > {THR_DB:g} dB entre mediciones · unidad: {self._unit}")
         p.end()
+
+    def _paint_colorbar(self, p):
+        """Escala de color con pasos: N bandas de igual tamaño entre el mínimo y el máximo, cada una con
+        su color, marcas y valor en cada borde. Se ve siempre, a la derecha del mallado."""
+        N = 12
+        vmin, vmax = self._vmin, self._vmax
+        if vmax - vmin < 1e-9:
+            vmax = vmin + 1.0
+        x, w = self.width() - 78, 22
+        top, bottom = 56, self.height() - 40
+        hstep = (bottom - top) / N
+        p.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold)); p.setPen(QColor('#111'))
+        p.drawText(QRectF(x - 40, 14, w + 90, 20), Qt.AlignmentFlag.AlignCenter, self._unit)
+        for i in range(N):
+            v_mid = vmax - (i + 0.5) * (vmax - vmin) / N            # arriba = máximo
+            p.setPen(QPen(QColor('#666'), 0.5))
+            p.setBrush(QBrush(self._color(v_mid)))
+            p.drawRect(QRectF(x, top + i * hstep, w, hstep))
+        p.setFont(QFont('Segoe UI', 8)); p.setPen(QColor('#111'))
+        for i in range(N + 1):
+            v = vmax - i * (vmax - vmin) / N
+            y = top + i * hstep
+            p.drawLine(QPointF(x + w, y), QPointF(x + w + 5, y))
+            bold = i in (0, N)
+            p.setFont(QFont('Segoe UI', 9 if bold else 8, QFont.Weight.Bold if bold else QFont.Weight.Normal))
+            p.drawText(QPointF(x + w + 8, y + 4), f"{v:.1f}")
 
     def mouseMoveEvent(self, ev):
         if self._drag is not None:                        # arrastre con botón derecho: mover el mallado
@@ -338,10 +375,11 @@ class _PlayerBar(QWidget):
 
 class MatrixDialog(QDialog):
     def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None,
-                 compare_cb=None, parent=None):
+                 compare_cb=None, unit='dB', parent=None):
         super().__init__(parent)
         self._apply_cb = apply_cb
         self._compare_cb = compare_cb
+        self._unit = unit
         self.resize(780, 720)
         self._levels3d = np.asarray(levels3d, dtype=float)
         self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
@@ -373,6 +411,7 @@ class MatrixDialog(QDialog):
             return msg
         self._on_click_cb = _click if on_click else None
         self._radial = _Radial(self._levels3d[:, :, 0], azimuths, thetas, source, on_click=self._on_click_cb)
+        self._radial.set_unit(unit)
         lay.addWidget(self._radial, 1)
         bar = QHBoxLayout()
         b_mir = QPushButton("Reemplazar selección por espejo")
@@ -424,6 +463,24 @@ class MatrixDialog(QDialog):
         f = self._freqs[i]
         from core.data_store import freq_label
         self.setWindowTitle("Matriz radial — " + ("RMS total" if f is None else f"{freq_label(f)} Hz"))
+
+    def refresh(self, levels3d, azimuths, thetas, freqs, source=None, unit='dB'):
+        """Actualiza la matriz con los datos nuevos (filtro, calibración, reemplazos, cálculo)."""
+        self._levels3d = np.asarray(levels3d, dtype=float)
+        self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
+        self._unit = unit
+        cur = self._combo.currentData() or 0
+        self._combo.blockSignals(True)
+        self._combo.clear()
+        from core.data_store import freq_label
+        for i, f in enumerate(freqs):
+            self._combo.addItem("RMS total (sin banda)" if f is None else f"{freq_label(f)} Hz", i)
+        self._combo.setCurrentIndex(min(cur, self._combo.count() - 1))
+        self._combo.blockSignals(False)
+        self._radial.set_source(source)
+        self._radial.set_unit(unit)
+        self._radial.set_axes(azimuths, thetas)
+        self._radial.set_levels(self._levels3d[:, :, self._combo.currentData() or 0])
 
     def _on_band(self, _=None):
         i = self._combo.currentData() or 0

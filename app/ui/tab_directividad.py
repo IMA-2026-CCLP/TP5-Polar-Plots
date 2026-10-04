@@ -914,6 +914,7 @@ class TabDirectividad(QWidget):
         self._worker: Worker | None = None
         self._full_levels    = None
         self.source_file: str | None = None   # archivo .cclp cargado (None = calculado desde audio)
+        self.on_data_changed = None           # callback: la matriz radial se pone al día al cambiar los datos
         self._full_azimuths  = None
         self._full_thetas    = None
         self._full_bands     = None
@@ -974,12 +975,14 @@ class TabDirectividad(QWidget):
         if self._full_levels is not None:
             from core.data_store import freq_label
             freqs = [float(f) for f in self._full_bands]
-            return (self._full_levels, self._full_azimuths, self._full_thetas, freqs, self.source_file)
+            return (self._full_levels, self._full_azimuths, self._full_thetas, freqs, self.source_file,
+                    'dB rel. on-axis')
         m = self.current_matrix()
         if m is None:
             return None
         levels, az, th, label, src = m
-        return (levels[:, :, None], az, th, [None], src)
+        unit = 'dB SPL' if getattr(self._ma, '_is_spl', False) else 'dB (sin calibrar)'
+        return (levels[:, :, None], az, th, [None], src, unit)
 
     def current_matrix(self):
         """(niveles[azimut, elevación], azimuts, elevaciones, rótulo de la banda) de la banda mostrada."""
@@ -1184,6 +1187,8 @@ class TabDirectividad(QWidget):
         self._refresh_display()
 
     def _refresh_display(self):
+        if self.on_data_changed is not None:
+            self.on_data_changed()          # p. ej. la matriz radial abierta se actualiza
         if self._full_levels is None:
             return
 
