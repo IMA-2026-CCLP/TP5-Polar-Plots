@@ -510,7 +510,10 @@ class GL3DView(QWidget):
         # luz). En cambio, el sombreado suave se hornea en los colores de vértice: luz fija desde
         # arriba-adelante, rango 0.65..1.0 para no tapar el color del dato.
         md.setVertexColors(_shade_vertex_colors(md))
-        return gl.GLMeshItem(meshdata=md, smooth=True, glOptions='opaque')
+        # Malla visible: aristas finas grises sobre la superficie, sin suavizado de normales
+        # (smooth=False) para que se note la grilla de datos y no quede todo "de plástico".
+        return gl.GLMeshItem(meshdata=md, smooth=False, glOptions='opaque', drawEdges=True,
+                             edgeColor=(0.35, 0.37, 0.42, 0.35))
 
     def _make_axis_items(self) -> list:
         width = float(self._style.get('axis_line_width', 3)) * self._px_scale
