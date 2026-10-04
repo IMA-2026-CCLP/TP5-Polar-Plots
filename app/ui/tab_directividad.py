@@ -805,7 +805,9 @@ class _ViewSection(QWidget):
         return True
 
     def _apply_snapshot(self, snap: dict):
-        self._style          = dict(snap['style'])
+        # Se parte de los defaults del modo: sesiones viejas no traen claves nuevas (p. ej.
+        # geometry_mode), y sin esto la Esfera caía al default 'origin' y se veía como Superficie.
+        self._style          = {**_DEFAULT_STYLE_BY_MODE.get(self._mode, {}), **snap['style']}
         self._min_db         = snap['min_db']
         self._max_db         = snap['max_db']
         self._tick_font_size = snap['tick_font_size']
