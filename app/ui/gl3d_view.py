@@ -89,6 +89,18 @@ def _parse_color(c: str) -> list:
     return [float(n) / 255.0 for n in nums[:3]]
 
 
+_LIGHT_DIR = np.array([-0.4, -0.5, 0.77]) / np.linalg.norm([-0.4, -0.5, 0.77])
+
+
+def _shade_vertex_colors(md) -> np.ndarray:
+    """Colores de vértice con sombreado Lambert suave (ver _make_surface_item)."""
+    colors = md.vertexColors().copy()
+    normals = md.vertexNormals()
+    lambert = np.clip(normals @ _LIGHT_DIR, 0.0, 1.0)
+    colors[:, :3] *= (0.65 + 0.35 * lambert)[:, None]
+    return colors
+
+
 def _colorscale_stops(name: str):
     """(t_stops, rgb_stops 0–1) desde COLORSCALES (listas [pos, color] de plot/balloon.py,
     mismas que usa Plotly) — listo para np.interp."""
@@ -494,10 +506,10 @@ class GL3DView(QWidget):
         faces = np.concatenate([tri1, tri2], axis=0)
 
         md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
-        # Sin shader (colores planos, tal cual el dato): el shader 'shaded' de pyqtgraph aplica
-        # una luz direccional fija (rgb *= 0.2 + dot(normal, luz)) que oscurece casi a negro
-        # cualquier cara que no mire hacia esa dirección — con una malla tipo globo, la mayoría
-        # de las caras quedaban así sin importar su color real.
+        # Sin shader de pyqtgraph (su 'shaded' oscurece casi a negro las caras que no miran a la
+        # luz). En cambio, el sombreado suave se hornea en los colores de vértice: luz fija desde
+        # arriba-adelante, rango 0.65..1.0 para no tapar el color del dato.
+        md.setVertexColors(_shade_vertex_colors(md))
         return gl.GLMeshItem(meshdata=md, smooth=True, glOptions='opaque')
 
     def _make_axis_items(self) -> list:
