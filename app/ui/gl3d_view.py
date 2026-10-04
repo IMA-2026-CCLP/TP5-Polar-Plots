@@ -302,11 +302,13 @@ class GL3DView(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if self._last_grid is not None:
+            self._update_colorbar(self._last_grid['cmin'], self._last_grid['cmax'])
         self._reposition_overlays()
 
     def _reposition_overlays(self):
         if self._colorbar.isVisible():
-            self._colorbar.move(self.width() - self._colorbar.width() - 20, 10)
+            self._colorbar.move(self.width() - self._colorbar.width() - 8, 8)
 
     # — no aplican a este modo, pero _ViewSection los llama para los 4 tipos de vista —
     def set_view_mode(self, mode):
@@ -611,12 +613,18 @@ class GL3DView(QWidget):
             items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True))
         return items
 
-    def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0) -> QImage:
+    def _panel_bar_h(self) -> int:
+        """Alto de la barra de color en pantalla: proporcional al panel (en 4 paneles es chica,
+        en 'ver en grande' crece), siempre dentro de un rango legible."""
+        return max(70, min(220, int(self.height() * 0.42)))
+
+    def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0, bar_h: int | None = None) -> QImage:
         """Barra de color estilo Plotly (como la v4): barra alta y angosta con marco fino, marcas
         y valores en números redondos dentro del rango, y "dB" girado al costado. `s` escala todo
         (para el export, ver export_image); en pantalla s=1."""
-        bar_w, bar_h = int(22 * s), int(300 * s)
-        pad = int(12 * s)
+        bar_w = int(16 * s)
+        bar_h = int(bar_h if bar_h is not None else 300 * s)
+        pad = int(8 * s)
         tick_len = int(5 * s)
         label_w = int(46 * s)
         title_w = int(20 * s)
@@ -649,7 +657,7 @@ class GL3DView(QWidget):
         raw = span / 6.0
         mag = 10 ** np.floor(np.log10(raw))
         step = min((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw), default=10 * mag)
-        font = _QFont("Segoe UI", max(1, round(9 * s)))
+        font = _QFont("Segoe UI", max(1, round(8 * s)))
         p.setFont(font)
         p.setPen(QColor("#1a1a1a"))
         first = np.ceil(cmin / step) * step
@@ -673,11 +681,11 @@ class GL3DView(QWidget):
 
     def _update_colorbar(self, cmin: float, cmax: float):
         """La barra se dibuja en el overlay de la pantalla y también se compone en el export."""
-        img = self._colorbar_image(cmin, cmax)
+        img = self._colorbar_image(cmin, cmax, bar_h=self._panel_bar_h())
         w, h = img.width(), img.height()
         self._colorbar.setPixmap(QPixmap.fromImage(img))
         self._colorbar.setFixedSize(w, h)
-        self._colorbar.move(self.width() - w - 20, 10)
+        self._colorbar.move(self.width() - w - 8, 8)
         self._colorbar.setToolTip(f"{cmax:.1f} dB (arriba) — {cmin:.1f} dB (abajo)")
         self._colorbar.show()
 
@@ -747,9 +755,10 @@ class GL3DView(QWidget):
                     from PyQt6.QtGui import QPainter
                     g = self._last_grid
                     k = W / max(1, self._gl.width())   # _px_scale ya volvió a 1.0 acá
-                    cb = self._colorbar_image(g['cmin'], g['cmax'], k)
+                    cb = self._colorbar_image(g['cmin'], g['cmax'], k,
+                                              bar_h=int(self._panel_bar_h() * k))
                     p = QPainter(img)
-                    p.drawImage(img.width() - cb.width() - int(20 * k), int(10 * k), cb)
+                    p.drawImage(img.width() - cb.width() - int(8 * k), int(8 * k), cb)
                     p.end()
                 ok = (not img.isNull()) and img.save(path)
                 if ok and fmt != 'svg':
