@@ -58,8 +58,12 @@ class _Heatmap(QWidget):
             QToolTip.hideText()
             return
         i, j = hit
-        name = os.path.basename(self._source) if self._source else "cálculo desde audio (sin archivo)"
-        full = self._source or "—"
+        if isinstance(self._source, dict):          # matriz desde audios: un WAV por toma
+            full = self._source.get((float(self._az[i]), float(self._th[j])), "—")
+            name = os.path.basename(full) if full != "—" else "sin archivo"
+        else:
+            name = os.path.basename(self._source) if self._source else "cálculo desde audio (sin archivo)"
+            full = self._source or "—"
         v = self._L[i, j]
         text = (f"Archivo: {name}\n{full}\n"
                 f"Azimut: {self._az[i]:.0f}°   Elevación: {self._th[j]:.0f}°\n"
@@ -107,7 +111,10 @@ class MatrixDialog(QDialog):
         self.setWindowTitle(f"Matriz de datos — {band_label}")
         self.resize(760, 620)
         lay = QVBoxLayout(self)
-        origin = os.path.basename(source) if source else "cálculo desde audio"
+        if isinstance(source, dict):
+            origin = "archivos WAV de audio (uno por toma)"
+        else:
+            origin = os.path.basename(source) if source else "cálculo desde audio"
         intro = QLabel(
             f"Dato medido (sin suavizar ni reparar) · {band_label} · origen: {origin}. "
             "Pasá el mouse sobre una celda para ver el archivo de origen. Click en una celda: reproduce esa toma (si hay audio cargado).")

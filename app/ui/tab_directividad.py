@@ -933,9 +933,13 @@ class TabDirectividad(QWidget):
             it = [j for j, v in enumerate(self._ma.thetas) if _num(v)]
             rms = np.sqrt(np.mean(np.asarray(tensor, dtype=float) ** 2, axis=-1))
             levels = 20.0 * np.log10(rms[np.ix_(ia, it)] + 1e-12)   # (azimut, elevación), dB relativo
+            files = getattr(self._ma, 'source_files', {}) or {}
+            # (azimut, elevación) -> ruta del WAV de esa toma
+            src = {(float(self._ma.angles[i]), float(self._ma.thetas[j])): files[(i, j)]
+                   for i in ia for j in it if (i, j) in files}
             return (levels, np.asarray([float(self._ma.angles[i]) for i in ia]),
                     np.asarray([float(self._ma.thetas[j]) for j in it]),
-                    "nivel RMS de cada toma (sin calcular el patrón)", None)
+                    "nivel RMS de cada toma (sin calcular el patrón)", src)
         bi = min(self._current_band_idx, self._full_levels.shape[2] - 1)
         hz = float(self._full_bands[bi])
         from core.data_store import freq_label

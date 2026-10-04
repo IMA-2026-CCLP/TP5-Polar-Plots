@@ -199,6 +199,7 @@ class MicArray:
         data = np.zeros((len(azimuths), len(thetas), max_len), dtype=np.float32)
 
         print(f"\n  Building tensor {data.shape} ...")
+        file_map = {}   # (índice azimut, índice theta) -> ruta del WAV de esa toma (para la matriz de datos)
         wavs = sorted(path.glob("*.wav"))
         for k, f in enumerate(wavs):
             _progress(k, len(wavs))
@@ -210,6 +211,7 @@ class MicArray:
                 i_th = thetas.index(el)
                 sig, _ = sf.read(f)
                 data[i_az, i_th, :len(sig)] = sig
+                file_map[(i_az, i_th)] = str(f)
                 continue
             if ref_regex:
                 m = ref_regex.search(f.name)
@@ -218,13 +220,17 @@ class MicArray:
                     i_th = thetas.index('ref')
                     sig, _ = sf.read(f)
                     data[i_az, i_th, :len(sig)] = sig
+                    file_map[(i_az, i_th)] = str(f)
 
         for az in azimuths:
             print(f"    {az:>4}° → OK")
 
         print(f"\n  Done. Shape: {data.shape}  ({data.nbytes/1024/1024:.1f} MB)")
 
-        return cls(data, sr, angles=azimuths, thetas=thetas)
+        ma = cls(data, sr, angles=azimuths, thetas=thetas)
+        ma.source_dir = str(path)
+        ma.source_files = file_map
+        return ma
 
     @classmethod
     def from_export(cls, path, pattern='mic_{H}_{V}.wav'):
