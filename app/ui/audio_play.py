@@ -33,3 +33,9 @@ def play_signal(x: np.ndarray, sr: int) -> str:
             pass   # si sigue en uso, queda en la carpeta temporal
     _last_file = path
     return path
+
+
+def stop() -> None:
+    """Detiene la reproducción en curso (si hay)."""
+    if _player is not None:
+        _player.stop()

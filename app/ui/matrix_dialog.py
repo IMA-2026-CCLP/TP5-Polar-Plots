@@ -3,7 +3,7 @@ import os
 import numpy as np
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QColor, QFont, QPainter
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QWidget, QDialogButtonBox, QToolTip
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox, QToolTip, QPushButton
 
 _ML, _MT = 90, 60   # margen izquierdo / superior (rótulos de ejes)
 
@@ -106,6 +106,11 @@ class _Heatmap(QWidget):
 
 
 class MatrixDialog(QDialog):
+    def _stop_audio(self):
+        from ui.audio_play import stop
+        stop()
+        self._status.setText("Reproducción detenida.")
+
     def __init__(self, levels, azimuths, thetas, band_label: str, source=None, on_click=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Matriz de datos — {band_label}")
@@ -120,8 +125,19 @@ class MatrixDialog(QDialog):
             "Pasá el mouse sobre una celda para ver el archivo de origen. Click en una celda: reproduce esa toma (si hay audio cargado).")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        self._heat = _Heatmap(levels, azimuths, thetas, source, on_click=on_click)
+        def _click(az, th):
+            msg = on_click(az, th) if on_click is not None else ""
+            self._status.setText(msg or "")
+            return msg
+        self._heat = _Heatmap(levels, azimuths, thetas, source, on_click=_click if on_click else None)
         lay.addWidget(self._heat, 1)
+        bar = QHBoxLayout()
+        self._status = QLabel("Click en una celda para escuchar esa toma.")
+        bar.addWidget(self._status, 1)
+        b_stop = QPushButton("■ Detener")
+        b_stop.clicked.connect(self._stop_audio)
+        bar.addWidget(b_stop)
+        lay.addLayout(bar)
         row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         row.rejected.connect(self.reject)
         row.accepted.connect(self.accept)
