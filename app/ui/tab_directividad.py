@@ -142,6 +142,7 @@ class _ComputeAllWorker(QThread):
                     bands          = self._bands,
                     ref_azimuth    = self._ref_az,
                     ref_theta_plot = self._ref_th,
+                    ref_theta      = self.corr_ref_th,
                 )
                 self.log.emit(f"[Directividad] {label} — OK")
 
@@ -914,7 +915,8 @@ class TabDirectividad(QWidget):
         self._worker: Worker | None = None
         self._full_levels    = None
         self.source_file: str | None = None   # archivo .cclp cargado (None = calculado desde audio)
-        self.on_data_changed = None           # callback: la matriz radial se pone al día al cambiar los datos
+        self.on_data_changed = None
+        self.corr_ref_th = 'ref'              # micrófono de referencia de la corrección por toma (paso 2)           # callback: la matriz radial se pone al día al cambiar los datos
         self._full_azimuths  = None
         self._full_thetas    = None
         self._full_bands     = None
@@ -1148,6 +1150,7 @@ class TabDirectividad(QWidget):
             bands          = bands,
             ref_azimuth    = ref_az,
             ref_theta_plot = ref_th,
+            ref_theta      = self.corr_ref_th,
         )
         return ma
 

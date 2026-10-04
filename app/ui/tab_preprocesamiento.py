@@ -7,7 +7,7 @@ corregir la alineación arrastrando el cursor de onset.
 """
 import numpy as np
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 from PyQt6.QtCore import pyqtSignal
 
 from core.worker import Worker
@@ -15,6 +15,7 @@ from ui.waveform_editor import WaveformEditorWidget
 
 
 class TabPreprocesamiento(QWidget):
+    corr_requested = pyqtSignal()
     view_chosen = pyqtSignal(str)       # 'matrix' | 'db' | 'envelope' | 'amp' (desde el desplegable)
 
     ma_updated = pyqtSignal(object)
@@ -33,6 +34,10 @@ class TabPreprocesamiento(QWidget):
         from PyQt6.QtWidgets import QStackedWidget, QComboBox, QHBoxLayout
         top = QHBoxLayout()                     # selector de vista, arriba a la derecha
         top.addStretch(1)
+        self._btn_corr = QPushButton("Corrección por toma…")
+        self._btn_corr.setToolTip("Elegir el micrófono de referencia de la corrección de emisión por toma y recalcular")
+        self._btn_corr.clicked.connect(self.corr_requested.emit)
+        top.addWidget(self._btn_corr)
         top.addWidget(QLabel("Vista:"))
         self._view_combo = QComboBox()
         for label, key in (("Matriz radial", "matrix"), ("dB", "db"), ("Envolvente", "envelope"), ("Amplitud", "amp")):

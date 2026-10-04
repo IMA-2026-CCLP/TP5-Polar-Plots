@@ -169,6 +169,7 @@ class MainWindow(QMainWindow):
         self.view_prepro.ma_updated.connect(self._on_ma_ready)
         self.view_prepro.log.connect(self._append_log)
         self.view_prepro.view_chosen.connect(self._on_view_choice)
+        self.view_prepro.corr_requested.connect(self._on_corr_request)
         self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
 
         self.view_notas.ma_updated.connect(self._on_ma_ready)
@@ -387,7 +388,29 @@ class MainWindow(QMainWindow):
             levels, az, th, freqs, src, unit = m
             win.refresh(levels, az, th, freqs, source=src, unit=unit)
 
-    def _on_view_choice(self, key):
+    def _on_corr_request(self):
+        """Corrección por toma: elige el micrófono de referencia (paso 2) y recalcula la directividad."""
+        from PyQt6.QtWidgets import QInputDialog
+        ma = self.view_dir._get_current_ma()
+        if ma is None or getattr(ma, 'tensor', None) is None:
+            self._append_log("[Corrección] Cargá los audios para elegir el micrófono de referencia.")
+            return
+        opts = ['ref']
+        for t in ma.thetas:
+            try:
+                opts.append(str(int(float(t))))
+            except (TypeError, ValueError):
+                continue
+        cur = str(self.view_dir.corr_ref_th)
+        cur = cur if cur in opts else 'ref'
+        val, ok = QInputDialog.getItem(self, "Corrección por toma",
+                                       "Micrófono de referencia (todas las tomas se corrigen con su nivel):",
+                                       opts, opts.index(cur), False)
+        if not ok:
+            return
+        self.view_dir.corr_ref_th = 'ref' if val == 'ref' else int(val)
+        self._append_log(f"[Corrección] Referencia: {val}. Recalculando…")
+        self.ribbon._b.computeDir()
         """Desplegable de Procesamiento (arriba a la derecha): cambia la misma vista que el menú Vista."""
         st = self.ribbon._b.state
         st.update(matrix=key == 'matrix', db=key == 'db', envelope=key in ('db', 'envelope'))
