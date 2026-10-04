@@ -43,7 +43,7 @@ API pública: espejo del subconjunto de BalloonView que usa TabDirectividad para
 '3d' (ver ui/tab_directividad.py::_ViewSection) — mismos nombres de método, misma firma.
 """
 import numpy as np
-from PyQt6.QtWidgets import QWidget, QStackedLayout, QLabel, QApplication
+from PyQt6.QtWidgets import QWidget, QStackedLayout, QHBoxLayout, QLabel, QApplication
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QImage, QColor, QPixmap, QVector3D
 
@@ -249,9 +249,16 @@ class GL3DView(QWidget):
         # recalcular la malla — ver export_image)
         self._last_grid = None
 
-        layout = QStackedLayout(self)
+        # Columna izquierda: gráfico (apilado). Columna derecha: franja de la barra de color, como
+        # en el export (la barra no tapa la escena).
+        self._host = QWidget()
+        layout = QStackedLayout(self._host)
         layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
         layout.setContentsMargins(0, 0, 0, 0)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self._host, 1)
 
         self._gl = gl.GLViewWidget()
         self._gl.setBackgroundColor('#ffffff')
@@ -289,8 +296,9 @@ class GL3DView(QWidget):
         self._info_label.move(8, 8)
         self._info_label.hide()
 
-        self._colorbar = QLabel(self._overlay)
+        self._colorbar = QLabel()          # franja derecha (ver outer), no encima del gráfico
         self._colorbar.hide()
+        outer.addWidget(self._colorbar)
 
         self._apply_camera()
 
@@ -312,8 +320,7 @@ class GL3DView(QWidget):
         self._reposition_overlays()
 
     def _reposition_overlays(self):
-        if self._colorbar.isVisible():
-            self._colorbar.move(self.width() - self._colorbar.width() - 8, 8)
+        pass   # la barra de color ya está en su columna (ver __init__)
 
     # — no aplican a este modo, pero _ViewSection los llama para los 4 tipos de vista —
     def set_view_mode(self, mode):
@@ -688,12 +695,11 @@ class GL3DView(QWidget):
         return img
 
     def _update_colorbar(self, cmin: float, cmax: float):
-        """La barra se dibuja en el overlay de la pantalla y también se compone en el export."""
-        img = self._colorbar_image(cmin, cmax, bar_h=self._panel_bar_h())
+        """Barra en la franja derecha, a todo el alto del panel (igual que en el export)."""
+        img = self._colorbar_image(cmin, cmax, bar_h=max(60, self.height() - 16))
         w, h = img.width(), img.height()
         self._colorbar.setPixmap(QPixmap.fromImage(img))
         self._colorbar.setFixedSize(w, h)
-        self._colorbar.move(self.width() - w - 8, 8)
         self._colorbar.setToolTip(f"{cmax:.1f} dB (arriba) — {cmin:.1f} dB (abajo)")
         self._colorbar.show()
 

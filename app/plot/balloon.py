@@ -31,7 +31,8 @@ COLORSCALES = {
     "Turbo":    _seq("Turbo"),
     "Hot":      "Hot",
     # Misma paleta que la v4 (Plotly RdBu invertida: azul oscuro abajo, rojo arriba)
-    "RdBu v4":  _cs(__import__("plotly.colors", fromlist=["x"]).diverging.RdBu, reverse=True),
+    # Azul → rojo directo (mezcla en el medio, sin blanco).
+    "RdBu v4":  _cs(["#1d3f9a", "#c81d25"]),
 }
 
 # ── Helpers comunes ───────────────────────────────────────────────────────────
