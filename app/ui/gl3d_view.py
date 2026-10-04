@@ -607,28 +607,29 @@ class GL3DView(QWidget):
         return items
 
     def _make_box_items(self) -> list:
-        """Planos de fondo con grilla que se extienden (casi) sin fin: piso z=0 y paredes x=-L e
-        y=-L, con L=10 y paso de 0.25 — más allá de la escena, como un plano infinito. Se activan y
-        desactivan con la misma casilla que la grilla de la esfera (Propiedades ▸ Ejes / grilla)."""
+        """Planos de fondo con grilla: piso (z=0) largo y paredes pegadas a la escena, en x=-W e
+        y=-W con altura W (W=1.4, justo fuera de la superficie). Paso de 0.25. Se activan y
+        desactivan con su propia casilla (Propiedades ▸ Ejes / grilla)."""
         qc = QColor(self._axis_color or '#8a8f9a')
         color = (qc.redF(), qc.greenF(), qc.blueF(), 0.45)
         width = float(self._axis_width or 1)
-        L, step = 10.0, 0.25
+        L, W, step = 10.0, 1.4, 0.25          # L: largo del piso · W: distancia y altura de las paredes
         t = np.arange(-L, L + step / 2, step)
-        h = np.arange(0.0, L + step / 2, step)
+        tw = np.arange(-W, W + step / 2, step)
+        h = np.arange(0.0, W + step / 2, step)
         segs = []
-        for x in t:                                  # piso: paralelas al eje Y y al eje X
+        for x in t:                                  # piso
             segs += [[x, -L, 0], [x, L, 0]]
         for y in t:
             segs += [[-L, y, 0], [L, y, 0]]
-        for x in t:                                  # pared y=-L
-            segs += [[x, -L, 0], [x, -L, L]]
+        for x in tw:                                 # pared y=-W
+            segs += [[x, -W, 0], [x, -W, W]]
         for z in h:
-            segs += [[-L, -L, z], [L, -L, z]]
-        for y in t:                                  # pared x=-L
-            segs += [[-L, y, 0], [-L, y, L]]
+            segs += [[-W, -W, z], [W, -W, z]]
+        for y in tw:                                 # pared x=-W
+            segs += [[-W, y, 0], [-W, y, W]]
         for z in h:
-            segs += [[-L, -L, z], [-L, L, z]]
+            segs += [[-W, -W, z], [-W, W, z]]
         return [gl.GLLinePlotItem(pos=np.array(segs, dtype=float), color=color, width=width,
                                   antialias=True, mode='lines', glOptions='translucent')]
 
