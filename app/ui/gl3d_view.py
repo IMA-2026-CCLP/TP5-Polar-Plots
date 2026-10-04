@@ -467,7 +467,7 @@ class GL3DView(QWidget):
         R_clip = np.clip(R_dB, cmin, cmax)
         # Sin variación (p. ej. un omni: todas las tomas con el mismo nivel) el radio sería el mínimo
         # (esfera diminuta, invisible): se dibuja a radio completo.
-        R_r    = np.clip((R_dB - vmin) / span, 0.01, 1.0) if (vmax - vmin) > 1e-6 else np.ones_like(R_dB)
+        R_r    = self._balloon_radius(R_dB)
 
         E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
         if self._geometry_mode == 'sphere':
@@ -501,7 +501,7 @@ class GL3DView(QWidget):
         if zenith_dB is not None and np.isfinite(zenith_dB):
             n_p = X.shape[1]
             # 'zaxis': el polo está siempre en Z=1 (90° de elevación), sin importar el nivel.
-            z_pole = 1.0 if self._geometry_mode in ('zaxis', 'sphere') else (float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0)) if (vmax - vmin) > 1e-6 else 1.0)
+            z_pole = 1.0 if self._geometry_mode in ('zaxis', 'sphere') else float(self._balloon_radius(zenith_dB))
             z_color = float(np.clip(zenith_dB, cmin, cmax))
             X = np.vstack([X, np.zeros(n_p)])
             Y = np.vstack([Y, np.zeros(n_p)])
@@ -679,6 +679,15 @@ class GL3DView(QWidget):
             pts = np.stack([np.cos(theta) * np.cos(a), np.cos(theta) * np.sin(a), np.sin(theta)], axis=-1)
             items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
         return items
+
+    def _balloon_radius(self, dB):
+        """Radio del balloon con escala FIJA en dB (como en la nota de Audiomatica AN-002, fig. 14):
+        0 dB (eje/referencia) toca el borde (radio 1); cada dB por debajo acorta el radio, y a
+        −rango el radio es el mínimo. El rango es configurable (Propiedades ▸ Escala, 12 dB)."""
+        lo = max(0.5, float(self._style.get('balloon_range_db', 12.0)))      # dB por debajo de 0
+        hi = max(0.0, float(self._style.get('balloon_headroom_db', 6.0)))     # margen por encima de 0
+        r = (np.asarray(dB, dtype=float) + lo) / (lo + hi)                  # 0 dB queda en lo/(lo+hi)
+        return np.clip(r, 0.01, None)   # sin tope superior: los lóbulos sobre 0 dB salen de la esfera
 
     def _colorbar_pt(self) -> float:
         """Tamaño (pt) de la escala: Propiedades ▸ Escala (por gráfico); si no hay, Opciones ▸ Imágenes."""

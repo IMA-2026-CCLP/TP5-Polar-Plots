@@ -58,12 +58,12 @@ _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear",
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_range_db": 12.0, "balloon_headroom_db": 6.0,
                  "colorbar_pt": 12.0},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear",
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_range_db": 12.0, "balloon_headroom_db": 6.0,
                  "colorbar_pt": 12.0},
     "polar2d":  {
         "bg_color":         "#ffffff",
@@ -472,6 +472,22 @@ class _ViewSection(QWidget):
                 spin_cb.setToolTip("Tamaño (pt) de los valores de la escala de colores, en pantalla y en las imágenes exportadas.")
                 form.addRow("Tamaño de texto de la escala (pt):", spin_cb)
                 fields['colorbar_pt'] = spin_cb
+                spin_rng = _NumEdit()
+                spin_rng.setRange(3, 60)
+                spin_rng.setDecimals(1)
+                spin_rng.setValue(self._style.get('balloon_range_db', 12.0))
+                spin_rng.setToolTip("Cuántos dB por debajo de 0 dB llega el balloon hasta el centro. "
+                                    "Por defecto 12 dB (ver Audiomatica AN-002, 'Reference Balloon Range').")
+                form.addRow("Rango bajo 0 dB (dB):", spin_rng)
+                fields['balloon_range_db'] = spin_rng
+                spin_head = _NumEdit()
+                spin_head.setRange(0, 30)
+                spin_head.setDecimals(1)
+                spin_head.setValue(self._style.get('balloon_headroom_db', 6.0))
+                spin_head.setToolTip("Margen por encima de 0 dB: el borde de la esfera de referencia corresponde a 0 dB + margen, "
+                                     "así los lóbulos que superan 0 dB no salen de la escala.")
+                form.addRow("Margen sobre 0 dB (dB):", spin_head)
+                fields['balloon_headroom_db'] = spin_head
             outer.addWidget(box)
 
         if self._mode in ("3d", "sphere"):
@@ -698,6 +714,9 @@ class _ViewSection(QWidget):
                 new_style['color_distribution'] = fields['color_distribution'].currentData()
             if 'colorbar_pt' in fields:
                 new_style['colorbar_pt'] = fields['colorbar_pt'].value()
+            if 'balloon_range_db' in fields:
+                new_style['balloon_range_db'] = fields['balloon_range_db'].value()
+                new_style['balloon_headroom_db'] = fields['balloon_headroom_db'].value()
 
             if self._mode in ("3d", "sphere"):
                 self._axis_color = fields['grid_color'].color_hex
