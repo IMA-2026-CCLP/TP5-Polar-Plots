@@ -283,7 +283,7 @@ class NativeRibbon(QWidget):
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
         act('export_all',  "Imágenes de directividad…", "Exporta las imágenes de los gráficos que elijas, para todas las bandas del rango", b.exportAllImages, False)
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
-        act('data_matrix', "Matriz de datos…", "Mapa de calor del dato medido de la banda actual: eje X = azimut, eje Y = elevación",
+        act('data_matrix', "Matriz radial…", "Mallado radial de las mediciones: anillo = distancia al cénit, sector = HOR; promedio energético en cénit y costura",
             lambda: self.sig_open_options.emit('data_matrix'))
         act('smoothing',   "Suavizado…",      "Suavizado e interpolación — se aplica por igual a Polar 2D, Superficie 3D y Esfera",
             lambda: self.sig_open_options.emit('smoothing'))

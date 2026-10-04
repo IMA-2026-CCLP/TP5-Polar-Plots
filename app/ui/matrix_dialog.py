@@ -1,108 +1,136 @@
-"""ui/matrix_dialog.py — Herramientas ▸ Matriz de datos: mapa de calor del dato medido (azimut × elevación)."""
+"""ui/matrix_dialog.py — Herramientas ▸ Matriz radial: mallado de mediciones (anillo = distancia al cénit,
+sector = HOR). Cada celda muestra el nivel que le corresponde según la regla de simetría."""
+import math
 import os
 import numpy as np
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QColor, QFont, QPainter
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox, QToolTip, QPushButton
+from PyQt6.QtCore import Qt, QSize, QPointF, QRectF
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox,
+                             QToolTip, QPushButton)
 
-_ML, _MT = 90, 60   # margen izquierdo / superior (rótulos de ejes)
+THR_DB = 3.0   # diferencia máxima entre mediciones de una misma celda antes de marcarla
 
 
-class _Heatmap(QWidget):
+def _energy_mean(values):
+    v = np.asarray(values, dtype=float)
+    return float(10 * np.log10(np.mean(10 ** (v / 10.0))))
+
+
+def radial_cells(levels, azimuths, thetas):
+    """Devuelve {(d, hor): (valor, [(θ, giro, dB), ...])} con la regla de la matriz radial:
+    d = |θ − 90°| (anillo), hor = giro/HOR de 10°. Delante (θ = 90 − d) mide HOR = giro;
+    atrás (θ = 90 + d) mide HOR = giro + 180. En HOR 0° y 180° hay dos mediciones: se promedian
+    en energía. El cénit (d = 0) promedia los giros de θ = 90°."""
+    L = np.asarray(levels, dtype=float)
+    az = [float(a) for a in azimuths]
+    th = [float(t) for t in thetas]
+    def get(giro, t):
+        ia = [i for i, a in enumerate(az) if abs(a - giro) < 0.5]
+        it = [j for j, x in enumerate(th) if abs(x - t) < 0.5]
+        return (L[ia[0], it[0]], giro, t) if ia and it and np.isfinite(L[ia[0], it[0]]) else None
+    cells = {}
+    cen = [get(g, 90.0) for g in az]
+    cen = [c for c in cen if c]
+    if cen:
+        cells[(0, None)] = (_energy_mean([c[0] for c in cen]), [(c[2], c[1], c[0]) for c in cen])
+    for d in range(10, 91, 10):
+        tf, tb = 90.0 - d, 90.0 + d
+        for hor in range(0, 360, 10):
+            ms = []
+            if hor <= 180 and get(hor, tf): ms.append(get(hor, tf))
+            if hor >= 180 and get(hor - 180, tb): ms.append(get(hor - 180, tb))
+            if hor == 0 and get(180, tb): ms.append(get(180, tb))          # costura: segunda medición
+            if not ms:
+                continue
+            cells[(d, hor)] = (_energy_mean([m[0] for m in ms]), [(m[2], m[1], m[0]) for m in ms])
+    return cells
+
+
+class _Radial(QWidget):
     def __init__(self, levels, azimuths, thetas, source=None, on_click=None, parent=None):
         super().__init__(parent)
-        self._on_click = on_click
-        self._L = np.asarray(levels, dtype=float)      # (azimut, elevación)
-        self._az = np.asarray(azimuths, dtype=float)
-        self._th = np.asarray(thetas, dtype=float)
+        self._cells = radial_cells(levels, azimuths, thetas)
         self._source = source
-        self._cell = 30
-        self._vmin = float(np.nanmin(self._L))
-        self._vmax = float(np.nanmax(self._L))
+        self._on_click = on_click
+        vals = [v for v, _ in self._cells.values()]
+        self._vmin = min(vals) if vals else -12.0
+        self._vmax = max(vals) if vals else 0.0
         self.setMouseTracking(True)
-        self.setMinimumSize(QSize(420, 360))
+        self.setMinimumSize(QSize(460, 460))
 
-    def _fit(self):
-        """Celda que entra en el área disponible (la matriz nunca se sale de la ventana)."""
-        n_az, n_th = len(self._az), len(self._th)
-        c = min((self.width() - _ML - 20) / n_az, (self.height() - _MT - 20) / n_th)
-        self._cell = max(8, int(c))
-
-    def resizeEvent(self, _):
-        self._fit()
+    def _geom(self):
+        return self.width() / 2, self.height() / 2 + 6, min(self.width(), self.height()) * 0.42
 
     def _color(self, v):
-        if not np.isfinite(v):
-            return QColor('#888888')
         t = min(1.0, max(0.0, (v - self._vmin) / ((self._vmax - self._vmin) or 1.0)))
-        return QColor.fromRgbF(t, 0.15, 1.0 - t)     # azul (bajo) → rojo (alto)
+        return QColor.fromRgbF(t, 0.15, 1.0 - t)
 
-    def _cell_at(self, pos):
-        i = int((pos.x() - _ML) // self._cell)
-        j = int((pos.y() - _MT) // self._cell)
-        if 0 <= i < len(self._az) and 0 <= j < len(self._th):
-            return i, j
-        return None
-
-    def mousePressEvent(self, ev):
-        hit = self._cell_at(ev.position().toPoint())
-        if hit is not None and self._on_click is not None:
-            i, j = hit
-            msg = self._on_click(float(self._az[i]), float(self._th[j]))
-            if msg:
-                QToolTip.showText(ev.globalPosition().toPoint(), msg, self)
-
-    def mouseMoveEvent(self, ev):
-        hit = self._cell_at(ev.position().toPoint())
-        if hit is None:
-            QToolTip.hideText()
-            return
-        i, j = hit
-        if isinstance(self._source, dict):          # matriz desde audios: un WAV por toma
-            full = self._source.get((float(self._az[i]), float(self._th[j])), "—")
-            name = os.path.basename(full) if full != "—" else "sin archivo"
-        else:
-            name = os.path.basename(self._source) if self._source else "cálculo desde audio (sin archivo)"
-            full = self._source or "—"
-        v = self._L[i, j]
-        text = (f"Archivo: {name}\n"
-                f"Azimut: {self._az[i]:.0f}°   Elevación: {self._th[j]:.0f}°\n"
-                f"Nivel: {v:.1f} dB" if np.isfinite(v) else f"Archivo: {name}\nSin dato")
-        QToolTip.showText(ev.globalPosition().toPoint(), text, self)
+    def _key_at(self, pos):
+        cx, cy, R = self._geom()
+        dx, dy = pos.x() - cx, pos.y() - cy
+        r = math.hypot(dx, dy)
+        if r > R:
+            return None
+        if r < 5 / 90.0 * R:
+            return (0, None)
+        d = max(10, min(90, int(round(r / R * 90 / 10)) * 10))
+        hor = int(round(math.degrees(math.atan2(-dx, -dy)) % 360 / 10)) * 10 % 360
+        return (d, hor)
 
     def paintEvent(self, _):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        c = self._cell
-        n_az, n_th = len(self._az), len(self._th)
-        p.setFont(QFont("Segoe UI", max(6, min(9, c // 3))))
-        for i in range(n_az):
-            for j in range(n_th):
-                v = self._L[i, j]
-                p.fillRect(_ML + i * c, _MT + j * c, c, c, self._color(v))
-                p.setPen(QColor('#1a1a1a'))
-                p.drawText(_ML + i * c, _MT + j * c, c, c, Qt.AlignmentFlag.AlignCenter,
-                           f"{v:.0f}" if np.isfinite(v) else "—")
-        # eje X: azimut (arriba)
-        p.setPen(QColor('#1a1a1a'))
-        p.setFont(QFont("Segoe UI", max(6, min(9, c // 3))))
-        for i in range(n_az):
-            p.drawText(_ML + i * c, _MT - 20, c, 16, Qt.AlignmentFlag.AlignCenter, f"{self._az[i]:.0f}")
-        p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        p.drawText(_ML, 4, c * n_az, 20, Qt.AlignmentFlag.AlignCenter, "EJE X: AZIMUT (°)")
-        # eje Y: elevación (izquierda, vertical)
-        p.setFont(QFont("Segoe UI", max(6, min(9, c // 3))))
-        for j in range(n_th):
-            p.drawText(_ML - 50, _MT + j * c, 44, c, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                       f"{self._th[j]:.0f}°")
-        p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        p.save()
-        p.translate(14, _MT + c * n_th / 2)
-        p.rotate(-90)
-        p.drawText(-c * n_th // 2, -10, c * n_th, 20, Qt.AlignmentFlag.AlignCenter,
-                   "EJE Y: ELEVACIÓN θ (°)  — 0° = horizonte, 90° = cénit")
-        p.restore()
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx, cy, R = self._geom()
+        r_of = lambda d: d / 90.0 * R
+        for key, (v, ms) in self._cells.items():
+            if key[0] == 0:
+                p.setPen(QPen(QColor('#555'), 1)); p.setBrush(QBrush(self._color(v)))
+                p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
+                continue
+            d, hor = key
+            d1, d2 = d - 5, min(90, d + 5)
+            m1, m2 = 90 + (hor - 5), 90 + (hor + 5)
+            outer = QRectF(cx - r_of(d2), cy - r_of(d2), 2 * r_of(d2), 2 * r_of(d2))
+            inner = QRectF(cx - r_of(d1), cy - r_of(d1), 2 * r_of(d1), 2 * r_of(d1))
+            pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, 10.0)
+            pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
+            flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
+            p.setPen(QPen(QColor('#d62728') if flag else QColor('#ffffff'), 2 if flag else 0.5))
+            p.setBrush(QBrush(self._color(v)))
+            p.drawPath(pp)
+        p.setPen(QPen(QColor('#444'), 1, Qt.PenStyle.DashLine)); p.setBrush(Qt.BrushStyle.NoBrush)
+        for d in range(10, 91, 10):
+            p.drawEllipse(QPointF(cx, cy), r_of(d), r_of(d))
+        p.setFont(QFont('Segoe UI', 8)); p.setPen(QColor('#111'))
+        for d in range(10, 91, 10):
+            p.drawText(QPointF(cx + 4, cy - r_of(d) - 2), f"d={d}°")
+        p.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        for hor in range(0, 360, 30):
+            t = math.radians(hor)
+            p.drawText(QPointF(cx - (R + 22) * math.sin(t) - 12, cy - (R + 22) * math.cos(t) + 4), f"{hor}°")
+        p.setFont(QFont('Segoe UI', 9))
+        p.drawText(QPointF(12, self.height() - 12), f"Colores: {self._vmin:.1f} a {self._vmax:.1f} dB · rojo = diferencia > {THR_DB:g} dB entre mediciones")
         p.end()
+
+    def mouseMoveEvent(self, ev):
+        key = self._key_at(ev.position())
+        if key is None or key not in self._cells:
+            QToolTip.hideText(); return
+        v, ms = self._cells[key]
+        lines = [f"d={key[0]}°" + ("" if key[1] is None else f" · HOR {key[1]}°"), f"valor (energía): {v:.1f} dB"]
+        for t, g, dbv in ms:
+            lines.append(f"  θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB")
+        if len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB:
+            lines.append(f"⚠ diferencia > {THR_DB:g} dB entre mediciones")
+        QToolTip.showText(ev.globalPosition().toPoint(), chr(10).join(lines), self)
+
+    def mousePressEvent(self, ev):
+        key = self._key_at(ev.position())
+        if key and key in self._cells and self._on_click is not None:
+            _, ms = self._cells[key]
+            t, g, _ = ms[0]
+            msg = self._on_click(float(g), float(t))
+            if msg:
+                QToolTip.showText(ev.globalPosition().toPoint(), msg, self)
 
 
 def _fmt_ms(ms: int) -> str:
@@ -157,33 +185,28 @@ class _PlayerBar(QWidget):
 
 
 class MatrixDialog(QDialog):
-    def _stop_audio(self):
-        from ui.audio_play import stop
-        stop()
-        self._status.setText("Reproducción detenida.")
-
     def __init__(self, levels, azimuths, thetas, band_label: str, source=None, on_click=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Matriz de datos — {band_label}")
-        self.resize(760, 620)
+        self.setWindowTitle(f"Matriz radial — {band_label}")
+        self.resize(780, 700)
         lay = QVBoxLayout(self)
         if isinstance(source, dict):
             origin = "archivos WAV de audio (uno por toma)"
         else:
             origin = os.path.basename(source) if source else "cálculo desde audio"
         intro = QLabel(
-            f"Dato medido (sin suavizar ni reparar) · {band_label} · origen: {origin}. "
-            "Pasá el mouse sobre una celda para ver el archivo de origen. Click en una celda: reproduce esa toma (si hay audio cargado).")
+            f"{band_label} · origen: {origin}. Anillo = distancia al cénit |θ − 90°|, sector = HOR (10°). "
+            "Pasá el mouse para ver las mediciones de cada celda. Click: reproduce esa toma (si hay audio).")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        def _click(az, th):
-            msg = on_click(az, th) if on_click is not None else ""
+        self._status = QLabel("")
+        lay.addWidget(self._status)
+        def _click(g, t):
+            msg = on_click(g, t) if on_click is not None else ""
             self._status.setText(msg or "")
             return msg
-        self._heat = _Heatmap(levels, azimuths, thetas, source, on_click=_click if on_click else None)
-        lay.addWidget(self._heat, 1)
-        self._status = QLabel("Click en una celda para escuchar esa toma.")
-        lay.addWidget(self._status)
+        self._radial = _Radial(levels, azimuths, thetas, source, on_click=_click if on_click else None)
+        lay.addWidget(self._radial, 1)
         if on_click is not None:
             lay.addWidget(_PlayerBar())
         row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
