@@ -228,7 +228,7 @@ class _Radial(QWidget):
             if key[0] == 0:
                 # cénit: promedio energético de los giros; se marca si la dispersión supera el umbral
                 flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
-                p.setPen(QPen(QColor('#d62728') if flag else QColor('#555'), 2 if flag else 1))
+                p.setPen(QPen(QColor('#ffd400') if flag else QColor('#555'), 2 if flag else 1))
                 p.setBrush(QBrush(self._color(v)))
                 p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
                 continue
@@ -241,11 +241,11 @@ class _Radial(QWidget):
             pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
             flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
             if key in self._sel:
-                pen = QPen(QColor('#ffd400'), 3)
+                pen = QPen(QColor('#00b3ff'), 3)
             elif key in self._overrides:
                 pen = QPen(QColor('#7b2cbf'), 2.5)
             else:
-                pen = QPen(QColor('#d62728') if flag else QColor('#ffffff'), 2 if flag else 0.5)
+                pen = QPen(QColor('#ffd400') if flag else QColor('#ffffff'), 2 if flag else 0.5)
             p.setPen(pen)
             p.setBrush(QBrush(self._color(v)))
             p.drawPath(pp)
@@ -281,7 +281,7 @@ class _Radial(QWidget):
             p.drawText(QPointF(cx - (R + 22) * math.sin(t) - 12, cy - (R + 22) * math.cos(t) + 4), f"{hor}°")
         self._paint_colorbar(p)
         p.setFont(QFont('Segoe UI', 9))
-        p.drawText(QPointF(12, self.height() - 12), f"rojo = diferencia > {THR_DB:g} dB entre mediciones · unidad: {self._unit}")
+        p.drawText(QPointF(12, self.height() - 12), f"amarillo = diferencia > {THR_DB:g} dB entre mediciones · unidad: {self._unit}")
         p.end()
 
     def _paint_colorbar(self, p):
