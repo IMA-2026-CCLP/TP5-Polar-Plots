@@ -465,7 +465,9 @@ class GL3DView(QWidget):
         cmax = self._max_db if self._max_db is not None else vmax
         span = (vmax - vmin) or 1.0
         R_clip = np.clip(R_dB, cmin, cmax)
-        R_r    = np.clip((R_dB - vmin) / span, 0.01, 1.0)
+        # Sin variación (p. ej. un omni: todas las tomas con el mismo nivel) el radio sería el mínimo
+        # (esfera diminuta, invisible): se dibuja a radio completo.
+        R_r    = np.clip((R_dB - vmin) / span, 0.01, 1.0) if (vmax - vmin) > 1e-6 else np.ones_like(R_dB)
 
         E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
         if self._geometry_mode == 'sphere':
@@ -499,7 +501,7 @@ class GL3DView(QWidget):
         if zenith_dB is not None and np.isfinite(zenith_dB):
             n_p = X.shape[1]
             # 'zaxis': el polo está siempre en Z=1 (90° de elevación), sin importar el nivel.
-            z_pole = 1.0 if self._geometry_mode in ('zaxis', 'sphere') else float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0))
+            z_pole = 1.0 if self._geometry_mode in ('zaxis', 'sphere') else (float(np.clip((zenith_dB - vmin) / span, 0.01, 1.0)) if (vmax - vmin) > 1e-6 else 1.0)
             z_color = float(np.clip(zenith_dB, cmin, cmax))
             X = np.vstack([X, np.zeros(n_p)])
             Y = np.vstack([Y, np.zeros(n_p)])
