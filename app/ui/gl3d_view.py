@@ -250,6 +250,9 @@ class GL3DView(QWidget):
         layout = QStackedLayout(self._host)
         layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
         layout.setContentsMargins(0, 0, 0, 0)
+        # Fondo blanco de toda la vista (incluida la franja de la escala), no el gris de la ventana.
+        self.setObjectName("gl3d_view")
+        self.setStyleSheet("QWidget#gl3d_view { background: #ffffff; }")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
