@@ -30,6 +30,8 @@ class Bridge(QObject):
     sig_load_session       = pyqtSignal()
     sig_apply_hpf          = pyqtSignal(float)
     sig_corr_recalc        = pyqtSignal()
+    sig_filter_bands       = pyqtSignal()
+    sig_nivelar_onaxis     = pyqtSignal()
     sig_align_takes        = pyqtSignal(float, float, object, float)
     sig_align_ref          = pyqtSignal(object)
     sig_align_preview      = pyqtSignal(float, float, object)
@@ -53,7 +55,7 @@ class Bridge(QObject):
             'tab':        0,
             'theta':      'ref',  'az':        'Todos',
             'envelope':   True,   'db':         True,   'matrix': True,
-            'corr_ref':   'ref',  'corr_view':  '0',
+            'corr_ref':   'ref',  'corr_view':  '0',  'corr_base':  0,
             'smooth':     20.0,   'ymin':       -60.0,  'ymax': 0.0,
             'hpf_hz':     200.0,
             'onset':      1.0,    'thresh':    -40.0,   'window_ms': 50.0,
@@ -128,6 +130,12 @@ class Bridge(QObject):
     @pyqtSlot()
     def corrRecalc(self):
         self.sig_corr_recalc.emit()
+
+    def filterBands(self):
+        self.sig_filter_bands.emit()
+
+    def nivelarOnaxis(self):
+        self.sig_nivelar_onaxis.emit()
 
     def applyHpf(self):
         self.sig_apply_hpf.emit(float(self.state.get('hpf_hz', 200.0)))

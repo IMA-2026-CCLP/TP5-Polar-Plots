@@ -987,19 +987,61 @@ class TabDirectividad(QWidget):
         return f"Deshecho el último reemplazo ({len(snap)} tomas)."
 
     def matrix_bands(self):
-        """(niveles[azimut, elevación, banda], azimuts, elevaciones, frecuencias Hz, origen) para la
-        matriz radial, con todas las bandas calculadas. Sin patrón calculado: una sola 'banda' RMS."""
+        """(niveles[azimut, elevación, banda], azimuts, elevaciones, frecuencias Hz, origen, unidad)
+        para la matriz radial. La corrección por toma (Aplicar) se suma acá, a cada giro, ANTES de
+        que la matriz promedie cenital y costura (esas celdas combinan tomas distintas)."""
+        ma = self._get_current_ma()
+        # Niveles por banda (Filtrar por bandas): corregidos si hubo Aplicar, si no sin corregir
+        if ma is not None and getattr(ma, 'leq_onaxis', None) is not None:
+            idx = [i for i, t in enumerate(ma.thetas) if t != 'ref']
+            th  = [float(ma.thetas[i]) for i in idx]
+            return (ma.leq_onaxis[:, idx, :], np.array(ma.angles, dtype=np.float32), np.array(th, dtype=np.float32),
+                    [float(f) for f in ma._leq_cache[2]], self.source_file, 'dB rel. on-axis (corregido)')
+        lv_bands = None
+        if ma is not None and getattr(ma, 'leq_corr', None) is not None:
+            lv_bands, unit_b = ma.leq_corr, 'dB SPL (corregido)'
+        elif ma is not None and getattr(ma, '_leq_cache', None) is not None:
+            lv_bands, unit_b = ma._leq_cache[0], ('dB SPL' if ma._is_spl else 'dBFS')
+        if lv_bands is not None:
+            idx = [i for i, t in enumerate(ma.thetas) if t != 'ref']
+            th  = [float(ma.thetas[i]) for i in idx]
+            freqs_b = ma._leq_cache[2] if getattr(ma, '_leq_cache', None) is not None else ma.dir_freqs
+            return (lv_bands[:, idx, :], np.array(ma.angles, dtype=np.float32), np.array(th, dtype=np.float32),
+                    [float(f) for f in freqs_b], self.source_file, unit_b)
+        shift = self._corr_shift()
         if self._full_levels is not None:
             from core.data_store import freq_label
             freqs = [float(f) for f in self._full_bands]
-            return (self._full_levels, self._full_azimuths, self._full_thetas, freqs, self.source_file,
-                    'dB rel. on-axis')
+            lv = self._full_levels if shift is None else self._full_levels + shift[:, None, None]
+            return (lv, self._full_azimuths, self._full_thetas, freqs, self.source_file, 'dB rel. on-axis')
         m = self.current_matrix()
         if m is None:
             return None
         levels, az, th, label, src = m
         unit = 'dB SPL' if getattr(self._ma, '_is_spl', False) else 'dB (sin calibrar)'
+        if shift is not None:
+            levels = levels + shift[:, None]
         return (levels[:, :, None], az, th, [None], src, unit)
+
+    def corr_delta_2d(self):
+        """Corrección por toma aplicada (n_giros × bandas, dB) o None si todavía no hubo Aplicar."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'leq_corr', None) is None:
+            return None
+        return ma.dir_delta
+
+    def onaxis_ref_1d(self):
+        """Valor on-axis (dB, por banda) que se restó al nivelar, o None si no se niveló."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'leq_onaxis', None) is None or getattr(ma, 'leq_corr', None) is None:
+            return None
+        return ma.leq_corr[ma._az_to_row(0), ma._th_to_col(0), :]
+
+    def _corr_shift(self):
+        """Delta de corrección por toma (dB, banda ancha) por giro, o None si Aplicar no se usó."""
+        ma = self._get_current_ma()
+        d = getattr(ma, 'dir_delta_global', None) if ma is not None else None
+        return None if d is None else np.asarray(d, dtype=float)
 
     def current_matrix(self):
         """(niveles[azimut, elevación], azimuts, elevaciones, rótulo de la banda) de la banda mostrada."""
@@ -1154,6 +1196,47 @@ class TabDirectividad(QWidget):
             ref_theta      = self.corr_ref_th,
         )
         return ma
+
+    def filter_bands(self) -> bool:
+        """Filtrar por bandas (1/3 de octava): Leq de cada grabación y banda (paso 1). Corre en un
+        hilo con la barra de progreso de abajo. Lo usa Aplicar. False si no hay audio."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'tensor', None) is None:
+            return False
+        w = Worker(ma.compute_leq_bands, '1/3')
+        w.label = "Filtrando por bandas 1/3…"
+        w.log.connect(self.log)
+        w.finished.connect(lambda _: self._on_filter_done(ma))
+        w.error.connect(lambda e: self.log.emit(e))
+        self._filter_worker = w
+        w.start()
+        return True
+
+    def _on_filter_done(self, ma):
+        self._refresh_display()   # la matriz se redibuja con las bandas nuevas
+        n = len(ma._leq_cache[2]) if getattr(ma, '_leq_cache', None) is not None else '?'
+        self.log.emit(f"[Filtrar] Leq por posición en {n} bandas de 1/3 de octava.")
+
+    def nivelar_onaxis(self) -> bool:
+        """Nivelar a on-axis (paso 3): sobre la grilla corregida, cada banda queda en 0 dB en (0°, 0°)."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'leq_corr', None) is None:
+            return False
+        ma.normalize_onaxis()
+        self._refresh_display()
+        return True
+
+    def apply_take_correction(self, ref_az: int) -> bool:
+        """Aplicar: corrección por toma banda por banda (tercios). Mic de referencia = corr_ref_th,
+        toma base = ref_az. Calcula el Leq por banda si falta (con audio cargado). False si no hay audio."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'tensor', None) is None:
+            return False
+        if ma._leq_cache is None:
+            ma.compute_leq_bands('1/3')
+        ma.apply_take_correction_bands(ref_theta=self.corr_ref_th, ref_azimuth=ref_az)
+        self._refresh_display()
+        return True
 
     def _on_compute_done(self, ma):
         nota = self._nota

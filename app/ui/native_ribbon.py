@@ -231,17 +231,23 @@ class NativeRibbon(QWidget):
         return b
 
     def _corr_row(self, b) -> QWidget:
-        """Referencia de la corrección por toma (desplegable angosto) + botón Aplicar."""
+        """Corrección por toma: fila 1 = mic de referencia + toma base (desplegables angostos);
+        fila 2 = Aplicar."""
         w = QWidget()
-        h = QHBoxLayout(w)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.addWidget(QLabel("Referencia"))
-        cb = self._combo('corr_ref', 60, "Micrófono de referencia de la corrección de emisión por toma (paso 2)",
-                         [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)])
-        h.addWidget(cb)
-        h.addWidget(self._button("Aplicar", "Recalcula la directividad con la referencia elegida (la matriz y dB vs tiempo se actualizan)",
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.addWidget(QLabel("Mic"))
+        top.addWidget(self._combo('corr_ref', 60, "Micrófono de referencia que mide la emisión de cada toma (paso 2)",
+                                  [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)]))
+        top.addWidget(QLabel("Base"))
+        top.addWidget(self._combo('corr_base', 60, "Giro (HOR) contra el que se compara cada toma. Por defecto 0°",
+                                  [(f'{a}°', str(a)) for a in range(0, 181, 10)]))
+        top.addStretch(1)
+        v.addLayout(top)
+        v.addWidget(self._button("Aplicar", "Recalcula sólo la corrección por toma con la referencia y toma base elegidas (matriz y dB vs tiempo)",
                                  lambda: b.corrRecalc()))
-        h.addStretch(1)
         return w
 
     def _tool(self, name) -> QToolButton:
@@ -575,8 +581,18 @@ class NativeRibbon(QWidget):
                                     lambda: b.applyHpf(), 'hpf', enabled=False))]),
             ("Calibración", [
                 (None, self._tool('calibrar'))]),
+            ("Filtrar por bandas", [
+                (None, self._button("Filtrar por bandas 1/3",
+                                    "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Aplicar.",
+                                    lambda: b.filterBands())),
+            ]),
             ("Corrección por toma", [
                 (None, self._corr_row(b)),
+            ]),
+            ("Nivelar a on-axis", [
+                (None, self._button("Nivelar a on-axis",
+                                    "Paso 3: cada banda queda en 0 dB en la posición on-axis (giro 0°, θ 0°) sobre la grilla corregida.",
+                                    lambda: b.nivelarOnaxis())),
             ]),
         ])
 

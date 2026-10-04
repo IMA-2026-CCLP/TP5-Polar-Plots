@@ -6,7 +6,8 @@ import numpy as np
 from PyQt6.QtCore import Qt, QSize, QPointF, QRectF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox,
-                             QToolTip, QPushButton, QComboBox)
+                             QToolTip, QPushButton, QComboBox, QCheckBox, QFormLayout, QLineEdit)
+from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtGui import QPainterPath
 
 def _halo(p, path, color, width, glow_width):
@@ -78,14 +79,18 @@ class _Radial(QWidget):
         self._zoom = 1.0          # zoom con la rueda del mouse
         self._cx = self._cy = None  # centro del mallado (se mueve al arrastrar / hacer zoom)
         self._drag = None
-        vals = [v for v, _ in self._cells.values()]
-        self._vmin = min(vals) if vals else -12.0
-        self._vmax = max(vals) if vals else 0.0
+        self._scale_fixed = False      # escala fija (no cambia al cambiar de banda)
+        self._scale_user = None        # (mín, máx, paso) elegidos a mano, en dB
+        self._cb_press = False         # clic derecho sobre la escala de colores
+        self._apply_scale()
         self.setMouseTracking(True)
         self.setMinimumSize(QSize(460, 460))
 
     def set_unit(self, unit):
+        if unit != getattr(self, '_unit', None):   # cambió el tipo de dato (sin calibrar / calibrado / relativo)
+            self._scale_user, self._scale_fixed = None, False   # la escala fija se vuelve a definir
         self._unit = unit
+        self._apply_scale()
         self.update()
 
     def set_source(self, source):
@@ -94,6 +99,14 @@ class _Radial(QWidget):
     def set_axes(self, azimuths, thetas):
         self._az, self._th = azimuths, thetas
 
+    def set_onaxis(self, value_db):
+        """Valor restado para nivelar al on-axis en la banda mostrada (dB); sólo se muestra en el hover."""
+        self._onaxis = value_db
+
+    def set_corr(self, corr_by_giro):
+        """Corrección aplicada por giro (dict giro→dB) para la banda mostrada; sólo se muestra en el hover."""
+        self._corr = corr_by_giro
+
     def set_levels(self, levels):
         """Cambia la banda mostrada (recalcula las celdas y la escala de color)."""
         self._levels = np.asarray(levels, dtype=float)
@@ -101,10 +114,72 @@ class _Radial(QWidget):
 
     def _recalc(self):
         self._cells = radial_cells(self._levels, self._az, self._th, self._overrides)
+        self._apply_scale()
+        self.update()
+
+    def band_changed(self):
+        """Cambio de banda: sin 'Fija' la escala vuelve a la de los datos; con 'Fija' se conserva."""
+        if not self._scale_fixed:
+            self._scale_user = None
+        self._apply_scale()
+
+    def _apply_scale(self):
+        """Mín y máx de la escala: fijos si el usuario los eligió, si no, los de los datos."""
+        if self._scale_user is not None:
+            self._vmin, self._vmax = self._scale_user[0], self._scale_user[1]
+            return
         vals = [v for v, _ in self._cells.values()]
         self._vmin = min(vals) if vals else -12.0
         self._vmax = max(vals) if vals else 0.0
-        self.update()
+
+    def _cbar_rect(self):
+        """Zona de la escala de colores (barra y valores), en coordenadas del widget."""
+        x = self.width() - 78
+        return QRectF(x - 40, 14, 22 + 90, self.height() - 40 - 14)
+
+    def _edit_scale(self):
+        """Diálogo de la escala: mínimo, máximo, paso (dB) como texto y si queda fija."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Escala de colores")
+        form = QFormLayout(dlg)
+        step0 = (self._vmax - self._vmin) / 12 if self._vmax > self._vmin else 1.0
+        if self._scale_user is not None:
+            step0 = self._scale_user[2]
+        def field(v):
+            le = QLineEdit(f"{float(v):g}")
+            le.setValidator(QDoubleValidator(-300.0, 300.0, 3, le))
+            le.setFixedWidth(90)
+            return le
+        e_min, e_max, e_step = field(self._vmin), field(self._vmax), field(step0)
+        chk = QCheckBox("Fija (conservar al cambiar de banda)"); chk.setChecked(self._scale_fixed)
+        form.addRow("Valor mínimo (dB):", e_min)
+        form.addRow("Valor máximo (dB):", e_max)
+        form.addRow("Paso por color (dB):", e_step)
+        form.addRow(chk)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        auto = btns.addButton("Automática", QDialogButtonBox.ButtonRole.ResetRole)
+        pulsado = {"auto": False}
+        def _auto():
+            pulsado["auto"] = True
+            dlg.accept()
+        auto.clicked.connect(_auto)
+        btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+        res = dlg.exec()
+        if pulsado["auto"]:
+            self._scale_fixed, self._scale_user = False, None
+        elif res == QDialog.DialogCode.Accepted:
+            try:
+                lo, hi, st = float(e_min.text()), float(e_max.text()), float(e_step.text())
+            except ValueError:
+                return
+            if hi <= lo or st <= 0:
+                return
+            self._scale_user = (lo, hi, st)
+            self._scale_fixed = chk.isChecked()
+        else:
+            return
+        self._recalc()   # recalcula los colores de las celdas con la escala nueva y redibuja
 
     @staticmethod
     def _mirror_source(key):
@@ -200,6 +275,9 @@ class _Radial(QWidget):
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.MouseButton.RightButton:
+            if self._cbar_rect().contains(ev.position()):
+                self._cb_press = True
+                return
             self._drag = ev.position()
             return
         if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:   # Ctrl + clic: seleccionar celda
@@ -214,6 +292,10 @@ class _Radial(QWidget):
         self._click_at(ev)
 
     def mouseReleaseEvent(self, ev):
+        if self._cb_press:
+            self._cb_press = False
+            self._edit_scale()
+            return
         self._drag = None
 
     def _color(self, v):
@@ -255,11 +337,10 @@ class _Radial(QWidget):
         for key, (v, ms) in self._cells.items():
             if key[0] == 0:
                 # cénit: promedio energético de los giros; se marca si la dispersión supera el umbral
-                flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
                 p.setBrush(QBrush(self._color(v)))
-                if flag:
+                if key in self._sel:
                     cc = QPainterPath(); cc.addEllipse(QPointF(cx, cy), r_of(5), r_of(5))
-                    _halo(p, cc, '#ffd400', 5.5, 8.0)
+                    _halo(p, cc, '#ffd400', 3.6, 3.0)            # selección: amarillo
                     p.setPen(Qt.PenStyle.NoPen); p.drawPath(cc)
                 else:
                     p.setPen(QPen(QColor('#555'), 1)); p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
@@ -271,15 +352,12 @@ class _Radial(QWidget):
             inner = QRectF(cx - r_of(d1), cy - r_of(d1), 2 * r_of(d1), 2 * r_of(d1))
             pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, 10.0)
             pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
-            flag = len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB
             p.setBrush(QBrush(self._color(v)))
             if key in self._sel:
-                _halo(p, pp, '#2ca02c', 3.0, 2.2)              # selección: verde leve
+                _halo(p, pp, '#ffd400', 3.6, 3.0)              # selección: amarillo, borde apenas más grueso
             elif key in self._overrides:
                 p.setPen(QPen(QColor('#7b2cbf'), 2.5)); p.drawPath(pp)
                 continue
-            elif flag:
-                _halo(p, pp, '#ffd400', 5.5, 8.0)              # diferencia > 3 dB: amarillo marcado
             else:
                 p.setPen(QPen(QColor('#ffffff'), 0.5)); p.drawPath(pp)
                 continue
@@ -293,16 +371,16 @@ class _Radial(QWidget):
             p.drawText(QPointF(cx - (R + 22) * math.sin(t) - 12, cy - (R + 22) * math.cos(t) + 4), f"{hor}°")
         self._paint_colorbar(p)
         p.setFont(QFont('Segoe UI', 9))
-        p.drawText(QPointF(12, self.height() - 12), f"amarillo = diferencia > {THR_DB:g} dB entre mediciones · verde = selección · unidad: {self._unit}")
+        p.drawText(QPointF(12, self.height() - 12), f"amarillo = selección · violeta = reemplazo · unidad: {self._unit}")
         p.end()
 
     def _paint_colorbar(self, p):
         """Escala de color con pasos: N bandas de igual tamaño entre el mínimo y el máximo, cada una con
         su color, marcas y valor en cada borde. Se ve siempre, a la derecha del mallado."""
-        N = 12
         vmin, vmax = self._vmin, self._vmax
         if vmax - vmin < 1e-9:
             vmax = vmin + 1.0
+        N = max(1, round((vmax - vmin) / self._scale_user[2])) if self._scale_user else 12
         x, w = self.width() - 78, 22
         top, bottom = 56, self.height() - 40
         hstep = (bottom - top) / N
@@ -333,12 +411,17 @@ class _Radial(QWidget):
             QToolTip.hideText(); return
         v, ms = self._cells[key]
         lines = [f"d={key[0]}°" + ("" if key[1] is None else f" · HOR {key[1]}°"), f"valor (energía): {v:.1f} dB"]
+        corr = getattr(self, '_corr', None)
         for t, g, dbv in ms:
             k = int(round(t / 10)) + 1
-            lines.append(f"  mic_{k}_ang_forte_{int(g)}.wav · θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB")
+            extra = '' if not corr or g not in corr else f" · corrección toma {corr[g]:+.2f} dB"
+            lines.append(f"  mic_{k}_ang_forte_{int(g)}.wav · θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB{extra}")
         if key in self._overrides:
             t_src, g_src = self._overrides[key]
             lines.append(f"↔ reemplazada por espejo: θ={t_src:.0f}° · giro {g_src:.0f}°")
+        onax = getattr(self, '_onaxis', None)
+        if onax is not None:
+            lines.append(f"nivelado al on-axis: −{onax:.2f} dB (nivel on-axis antes de nivelar)")
         if len(ms) > 1 and (max(m[2] for m in ms) - min(m[2] for m in ms)) > THR_DB:
             lines.append(f"⚠ diferencia > {THR_DB:g} dB entre mediciones")
         QToolTip.showText(ev.globalPosition().toPoint(), chr(10).join(lines), self)
@@ -406,9 +489,11 @@ class _PlayerBar(QWidget):
 
 class MatrixPanel(QWidget):
     def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None,
-                 compare_cb=None, undo_cb=None, unit='dB', parent=None):
+                 compare_cb=None, undo_cb=None, unit='dB', corr=None, onaxis=None, parent=None):
         super().__init__(parent)
         self._undo_cb = undo_cb
+        self._onaxis = None if onaxis is None else np.asarray(onaxis, dtype=float)
+        self._corr = None if corr is None else np.asarray(corr, dtype=float)
         self._apply_cb = apply_cb
         self._compare_cb = compare_cb
         self._unit = unit
@@ -438,6 +523,8 @@ class MatrixPanel(QWidget):
         self._on_click_cb = _click if on_click else None
         self._radial = _Radial(self._levels3d[:, :, 0], azimuths, thetas, source, on_click=self._on_click_cb)
         self._radial.set_unit(unit)
+        self._radial.set_corr(self._corr_for_band(0))
+        self._radial.set_onaxis(self._onaxis_for_band(0))
         lay.addWidget(self._radial, 1)
         bar = QHBoxLayout()
         self._b_rep = QPushButton("Reemplazar…")
@@ -534,8 +621,21 @@ class MatrixPanel(QWidget):
         from core.data_store import freq_label
         self.setWindowTitle("Matriz radial — " + ("RMS total" if f is None else f"{freq_label(f)} Hz"))
 
-    def refresh(self, levels3d, azimuths, thetas, freqs, source=None, unit='dB'):
+    def _corr_for_band(self, i):
+        """dict giro→dB de la corrección aplicada en la banda i (o None si no hubo Aplicar)."""
+        if self._corr is None or i >= self._corr.shape[1]:
+            return None
+        return {int(round(float(a))): float(self._corr[k, i]) for k, a in enumerate(self._az)}
+
+    def _onaxis_for_band(self, i):
+        if self._onaxis is None or i >= len(self._onaxis):
+            return None
+        return float(self._onaxis[i])
+
+    def refresh(self, levels3d, azimuths, thetas, freqs, source=None, unit='dB', corr=None, onaxis=None):
+        self._onaxis = None if onaxis is None else np.asarray(onaxis, dtype=float)
         """Actualiza la matriz con los datos nuevos (filtro, calibración, reemplazos, cálculo)."""
+        self._corr = None if corr is None else np.asarray(corr, dtype=float)
         self._levels3d = np.asarray(levels3d, dtype=float)
         self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
         self._unit = unit
@@ -554,6 +654,9 @@ class MatrixPanel(QWidget):
 
     def _on_band(self, _=None):
         i = self._combo.currentData() or 0
+        self._radial.set_corr(self._corr_for_band(i))
+        self._radial.set_onaxis(self._onaxis_for_band(i))
+        self._radial.band_changed()
         self._radial.set_levels(self._levels3d[:, :, i])
         self._update_title()
 

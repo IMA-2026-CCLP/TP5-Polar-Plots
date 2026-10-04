@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QToolButton, QApplication, QLineEdit, QPushButton, QLabel, QProgressBar, QMessageBox, QCheckBox, QComboBox,
 )
 from pathlib import Path
+import numpy as np
 
 from PyQt6.QtCore import Qt, QSettings, QTimer
 from PyQt6.QtGui import QFont, QTextCursor
@@ -170,6 +171,8 @@ class MainWindow(QMainWindow):
         self.view_prepro.log.connect(self._append_log)
         self.view_prepro.view_chosen.connect(self._on_view_choice)
         self.ribbon._b.sig_corr_recalc.connect(self._on_corr_recalc)
+        self.ribbon._b.sig_filter_bands.connect(self._on_filter_bands)
+        self.ribbon._b.sig_nivelar_onaxis.connect(self._on_nivelar_onaxis)
         self.view_prepro._editor.set_corr_offset(self._corr_offset_db)
         QTimer.singleShot(0, self.ribbon._b.emitPlotParams)   # al abrir: matriz radial (esqueleto si no hay datos)
         self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
@@ -388,23 +391,64 @@ class MainWindow(QMainWindow):
         m = self.view_dir.matrix_bands()
         if m is not None:
             levels, az, th, freqs, src, unit = m
-            win.refresh(levels, az, th, freqs, source=src, unit=unit)
+            win.refresh(levels, az, th, freqs, source=src, unit=unit, corr=self.view_dir.corr_delta_2d(),
+                        onaxis=self.view_dir.onaxis_ref_1d())
 
     def _corr_offset_db(self):
         """Corrección por toma en dB por azimut (banda elegida), si está activada en el panel izquierdo."""
-        ma = self.view_dir._ma
-        delta = getattr(ma, 'dir_delta', None)
-        if delta is None:
-            return None
-        bi = min(self.view_dir._current_band_idx, delta.shape[1] - 1)
-        return delta[:, bi]
+        ma = self.view_dir._get_current_ma()
+        glob = getattr(ma, 'dir_delta_global', None)   # dB vs tiempo es banda ancha: corrección global
+        return None if glob is None else np.asarray(glob)
+
+    def _on_nivelar_onaxis(self):
+        """Nivelar a on-axis (paso 3): sobre la grilla corregida por toma."""
+        if not self.view_dir.nivelar_onaxis():
+            self._append_log("[On-axis] Primero aplicá la corrección por toma (Aplicar).")
+            return
+        self._append_log("[On-axis] Grilla nivelada: 0 dB en giro 0°, θ 0° para cada banda.")
+
+    def _on_filter_bands(self):
+        """Filtrar por bandas (1/3): calcula el Leq por posición y banda desde los audios cargados."""
+        if not self.view_dir.filter_bands():
+            self._append_log("[Filtrar] No hay audio cargado.")
 
     def _on_corr_recalc(self):
-        """Panel izquierdo ▸ Corrección por toma ▸ Recalcular: usa la referencia elegida y recalcula."""
-        ref = str(self.ribbon._b.state.get('corr_ref', 'ref'))
+        """Corrección por toma (Aplicar): sólo recalcula la diferencia de niveles entre tomas
+        con el mic de referencia y la toma base elegidos. No relee audio ni recalcula todo.
+        Al terminar, loguea qué cambió (tomas y posiciones de la matriz) y cuánto."""
+        st = self.ribbon._b.state
+        ref = str(st.get('corr_ref', 'ref'))
         self.view_dir.corr_ref_th = 'ref' if ref == 'ref' else int(float(ref))
-        self._append_log(f"[Corrección] Referencia: {ref}. Recalculando…")
-        self.ribbon._b.computeDir()
+        ref_az = int(float(st.get('corr_base', 0)))   # clave propia: no la pisa 'Ref. azimut' de Parámetros
+        ma = self.view_dir._get_current_ma()
+        before_lv = None if ma is None or ma.dir_levels is None else ma.dir_levels.copy()
+        before_d  = None if ma is None or getattr(ma, 'dir_delta_global', None) is None else np.array(ma.dir_delta_global)
+        if not self.view_dir.apply_take_correction(ref_az):
+            self._append_log("[Corrección] No hay audio cargado para calcular la corrección.")
+            return
+        self._append_log(f"[Corrección] Mic {ref}, toma base {ref_az}°.")
+        self._log_corr_diff(ma, before_lv, before_d)
+        self.ribbon._b.emitPlotParams()   # redibuja dB vs tiempo con el nuevo desplazamiento
+
+    def _log_corr_diff(self, ma, before_lv, before_d):
+        """Resumen de lo que cambió con Aplicar: corrección por toma (dB, banda ancha) y las
+        posiciones de la matriz con mayor cambio (giro, θ, dB)."""
+        if ma is None or before_lv is None or ma.dir_levels is None:
+            return
+        after_d = np.asarray(ma.dir_delta_global)
+        self._append_log("[Corrección] Cambio por toma (dB, banda ancha):")
+        for i_az, az in enumerate(ma.angles):
+            b = 0.0 if before_d is None else float(before_d[i_az])
+            self._append_log(f"    giro {az:>3}°: {b:+6.2f} → {float(after_d[i_az]):+6.2f}   (Δ {float(after_d[i_az]) - b:+6.2f})")
+        bi = min(self.view_dir._current_band_idx, ma.dir_levels.shape[2] - 1)
+        diff = ma.dir_levels[:, :, bi] - before_lv[:, :, bi]
+        changed = np.argwhere(np.abs(diff) > 0.05)
+        self._append_log(f"[Corrección] Posiciones con cambio > 0.05 dB (banda {bi}): {len(changed)} de {diff.size}. "
+                         f"Máximo |Δ| = {np.nanmax(np.abs(diff)):.2f} dB")
+        order = sorted(changed.tolist(), key=lambda ij: -abs(diff[ij[0], ij[1]]))[:8]
+        for i_az, i_th in order:
+            th = ma.thetas[i_th]
+            self._append_log(f"    giro {ma.angles[i_az]:>3}°, θ {th}: {float(diff[i_az, i_th]):+6.2f} dB")
 
     def _on_corr_request(self):
         """Corrección por toma: elige el micrófono de referencia (paso 2) y recalcula la directividad."""
@@ -462,10 +506,12 @@ class MainWindow(QMainWindow):
         if self._matrix_win is None:
             self._matrix_win = MatrixPanel(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
                                            apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
-                                           undo_cb=self._undo_replacement, unit=unit)
+                                           undo_cb=self._undo_replacement, unit=unit,
+                                           corr=self.view_dir.corr_delta_2d(), onaxis=self.view_dir.onaxis_ref_1d())
             self.view_dir.on_data_changed = self._refresh_matrix
         else:
-            self._matrix_win.refresh(levels, az, th, freqs, source=src, unit=unit)
+            self._matrix_win.refresh(levels, az, th, freqs, source=src, unit=unit,
+                                     corr=self.view_dir.corr_delta_2d(), onaxis=self.view_dir.onaxis_ref_1d())
         return self._matrix_win
 
     def _on_apply_hpf(self, hz: float):

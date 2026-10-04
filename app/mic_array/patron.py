@@ -68,6 +68,8 @@ class MicArray:
         self.spl_freqs  = None
         self.spl_levels = None
         self.spl_global = None
+        self._leq_cache = None   # (spl_levels, spl_global, freqs, bands) para apply_take_correction
+        self._leq_global_cache = None   # (n_angles, n_thetas) dB banda ancha, para Aplicar
 
         # Directivity results (relative to ref mic per take), None until compute_directivity()
         self.dir_freqs  = None
@@ -658,6 +660,8 @@ class MicArray:
         self._is_normalized  = False
         self.leq_freqs  = self.leq_levels = self.leq_bands = self.leq_global = None
         self.spl_freqs  = self.spl_levels = self.spl_global = None
+        self._leq_cache = None
+        self._leq_global_cache = None
         print("\n  level_compensation done.")
 
     def hpf(self, cutoff_hz):
@@ -1198,8 +1202,42 @@ class MicArray:
 
         print(f"\n  compute_spl done — {bands} octava  |  shape {levels.shape}")
 
+    def compute_leq_bands(self, bands='1/3'):
+        """Paso 1: Leq por posición y banda (tercios u octavas). Guarda self._leq_cache =
+        (spl_levels, spl_global, freqs, bands). Lo usa apply_take_correction."""
+        from filterbank import FilterBank
+
+        P_REF   = 20e-6 if self._is_spl else 1.0
+        fb      = FilterBank(sr=self.sr, bands=bands)
+        n_bands = len(fb.center_freqs_nominal)
+
+        spl_levels = np.zeros((self.n_angles, self.n_thetas, n_bands), dtype=np.float32)
+        spl_global = np.zeros((self.n_angles, self.n_thetas),          dtype=np.float32)
+
+        total = self.n_angles * self.n_thetas
+        done  = 0
+
+        # Step 1 — compute SPL for all positions
+        for i_az in range(self.n_angles):
+            for i_th in range(self.n_thetas):
+                signal = self.tensor[i_az, i_th, :].astype(np.float64)
+
+                if len(signal) >= 2:
+                    rms = np.sqrt(np.mean(signal ** 2))
+                    spl_global[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
+                    _, band_levels = fb.leq(signal, p_ref=P_REF, method='fft')
+                    spl_levels[i_az, i_th, :] = band_levels
+
+                done += 1
+                _progress(done, total)
+                print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
+                      f"  el={self.thetas[i_th]}", end='')
+
+        # Step 2–3 — corrección por toma y normalización (ver apply_take_correction)
+        self._leq_cache = (spl_levels, spl_global, np.array(fb.center_freqs_nominal, dtype=float), bands)
+
     def compute_directivity(self, bands='1/3',
-                            ref_theta='ref', ref_azimuth=0, ref_theta_plot=0):
+                            ref_theta='ref', ref_azimuth=0, ref_theta_plot=0, take_correction=True):
         """
         Computes the directivity pattern in 1/3-octave bands.
 
@@ -1237,32 +1275,74 @@ class MicArray:
         # Sin calibrar (tensor en unidades de fondo de escala) se calcula igual, con niveles en dBFS
         # (P_REF = 1). El patrón es relativo, pero no corrige las diferencias de sensibilidad
         # entre micrófonos: la GUI avisa al usuario (ver MainWindow._confirm_uncalibrated).
-        from filterbank import FilterBank
+        self.compute_leq_bands(bands)
+        spl_levels, spl_global, freqs, bands = self._leq_cache
+        self.apply_take_correction(ref_theta=ref_theta, ref_azimuth=ref_azimuth, ref_theta_plot=ref_theta_plot,
+                                   correct=take_correction)
 
-        P_REF   = 20e-6 if self._is_spl else 1.0
-        fb      = FilterBank(sr=self.sr, bands=bands)
-        n_bands = len(fb.center_freqs_nominal)
+    def apply_take_correction_bands(self, ref_theta='ref', ref_azimuth=0):
+        """Corrección por toma banda por banda (Aplicar):
+        Delta[giro, f] = Leq(base, ref, f) − Leq(giro, ref, f); Leq_corr = Leq + Delta.
+        Guarda self.leq_corr (n_angles, n_thetas, n_bands) dB SPL, self.dir_delta (n_angles, n_bands)
+        y dir_delta_global (banda ancha, para dB vs tiempo). No normaliza."""
+        if self._leq_cache is None:
+            self.compute_leq_bands('1/3')
+        spl_levels, spl_global, freqs, bands = self._leq_cache
+        i_ref  = self._th_to_col(ref_theta)
+        i_base = self._az_to_row(ref_azimuth)
+        delta        = spl_levels[i_base, i_ref, :] - spl_levels[:, i_ref, :]
+        delta_global = spl_global[i_base, i_ref] - spl_global[:, i_ref]
+        self.leq_corr        = spl_levels + delta[:, np.newaxis, :]
+        self.leq_onaxis      = None
+        self.dir_delta       = delta
+        self.dir_delta_global = delta_global
+        self.dir_freqs       = np.array(freqs, dtype=float)
+        return self.leq_corr
 
-        spl_levels = np.zeros((self.n_angles, self.n_thetas, n_bands), dtype=np.float32)
-        spl_global = np.zeros((self.n_angles, self.n_thetas),          dtype=np.float32)
-
-        total = self.n_angles * self.n_thetas
-        done  = 0
-
-        # Step 1 — compute SPL for all positions
+    def compute_leq_broadband(self):
+        """Leq de banda ancha de cada grabación (energía de toda la toma, sin bandas ni filtros).
+        Guarda self._leq_global_cache = (n_angles, n_thetas) dB. Lo usa Aplicar (corrección por toma)."""
+        P_REF = 20e-6 if self._is_spl else 1.0
+        spl = np.full((self.n_angles, self.n_thetas), np.nan, dtype=np.float64)
         for i_az in range(self.n_angles):
             for i_th in range(self.n_thetas):
-                signal = self.tensor[i_az, i_th, :].astype(np.float64)
+                x = self.tensor[i_az, i_th, :].astype(np.float64)
+                if len(x) >= 2:
+                    spl[i_az, i_th] = 20 * np.log10(np.sqrt(np.mean(x ** 2)) / P_REF + 1e-12)
+        self._leq_global_cache = spl
+        return spl
 
-                if len(signal) >= 2:
-                    rms = np.sqrt(np.mean(signal ** 2))
-                    spl_global[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
-                    _, band_levels = fb.leq(signal, p_ref=P_REF, method='fft')
-                    spl_levels[i_az, i_th, :] = band_levels
+    def normalize_onaxis(self):
+        """Paso 3: nivela cada banda al on-axis (giro 0°, θ 0°) sobre la grilla corregida por toma.
+        dir[giro, θ, f] = leq_corr[giro, θ, f] − leq_corr[0°, 0°, f]. Guarda self.leq_onaxis (dB rel.)."""
+        if getattr(self, 'leq_corr', None) is None:
+            raise RuntimeError("Primero Aplicar la corrección por toma")
+        i_on_az = self._az_to_row(0)
+        i_on_th = self._th_to_col(0)
+        self.leq_onaxis = self.leq_corr - self.leq_corr[i_on_az, i_on_th, :][np.newaxis, np.newaxis, :]
+        return self.leq_onaxis
 
-                done += 1
-                print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
-                      f"  el={self.thetas[i_th]}", end='')
+    def apply_take_correction_broadband(self, ref_theta='ref', ref_azimuth=0):
+        """Corrección por toma en banda ancha: Delta_az = Leq(base, ref) − Leq(az, ref).
+        Guarda dir_delta_global (n_angles,) dB. No normaliza ni toca la matriz por banda."""
+        if getattr(self, '_leq_global_cache', None) is None:
+            self.compute_leq_broadband()
+        spl = self._leq_global_cache
+        i_ref = self._th_to_col(ref_theta)
+        i_base = self._az_to_row(ref_azimuth)
+        self.dir_delta_global = spl[i_base, i_ref] - spl[:, i_ref]
+        self.dir_leq_corr_global = spl + self.dir_delta_global[:, np.newaxis]
+        return self.dir_delta_global
+
+    def apply_take_correction(self, ref_theta='ref', ref_azimuth=0, ref_theta_plot=0, correct=True):
+        """
+        Corrección por toma (paso 2) y normalización (paso 3) sobre el Leq ya calculado por
+        compute_directivity(). No relee los audios: sirve para cambiar el micrófono de
+        referencia o la toma base y ver el resultado al instante (botón Aplicar).
+        """
+        if self._leq_cache is None:
+            raise RuntimeError("Primero compute_directivity()")
+        spl_levels, spl_global, freqs, bands = self._leq_cache
 
         # Step 2 — per-take emission correction
         # delta[az, f] = SPL(az=0, ref, f) - SPL(az, ref, f)
@@ -1271,6 +1351,9 @@ class MicArray:
 
         delta        = spl_levels[i_ref_az, i_ref, :] - spl_levels[:, i_ref, :]  # (n_angles, n_bands)
         delta_global = spl_global[i_ref_az, i_ref]    - spl_global[:, i_ref]     # (n_angles,)
+        if not correct:   # Calcular: sin corrección por toma (la aplica Aplicar, sobre la matriz)
+            delta        = np.zeros_like(delta)
+            delta_global = np.zeros_like(delta_global)
 
         spl_corr        = spl_levels + delta[:, np.newaxis, :]      # (n_angles, n_thetas, n_bands)
         spl_corr_global = spl_global + delta_global[:, np.newaxis]  # (n_angles, n_thetas)
@@ -1283,14 +1366,15 @@ class MicArray:
         dir_levels = spl_corr        - spl_corr[i_ref_az, i_ref_th, :]
         dir_global = spl_corr_global - float(spl_corr_global[i_ref_az, i_ref_th])
 
-        self.dir_freqs  = np.array(fb.center_freqs_nominal, dtype=float)
+        self.dir_freqs  = np.array(freqs, dtype=float)
         self.dir_levels = dir_levels
         self.dir_global = dir_global
         self.dir_delta  = delta
+        self.dir_delta_global = delta_global   # (n_angles,) dB, broadband: para dB vs tiempo
         self._is_normalized = True
 
         th_plot_label = 'ref' if ref_theta_plot == 'ref' else f'{ref_theta_plot}°'
-        print(f"\n  compute_directivity done — {bands} octava  |  shape {dir_levels.shape}"
+        print(f"\n  corrección por toma — {bands} octava  |  shape {dir_levels.shape}"
               f"  |  ref_mic='{ref_theta}'  |  ref_plot=({ref_azimuth}°, {th_plot_label})")
 
     def plot_leq_global(self, theta='ref', yrange=None, title=None):
