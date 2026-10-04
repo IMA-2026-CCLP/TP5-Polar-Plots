@@ -2,6 +2,9 @@
 elegidos, para un giro dado. Lee el audio en memoria (incluye reemplazos por espejo aplicados)."""
 import numpy as np
 import pyqtgraph as pg
+from scipy.signal import hilbert
+from scipy.fft import next_fast_len
+from ui.waveform_editor import _MAX_PTS, _FLOOR_DB
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QVBoxLayout, QLabel, QComboBox, QListWidget,
                              QListWidgetItem, QDialogButtonBox)
@@ -19,11 +22,12 @@ def _num(v):
 
 
 class CompareDialog(QDialog):
-    def __init__(self, ma_getter, parent=None):
+    def __init__(self, ma_getter, view_params=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Comparar mediciones")
         self.resize(960, 600)
         self._get = ma_getter
+        self._view = view_params or (lambda: {'env': True, 'db': False, 'smooth': 20.0, 'yrange': None})
         self._ma = ma_getter()
         lay = QVBoxLayout(self)
         if self._ma is None or getattr(self._ma, 'tensor', None) is None:
@@ -107,7 +111,7 @@ class CompareDialog(QDialog):
             pass
         giro = self._giro.currentData()
         ia = int(np.argmin(np.abs(np.asarray([_num(a) or 0 for a in ma.angles]) - (giro or 0))))
-        sr = float(ma.sr)
+        v = self._view()
         k = 0
         for tv, it in self._items.items():
             if it.checkState() != Qt.CheckState.Checked:
@@ -115,10 +119,35 @@ class CompareDialog(QDialog):
             j = [i for i, t in enumerate(ma.thetas) if _num(t) is not None and abs(_num(t) - tv) < 0.5]
             if not j:
                 continue
-            y = np.asarray(ma.tensor[ia, j[0], :], dtype=float)
-            step = max(1, len(y) // 20000)        # submuestreo para que no pese
-            t = np.arange(len(y))[::step] / sr
+            t, y = self._prepare(ma, ma.tensor[ia, j[0], :], v['env'], v['db'], v['smooth'])
             kk = int(round(tv / 10)) + 1
-            self._plot.plot(t, y[::step], pen=pg.mkPen(COLORS[k % len(COLORS)], width=1.2),
+            self._plot.plot(t, y, pen=pg.mkPen(COLORS[k % len(COLORS)], width=1.2),
                             name=f"mic {kk} · {tv:.0f}° · giro {giro:.0f}°")
             k += 1
+        self._plot.setLabel('left', 'dB' if v['db'] else 'amplitud')
+        if v.get('yrange'):
+            self._plot.setYRange(v['yrange'][0], v['yrange'][1], padding=0)
+        else:
+            self._plot.enableAutoRange(axis='y')
+
+    @staticmethod
+    def _prepare(ma, sig, env, db, smooth_ms):
+        """Igual que WaveformEditorWidget._prepare: envolvente (Hilbert + promedio móvil) o señal cruda,
+        en dB si corresponde, diezmada a ~_MAX_PTS puntos."""
+        sr = ma.sr
+        n = len(sig)
+        factor = max(1, n // _MAX_PTS)
+        sig = np.asarray(sig, dtype=np.float64)
+        if env or db:
+            e = np.abs(hilbert(sig, N=next_fast_len(n))[:n])
+            win = int(smooth_ms / 1000 * sr)
+            if win > 1:
+                e = np.convolve(e, np.ones(win) / win, mode='same')
+            y = e[::factor]
+        else:
+            y = sig[::factor]
+        if db:
+            p_ref = 20e-6 if getattr(ma, '_is_spl', False) else 1.0
+            y = np.maximum(20.0 * np.log10(np.abs(y) / p_ref + 1e-12), _FLOOR_DB)
+        t = np.arange(len(y)) * factor / sr
+        return t, y

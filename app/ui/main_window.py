@@ -222,7 +222,13 @@ class MainWindow(QMainWindow):
         Superficie 3D y Esfera, no un modal de Propiedades de un gráfico en particular."""
         if kind == "compare":
             from ui.compare_dialog import CompareDialog
-            self._compare_win = CompareDialog(lambda: self.view_dir._get_current_ma(), parent=self)
+            def _vp():
+                st = self.ribbon._b.state
+                ymin, ymax = st.get('ymin'), st.get('ymax')
+                return {'env': bool(st.get('envelope', True)), 'db': bool(st.get('db', False)),
+                        'smooth': float(st.get('smooth', 20.0)),
+                        'yrange': [float(ymin), float(ymax)] if ymin is not None and ymax is not None else None}
+            self._compare_win = CompareDialog(lambda: self.view_dir._get_current_ma(), view_params=_vp, parent=self)
             self._compare_win.show()
             return
         if kind == "data_matrix":
