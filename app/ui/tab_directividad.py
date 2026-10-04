@@ -1356,7 +1356,7 @@ class TabDirectividad(QWidget):
         self._spec_data   = params.get('spec_data', 0)
         self._spec_global = params.get('spec_global', True)
 
-        cs = params.get('colorscale', 'Plasma')
+        cs = params.get('colorscale', 'RdBu v4')
         for sec in self._sections.values():
             sec.set_colorscale(cs)
 

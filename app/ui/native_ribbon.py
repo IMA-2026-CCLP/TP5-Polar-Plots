@@ -738,7 +738,7 @@ class NativeRibbon(QWidget):
         return dict(
             hz_min      = float(s.get('hz_min', 315.0)),
             hz_max      = float(s.get('hz_max', 10000.0)),
-            colorscale  = str(s.get('colorscale', 'Plasma')),
+            colorscale  = str(s.get('colorscale', 'RdBu v4')),
             el_index    = s.get('el_idx'),
             plane       = str(s.get('polar_plane', 'XY')),
             show_info   = bool(s.get('show_info', False)),

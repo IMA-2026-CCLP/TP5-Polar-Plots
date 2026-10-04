@@ -209,7 +209,7 @@ class GL3DView(QWidget):
         self._elevations: np.ndarray | None = None
         self._bands:      np.ndarray | None = None
         self._band_index: int = 0
-        self._colorscale: str = "Plasma"
+        self._colorscale: str = "RdBu v4"
         self._min_db:     float | None = None
         self._max_db:     float | None = None
         self._show_info:  bool = False

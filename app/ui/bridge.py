@@ -58,7 +58,7 @@ class Bridge(QObject):
             'align_theta':'ref',  'gcc_thresh': None,
             'bands':      '1/3',  'hz_min':    315.0,   'hz_max': 10000.0,
             'ref_az':     0,      'ref_th':     0,
-            'colorscale': 'Plasma','el_idx':    None,
+            'colorscale': 'RdBu v4','el_idx':    None,
             'symmetry':   'none', 'nota':       'Todo el audio',
             'spec_data':  0,      'spec_global': True,
             'view_3d':    True,   'view_sphere': True,
