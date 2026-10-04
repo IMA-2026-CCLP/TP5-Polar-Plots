@@ -230,6 +230,20 @@ class NativeRibbon(QWidget):
             self._btn[name] = b
         return b
 
+    def _corr_row(self, b) -> QWidget:
+        """Referencia de la corrección por toma (desplegable angosto) + botón Aplicar."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(QLabel("Referencia"))
+        cb = self._combo('corr_ref', 60, "Micrófono de referencia de la corrección de emisión por toma (paso 2)",
+                         [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)])
+        h.addWidget(cb)
+        h.addWidget(self._button("Aplicar", "Recalcula la directividad con la referencia elegida (la matriz y dB vs tiempo se actualizan)",
+                                 lambda: b.corrRecalc()))
+        h.addStretch(1)
+        return w
+
     def _tool(self, name) -> QToolButton:
         t = QToolButton()
         t.setDefaultAction(self._act[name])
@@ -562,9 +576,7 @@ class NativeRibbon(QWidget):
             ("Calibración", [
                 (None, self._tool('calibrar'))]),
             ("Corrección por toma", [
-                ("Referencia", self._combo('corr_ref', 90, "Micrófono de referencia de la corrección de emisión por toma (paso 2). Al cambiarlo, se recalcula.",
-                                           [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)],
-                                           lambda: b.corrRecalc())),
+                (None, self._corr_row(b)),
             ]),
         ])
 
