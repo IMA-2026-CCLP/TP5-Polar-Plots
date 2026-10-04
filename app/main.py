@@ -100,6 +100,14 @@ def main():
     # sí (pantalla negra con contenido de otros paneles filtrándose adentro) — hay que
     # setearlo ANTES de construir la QApplication, no alcanza con setearlo después.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+    # Buffer de profundidad explícito para los 3D (pyqtgraph.opengl): sin él el test de
+    # profundidad no funciona y los ejes X/Y/Z se dibujan siempre encima de la superficie, en
+    # vez de quedar tapados por ella según el ángulo de la cámara.
+    from PyQt6.QtGui import QSurfaceFormat
+    _fmt = QSurfaceFormat()
+    _fmt.setDepthBufferSize(24)
+    _fmt.setStencilBufferSize(8)
+    QSurfaceFormat.setDefaultFormat(_fmt)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
