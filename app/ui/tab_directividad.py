@@ -887,6 +887,7 @@ class TabDirectividad(QWidget):
         self._ma             = None
         self._worker: Worker | None = None
         self._full_levels    = None
+        self.source_file: str | None = None   # archivo .cclp cargado (None = calculado desde audio)
         self._full_azimuths  = None
         self._full_thetas    = None
         self._full_bands     = None
@@ -922,7 +923,7 @@ class TabDirectividad(QWidget):
         hz = float(self._full_bands[bi])
         from core.data_store import freq_label
         return (self._full_levels[:, :, bi], self._full_azimuths, self._full_thetas,
-                f"banda {freq_label(hz)} Hz")
+                f"banda {freq_label(hz)} Hz", self.source_file)
 
     def apply_smoothing_settings(self, values: dict):
         """Una sola configuración de suavizado para Polar 2D, Superficie 3D y Esfera (Herramientas
@@ -1071,6 +1072,7 @@ class TabDirectividad(QWidget):
         if not band_mask.any():
             band_mask = np.ones(len(ma.dir_freqs), dtype=bool)
 
+        self.source_file = None   # calculado desde audio, no desde un archivo
         self._full_levels   = ma.dir_levels[:, theta_idx, :][:, :, band_mask]
         self._full_azimuths = np.array(ma.angles,  dtype=np.float32)
         self._full_thetas   = np.array(thetas_num, dtype=np.float32)

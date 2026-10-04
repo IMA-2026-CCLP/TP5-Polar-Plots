@@ -1,22 +1,34 @@
 """ui/matrix_dialog.py — Herramientas ▸ Matriz de datos: mapa de calor del dato medido (azimut × elevación)."""
+import os
 import numpy as np
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QColor, QFont, QPainter
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea, QWidget, QDialogButtonBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QWidget, QDialogButtonBox, QToolTip
+
+_ML, _MT = 90, 60   # margen izquierdo / superior (rótulos de ejes)
 
 
 class _Heatmap(QWidget):
-    def __init__(self, levels, azimuths, thetas, parent=None):
+    def __init__(self, levels, azimuths, thetas, source=None, parent=None):
         super().__init__(parent)
         self._L = np.asarray(levels, dtype=float)      # (azimut, elevación)
         self._az = np.asarray(azimuths, dtype=float)
         self._th = np.asarray(thetas, dtype=float)
-        self._cell = 34
-        self._ml, self._mt = 110, 70                   # margen izquierdo / superior (títulos y etiquetas)
+        self._source = source
+        self._cell = 30
         self._vmin = float(np.nanmin(self._L))
         self._vmax = float(np.nanmax(self._L))
+        self.setMouseTracking(True)
+        self.setMinimumSize(QSize(420, 360))
+
+    def _fit(self):
+        """Celda que entra en el área disponible (la matriz nunca se sale de la ventana)."""
         n_az, n_th = len(self._az), len(self._th)
-        self.setMinimumSize(QSize(self._ml + self._cell * n_az + 40, self._mt + self._cell * n_th + 40))
+        c = min((self.width() - _ML - 20) / n_az, (self.height() - _MT - 20) / n_th)
+        self._cell = max(8, int(c))
+
+    def resizeEvent(self, _):
+        self._fit()
 
     def _color(self, v):
         if not np.isfinite(v):
@@ -24,55 +36,76 @@ class _Heatmap(QWidget):
         t = min(1.0, max(0.0, (v - self._vmin) / ((self._vmax - self._vmin) or 1.0)))
         return QColor.fromRgbF(t, 0.15, 1.0 - t)     # azul (bajo) → rojo (alto)
 
+    def _cell_at(self, pos):
+        i = int((pos.x() - _ML) // self._cell)
+        j = int((pos.y() - _MT) // self._cell)
+        if 0 <= i < len(self._az) and 0 <= j < len(self._th):
+            return i, j
+        return None
+
+    def mouseMoveEvent(self, ev):
+        hit = self._cell_at(ev.position().toPoint())
+        if hit is None:
+            QToolTip.hideText()
+            return
+        i, j = hit
+        name = os.path.basename(self._source) if self._source else "cálculo desde audio (sin archivo)"
+        full = self._source or "—"
+        v = self._L[i, j]
+        text = (f"Archivo: {name}\n{full}\n"
+                f"Azimut: {self._az[i]:.0f}°   Elevación: {self._th[j]:.0f}°\n"
+                f"Nivel: {v:.1f} dB" if np.isfinite(v) else f"Archivo: {name}\nSin dato")
+        QToolTip.showText(ev.globalPosition().toPoint(), text, self)
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        c, ml, mt = self._cell, self._ml, self._mt
+        c = self._cell
         n_az, n_th = len(self._az), len(self._th)
-        p.setFont(QFont("Segoe UI", 9))
+        p.setFont(QFont("Segoe UI", max(6, min(9, c // 3))))
         for i in range(n_az):
             for j in range(n_th):
                 v = self._L[i, j]
-                p.fillRect(ml + i * c, mt + j * c, c, c, self._color(v))
+                p.fillRect(_ML + i * c, _MT + j * c, c, c, self._color(v))
                 p.setPen(QColor('#1a1a1a'))
-                p.drawText(ml + i * c, mt + j * c, c, c, Qt.AlignmentFlag.AlignCenter,
+                p.drawText(_ML + i * c, _MT + j * c, c, c, Qt.AlignmentFlag.AlignCenter,
                            f"{v:.0f}" if np.isfinite(v) else "—")
-        # eje X: azimut (arriba de la matriz)
+        # eje X: azimut (arriba)
         p.setPen(QColor('#1a1a1a'))
+        p.setFont(QFont("Segoe UI", max(6, min(9, c // 3))))
         for i in range(n_az):
-            p.drawText(ml + i * c, mt - 22, c, 18, Qt.AlignmentFlag.AlignCenter, f"{self._az[i]:.0f}")
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        p.drawText(ml, 6, c * n_az, 22, Qt.AlignmentFlag.AlignCenter, "EJE X: AZIMUT (°)")
-        # eje Y: elevación (a la izquierda de la matriz)
-        p.setFont(QFont("Segoe UI", 9))
+            p.drawText(_ML + i * c, _MT - 20, c, 16, Qt.AlignmentFlag.AlignCenter, f"{self._az[i]:.0f}")
+        p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        p.drawText(_ML, 4, c * n_az, 20, Qt.AlignmentFlag.AlignCenter, "EJE X: AZIMUT (°)")
+        # eje Y: elevación (izquierda, vertical)
+        p.setFont(QFont("Segoe UI", max(6, min(9, c // 3))))
         for j in range(n_th):
-            p.drawText(ml - 62, mt + j * c, 56, c, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            p.drawText(_ML - 50, _MT + j * c, 44, c, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                        f"{self._th[j]:.0f}°")
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         p.save()
-        p.translate(18, mt + c * n_th / 2)
+        p.translate(14, _MT + c * n_th / 2)
         p.rotate(-90)
-        p.drawText(-c * n_th // 2, -12, c * n_th, 22, Qt.AlignmentFlag.AlignCenter,
+        p.drawText(-c * n_th // 2, -10, c * n_th, 20, Qt.AlignmentFlag.AlignCenter,
                    "EJE Y: ELEVACIÓN θ (°)  — 0° = horizonte, 90° = cénit")
         p.restore()
         p.end()
 
 
 class MatrixDialog(QDialog):
-    def __init__(self, levels, azimuths, thetas, band_label: str, parent=None):
+    def __init__(self, levels, azimuths, thetas, band_label: str, source=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Matriz de datos — {band_label}")
-        self.resize(900, 720)
+        self.resize(760, 620)
         lay = QVBoxLayout(self)
+        origin = os.path.basename(source) if source else "cálculo desde audio"
         intro = QLabel(
-            f"Dato medido (sin suavizar ni reparar) en {band_label}. "
-            "Cada celda es un punto de medición: azimut (eje X, horizontal) × elevación (eje Y, vertical).")
+            f"Dato medido (sin suavizar ni reparar) · {band_label} · origen: {origin}. "
+            "Pasá el mouse sobre una celda para ver el archivo de origen.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        area = QScrollArea()
-        area.setWidgetResizable(False)
-        area.setWidget(_Heatmap(levels, azimuths, thetas))
-        lay.addWidget(area, 1)
+        self._heat = _Heatmap(levels, azimuths, thetas, source)
+        lay.addWidget(self._heat, 1)
         row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         row.rejected.connect(self.reject)
         row.accepted.connect(self.accept)

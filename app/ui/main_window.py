@@ -226,7 +226,7 @@ class MainWindow(QMainWindow):
             if m is None:
                 self._append_log("[Matriz] No hay datos de directividad calculados.")
                 return
-            MatrixDialog(*m, parent=self).exec()
+            MatrixDialog(*m[:4], source=m[4], parent=self).exec()
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
@@ -260,6 +260,7 @@ class MainWindow(QMainWindow):
     def _load_polar_npz_file(self, path: str):
         try:
             data = load_results(path)
+            self.view_dir.source_file = path
             view = data['metadata'].get('view') or {}
             # Cambiar a Directividad ANTES de cargar para que las secciones
             # sean visibles cuando _refresh_display() las actualice
