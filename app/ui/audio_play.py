@@ -50,3 +50,14 @@ def player() -> QMediaPlayer:
         _output.setVolume(1.0)
         _player.setAudioOutput(_output)
     return _player
+
+
+def play_file(path: str) -> str:
+    """Reproduce directamente el WAV original (sin copiarlo ni normalizarlo)."""
+    global _last_file
+    pl = player()
+    pl.stop()
+    pl.setSource(QUrl.fromLocalFile(path))
+    pl.play()
+    _last_file = None   # no es temporal: no se borra
+    return path

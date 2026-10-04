@@ -1279,8 +1279,12 @@ class TabDirectividad(QWidget):
         ths = [(j, v) for j, v in ths if v is not None]
         ia, va = min(ang, key=lambda t: abs(t[1] - azimuth))
         it, vt = min(ths, key=lambda t: abs(t[1] - theta))
-        from ui.audio_play import play_signal
-        play_signal(tensor[ia, it, :], ma.sr)
+        from ui.audio_play import play_signal, play_file
+        src = (getattr(ma, 'source_files', {}) or {}).get((ia, it))
+        if src:                                   # el WAV original de esa toma (directorio de carga)
+            play_file(src)
+        else:                                     # sin ruta (p. ej. audio armado en memoria)
+            play_signal(tensor[ia, it, :], ma.sr)
         return f"Reproduciendo azimut {va:.0f}°, elevación {vt:.0f}°"
 
     def _on_error(self, msg: str):
