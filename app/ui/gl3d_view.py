@@ -613,7 +613,8 @@ class GL3DView(QWidget):
         qc = QColor(self._axis_color or '#8a8f9a')
         color = (qc.redF(), qc.greenF(), qc.blueF(), 0.45)
         width = float(self._axis_width or 1)
-        L, W, step = 10.0, 1.4, 0.25          # L: largo del piso · W: distancia y altura de las paredes
+        W, step = 1.4, 0.25                   # W: distancia, altura y largo del piso y las paredes
+        L = W
         t = np.arange(-L, L + step / 2, step)
         tw = np.arange(-W, W + step / 2, step)
         h = np.arange(0.0, W + step / 2, step)
