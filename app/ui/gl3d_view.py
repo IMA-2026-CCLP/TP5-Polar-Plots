@@ -71,6 +71,7 @@ _CAMERA_PRESETS = {
 _CAMERA_CENTER_Z = 0.5
 _DEFAULT_DISTANCE = 4.6   # lejos: que entre toda la cúpula sin recortar
 _AXIS_LEN = 1.4
+_LABEL_OFFSET = 1.12   # factor sobre _AXIS_LEN para separar la etiqueta de la punta del eje
 _AXES = (  # (vector, etiqueta, color) — idéntico a plot/balloon.py::_axes_traces
     ((_AXIS_LEN, 0, 0), "X (0°)",    QColor("#ff6b6b")),
     ((0, _AXIS_LEN, 0), "Y (90°)",   QColor("#51cf66")),
@@ -507,7 +508,8 @@ class GL3DView(QWidget):
             rgba = (color.redF(), color.greenF(), color.blueF(), 1.0)
             items.append(gl.GLLinePlotItem(pos=np.array([[0, 0, 0], vec]), color=rgba,
                                             width=width, antialias=True))
-            items.append(gl.GLTextItem(pos=np.array(vec, dtype=float), text=label, color=color,
+            # Etiqueta un poco más allá de la punta: si no, el texto arranca encima de la línea.
+            items.append(gl.GLTextItem(pos=np.array(vec, dtype=float) * _LABEL_OFFSET, text=label, color=color,
                                         font=QFont("Segoe UI", label_size)))
         return items
 
