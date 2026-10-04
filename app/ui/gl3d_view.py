@@ -465,8 +465,8 @@ class GL3DView(QWidget):
         cmax = self._max_db if self._max_db is not None else vmax
         span = (vmax - vmin) or 1.0
         R_clip = np.clip(R_dB, cmin, cmax)
-        # Sin variación (p. ej. un omni: todas las tomas con el mismo nivel) el radio sería el mínimo
-        # (esfera diminuta, invisible): se dibuja a radio completo.
+        # Valor que va en el borde de la esfera: máximo del balloon o el on-axis (Propiedades ▸ Escala)
+        self._set_balloon_anchor(lev_2d, R_dB)
         R_r    = self._balloon_radius(R_dB)
 
         E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
@@ -680,14 +680,37 @@ class GL3DView(QWidget):
             items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
         return items
 
+    def _set_balloon_anchor(self, lev_2d, R_dB):
+        """Fija el valor dB que queda en el borde (radio 1), según 'balloon_anchor':
+        'max' = máximo de cualquier ángulo (el pico toca el borde; no hay margen por encima),
+        'onaxis' = nivel en 0°/0° (el eje queda en el borde; hay margen por encima)."""
+        lo = max(0.5, float(self._style.get('balloon_range_db', 12.0)))
+        hi = max(0.0, float(self._style.get('balloon_headroom_db', 6.0)))
+        anchor = str(self._style.get('balloon_anchor', 'onaxis'))
+        A = None
+        if anchor == 'onaxis':
+            az = np.asarray(self._azimuths, dtype=float)
+            th = np.asarray(self._elevations, dtype=float)
+            if len(az) and len(th):
+                ia = int(np.argmin(np.abs(az - 0.0)))
+                it = int(np.argmin(np.abs(th - 0.0)))
+                v = lev_2d[ia, it]
+                if np.isfinite(v):
+                    A = float(v)
+        if A is None:                       # 'max' o on-axis no disponible
+            A = float(np.nanmax(R_dB))
+            hi = 0.0
+        self._rad_A, self._rad_lo, self._rad_hi = A, lo, hi
+
     def _balloon_radius(self, dB):
         """Radio del balloon con escala FIJA en dB (como en la nota de Audiomatica AN-002, fig. 14):
         0 dB (eje/referencia) toca el borde (radio 1); cada dB por debajo acorta el radio, y a
         −rango el radio es el mínimo. El rango es configurable (Propiedades ▸ Escala, 12 dB)."""
-        lo = max(0.5, float(self._style.get('balloon_range_db', 12.0)))      # dB por debajo de 0
-        hi = max(0.0, float(self._style.get('balloon_headroom_db', 6.0)))     # margen por encima de 0
-        r = (np.asarray(dB, dtype=float) + lo) / (lo + hi)                  # 0 dB queda en lo/(lo+hi)
-        return np.clip(r, 0.01, None)   # sin tope superior: los lóbulos sobre 0 dB salen de la esfera
+        A = getattr(self, '_rad_A', 0.0)
+        lo = getattr(self, '_rad_lo', 12.0)
+        hi = getattr(self, '_rad_hi', 6.0)
+        r = (np.asarray(dB, dtype=float) - A + lo) / (lo + hi)   # A (valor elegido) queda en lo/(lo+hi)
+        return np.clip(r, 0.01, None)   # sin tope superior: lo que supera el anclaje sale de la esfera
 
     def _colorbar_pt(self) -> float:
         """Tamaño (pt) de la escala: Propiedades ▸ Escala (por gráfico); si no hay, Opciones ▸ Imágenes."""

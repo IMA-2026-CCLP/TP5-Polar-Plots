@@ -58,12 +58,12 @@ _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_range_db": 12.0, "balloon_headroom_db": 6.0,
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_range_db": 12.0, "balloon_headroom_db": 6.0, "balloon_anchor": "onaxis",
                  "colorbar_pt": 12.0},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_range_db": 12.0, "balloon_headroom_db": 6.0,
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_range_db": 12.0, "balloon_headroom_db": 6.0, "balloon_anchor": "onaxis",
                  "colorbar_pt": 12.0},
     "polar2d":  {
         "bg_color":         "#ffffff",
@@ -488,6 +488,14 @@ class _ViewSection(QWidget):
                                      "así los lóbulos que superan 0 dB no salen de la escala.")
                 form.addRow("Margen sobre 0 dB (dB):", spin_head)
                 fields['balloon_headroom_db'] = spin_head
+                combo_anchor = QComboBox()
+                combo_anchor.addItem("On-axis (0°/0°)", "onaxis")
+                combo_anchor.addItem("Máximo de cualquier ángulo", "max")
+                combo_anchor.setCurrentIndex(max(0, combo_anchor.findData(self._style.get('balloon_anchor', 'onaxis'))))
+                combo_anchor.setToolTip("Qué valor queda en el borde de la esfera: el on-axis (eje de referencia) "
+                                        "o el máximo de cualquier ángulo (el pico toca el borde).")
+                form.addRow("Valor en el borde de la esfera:", combo_anchor)
+                fields['balloon_anchor'] = combo_anchor
             outer.addWidget(box)
 
         if self._mode in ("3d", "sphere"):
@@ -717,6 +725,7 @@ class _ViewSection(QWidget):
             if 'balloon_range_db' in fields:
                 new_style['balloon_range_db'] = fields['balloon_range_db'].value()
                 new_style['balloon_headroom_db'] = fields['balloon_headroom_db'].value()
+                new_style['balloon_anchor'] = fields['balloon_anchor'].currentData()
 
             if self._mode in ("3d", "sphere"):
                 self._axis_color = fields['grid_color'].color_hex
