@@ -671,8 +671,11 @@ class MainWindow(QMainWindow):
         self._settings.setValue("geometry", self.saveGeometry())
         # Un hilo de trabajo (Worker/QThread) todavía corriendo hace que Python no termine al cerrar:
         # se le pide que pare y se espera un momento antes de salir.
-        from core.worker import stop_all_workers
-        stop_all_workers()
+        try:
+            from core.worker import stop_all_workers
+            stop_all_workers()
+        except Exception as exc:       # que un error al parar hilos no impida cerrar la ventana
+            print(f"[cierre] no se pudieron detener los hilos: {exc}")
         super().closeEvent(event)
 
 
