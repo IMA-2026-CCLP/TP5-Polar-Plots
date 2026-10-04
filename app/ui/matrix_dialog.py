@@ -12,7 +12,7 @@ from PyQt6.QtGui import QPainterPath
 def _halo(p, path, color, width, glow_width):
     """Borde con halo suave: una línea ancha semitransparente por debajo y el borde firme encima."""
     # solo el contorno: el relleno (color en dB) lo pone quien llama con el pincel de la celda
-    g = QColor(color); g.setAlphaF(0.35)
+    g = QColor(color); g.setAlphaF(0.5)
     p.setPen(QPen(g, glow_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
     p.drawPath(path)
     p.setPen(QPen(QColor(color), width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
@@ -243,7 +243,7 @@ class _Radial(QWidget):
                 p.setBrush(QBrush(self._color(v)))
                 if flag:
                     cc = QPainterPath(); cc.addEllipse(QPointF(cx, cy), r_of(5), r_of(5))
-                    _halo(p, cc, '#ffd400', 4.0, 3.0)
+                    _halo(p, cc, '#ffd400', 5.5, 8.0)
                     p.setPen(Qt.PenStyle.NoPen); p.drawPath(cc)
                 else:
                     p.setPen(QPen(QColor('#555'), 1)); p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
@@ -263,7 +263,7 @@ class _Radial(QWidget):
                 p.setPen(QPen(QColor('#7b2cbf'), 2.5)); p.drawPath(pp)
                 continue
             elif flag:
-                _halo(p, pp, '#ffd400', 4.0, 3.0)              # diferencia > 3 dB: amarillo marcado
+                _halo(p, pp, '#ffd400', 5.5, 8.0)              # diferencia > 3 dB: amarillo marcado
             else:
                 p.setPen(QPen(QColor('#ffffff'), 0.5)); p.drawPath(pp)
                 continue
