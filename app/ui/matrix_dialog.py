@@ -114,6 +114,18 @@ class _Radial(QWidget):
     def clear_selection(self):
         self._sel.clear(); self.update()
 
+    def pending_pairs(self):
+        """Reemplazos a aplicar al audio: (θ destino, giro destino, θ fuente, giro fuente).
+        Destino: HOR h ≤ 180 → (90 − d, h); HOR h > 180 → (90 + d, h − 180)."""
+        out = []
+        for (d, h), (t_src, g_src) in self._overrides.items():
+            t_dst, g_dst = (90.0 - d, h) if h <= 180 else (90.0 + d, h - 180.0)
+            out.append((t_dst, g_dst, t_src, g_src))
+        return out
+
+    def clear_overrides(self):
+        self._overrides.clear(); self._sel.clear(); self._recalc()
+
     def _geom(self):
         if self._cx is None:
             self._cx, self._cy = self.width() / 2, self.height() / 2 + 6
@@ -316,8 +328,9 @@ class _PlayerBar(QWidget):
 
 
 class MatrixDialog(QDialog):
-    def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, parent=None):
+    def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None, parent=None):
         super().__init__(parent)
+        self._apply_cb = apply_cb
         self.resize(780, 720)
         self._levels3d = np.asarray(levels3d, dtype=float)
         self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
@@ -354,6 +367,21 @@ class MatrixDialog(QDialog):
         b_mir = QPushButton("Reemplazar selección por espejo")
         b_und = QPushButton("Deshacer reemplazo")
         b_cln = QPushButton("Limpiar selección")
+        b_app = QPushButton("Aplicar al audio (persistente)")
+        b_app.setToolTip("Escribe los reemplazos en la señal de cada micrófono en memoria. Después, Calcular "
+                         "usa esos datos. Se pierden al cerrar la app si no se guarda la sesión.")
+        b_app.setEnabled(apply_cb is not None)
+        def _apply():
+            pairs = self._radial.pending_pairs()
+            if not pairs:
+                self._status.setText("No hay reemplazos pendientes."); return
+            n = self._apply_cb(pairs)
+            self._status.setText(n if isinstance(n, str) else
+                                 f"Aplicados {len(pairs)} reemplazos al audio. Presioná Calcular para recalcular.")
+            if not isinstance(n, str):
+                self._radial.clear_overrides()
+        b_app.clicked.connect(_apply)
+        bar.addWidget(b_app)
         b_mir.setToolTip("Ctrl + clic selecciona celdas. Cada una se reemplaza por su medición espejo izquierda-derecha.")
         b_mir.clicked.connect(lambda: self._status.setText(f"Reemplazadas {self._radial.replace_selected_mirror()} celdas por espejo."))
         b_und.clicked.connect(lambda: self._status.setText(f"Deshechos {self._radial.undo_selected()} reemplazos."))

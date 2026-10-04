@@ -941,6 +941,33 @@ class TabDirectividad(QWidget):
         from ui.export_utils import get_smoothing_settings
         self.apply_smoothing_settings(get_smoothing_settings())   # última config guardada (Herramientas ▸ Suavizado…)
 
+    def apply_mirror_replacements(self, pairs):
+        """Copia en la señal en memoria el dato espejo elegido en la matriz radial: el micrófono/giro
+        destino pasa a tener la señal de la fuente. Devuelve la cantidad aplicada (o un mensaje)."""
+        ma = self._ma
+        tensor = getattr(ma, 'tensor', None) if ma is not None else None
+        if tensor is None:
+            return "No hay audio cargado en memoria (sesión .cclp): cargá los WAV para aplicar."
+        def _idx(vals, v):
+            for i, x in enumerate(vals):
+                try:
+                    if abs(float(x) - float(v)) < 0.5:
+                        return i
+                except (TypeError, ValueError):
+                    continue
+            return None
+        n = 0
+        for t_d, g_d, t_s, g_s in pairs:
+            i_d, j_d = _idx(ma.angles, g_d), _idx(ma.thetas, t_d)
+            i_s, j_s = _idx(ma.angles, g_s), _idx(ma.thetas, t_s)
+            if None in (i_d, j_d, i_s, j_s):
+                continue
+            tensor[i_d, j_d, :] = tensor[i_s, j_s, :]
+            n += 1
+        log = getattr(ma, 'mirror_log', [])
+        ma.mirror_log = log + [p for p in pairs]
+        return f"Aplicados {n} reemplazos al audio. Presioná Calcular para recalcular."
+
     def matrix_bands(self):
         """(niveles[azimut, elevación, banda], azimuts, elevaciones, frecuencias Hz, origen) para la
         matriz radial, con todas las bandas calculadas. Sin patrón calculado: una sola 'banda' RMS."""

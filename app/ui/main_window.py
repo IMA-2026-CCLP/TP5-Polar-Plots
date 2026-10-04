@@ -227,7 +227,8 @@ class MainWindow(QMainWindow):
                 self._append_log("[Matriz] No hay datos de directividad calculados.")
                 return
             levels, az, th, freqs, src = m
-            MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell, parent=self).exec()
+            MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
+                         apply_cb=self.view_dir.apply_mirror_replacements, parent=self).exec()
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
