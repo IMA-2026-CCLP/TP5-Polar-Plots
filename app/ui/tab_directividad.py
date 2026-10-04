@@ -1001,7 +1001,9 @@ class TabDirectividad(QWidget):
             ia = [i for i, v in enumerate(self._ma.angles) if _num(v)]
             it = [j for j, v in enumerate(self._ma.thetas) if _num(v)]
             rms = np.sqrt(np.mean(np.asarray(tensor, dtype=float) ** 2, axis=-1))
-            levels = 20.0 * np.log10(rms[np.ix_(ia, it)] + 1e-12)   # (azimut, elevación), dB relativo
+            # señal calibrada (dB SPL): referencia 20 µPa, igual que el panel de Procesamiento
+            p_ref = 20e-6 if getattr(self._ma, '_is_spl', False) else 1.0
+            levels = 20.0 * np.log10(rms[np.ix_(ia, it)] / p_ref + 1e-12)   # (azimut, elevación)
             files = getattr(self._ma, 'source_files', {}) or {}
             # (azimut, elevación) -> ruta del WAV de esa toma
             src = {(float(self._ma.angles[i]), float(self._ma.thetas[j])): files[(i, j)]
