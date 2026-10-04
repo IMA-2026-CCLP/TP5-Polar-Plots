@@ -222,11 +222,12 @@ class MainWindow(QMainWindow):
         Superficie 3D y Esfera, no un modal de Propiedades de un gráfico en particular."""
         if kind == "data_matrix":
             from ui.matrix_dialog import MatrixDialog
-            m = self.view_dir.current_matrix()
+            m = self.view_dir.matrix_bands()
             if m is None:
                 self._append_log("[Matriz] No hay datos de directividad calculados.")
                 return
-            MatrixDialog(*m[:4], source=m[4], on_click=self.view_dir.play_cell, parent=self).exec()
+            levels, az, th, freqs, src = m
+            MatrixDialog(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell, parent=self).exec()
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog

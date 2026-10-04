@@ -941,6 +941,19 @@ class TabDirectividad(QWidget):
         from ui.export_utils import get_smoothing_settings
         self.apply_smoothing_settings(get_smoothing_settings())   # última config guardada (Herramientas ▸ Suavizado…)
 
+    def matrix_bands(self):
+        """(niveles[azimut, elevación, banda], azimuts, elevaciones, frecuencias Hz, origen) para la
+        matriz radial, con todas las bandas calculadas. Sin patrón calculado: una sola 'banda' RMS."""
+        if self._full_levels is not None:
+            from core.data_store import freq_label
+            freqs = [float(f) for f in self._full_bands]
+            return (self._full_levels, self._full_azimuths, self._full_thetas, freqs, self.source_file)
+        m = self.current_matrix()
+        if m is None:
+            return None
+        levels, az, th, label, src = m
+        return (levels[:, :, None], az, th, [None], src)
+
     def current_matrix(self):
         """(niveles[azimut, elevación], azimuts, elevaciones, rótulo de la banda) de la banda mostrada."""
         if self._full_levels is None:

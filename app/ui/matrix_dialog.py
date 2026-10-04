@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QSize, QPointF, QRectF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox,
-                             QToolTip, QPushButton)
+                             QToolTip, QPushButton, QComboBox)
 
 THR_DB = 3.0   # diferencia máxima entre mediciones de una misma celda antes de marcarla
 
@@ -49,6 +49,7 @@ def radial_cells(levels, azimuths, thetas):
 class _Radial(QWidget):
     def __init__(self, levels, azimuths, thetas, source=None, on_click=None, parent=None):
         super().__init__(parent)
+        self._az, self._th = azimuths, thetas
         self._cells = radial_cells(levels, azimuths, thetas)
         self._source = source
         self._on_click = on_click
@@ -57,6 +58,14 @@ class _Radial(QWidget):
         self._vmax = max(vals) if vals else 0.0
         self.setMouseTracking(True)
         self.setMinimumSize(QSize(460, 460))
+
+    def set_levels(self, levels):
+        """Cambia la banda mostrada (recalcula las celdas y la escala de color)."""
+        self._cells = radial_cells(levels, self._az, self._th)
+        vals = [v for v, _ in self._cells.values()]
+        self._vmin = min(vals) if vals else -12.0
+        self._vmax = max(vals) if vals else 0.0
+        self.update()
 
     def _geom(self):
         return self.width() / 2, self.height() / 2 + 6, min(self.width(), self.height()) * 0.42
@@ -185,17 +194,28 @@ class _PlayerBar(QWidget):
 
 
 class MatrixDialog(QDialog):
-    def __init__(self, levels, azimuths, thetas, band_label: str, source=None, on_click=None, parent=None):
+    def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Matriz radial — {band_label}")
-        self.resize(780, 700)
+        self.resize(780, 720)
+        self._levels3d = np.asarray(levels3d, dtype=float)
+        self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
         lay = QVBoxLayout(self)
         if isinstance(source, dict):
             origin = "archivos WAV de audio (uno por toma)"
         else:
             origin = os.path.basename(source) if source else "cálculo desde audio"
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Frecuencia:"))
+        self._combo = QComboBox()
+        for i, f in enumerate(freqs):
+            from core.data_store import freq_label
+            self._combo.addItem("RMS total (sin banda)" if f is None else f"{freq_label(f)} Hz", i)
+        self._combo.currentIndexChanged.connect(self._on_band)
+        top.addWidget(self._combo)
+        top.addStretch(1)
+        lay.addLayout(top)
         intro = QLabel(
-            f"{band_label} · origen: {origin}. Anillo = distancia al cénit |θ − 90°|, sector = HOR (10°). "
+            f"origen: {origin}. Anillo = distancia al cénit |θ − 90°|, sector = HOR (10°). "
             "Pasá el mouse para ver las mediciones de cada celda. Click: reproduce esa toma (si hay audio).")
         intro.setWordWrap(True)
         lay.addWidget(intro)
@@ -205,7 +225,8 @@ class MatrixDialog(QDialog):
             msg = on_click(g, t) if on_click is not None else ""
             self._status.setText(msg or "")
             return msg
-        self._radial = _Radial(levels, azimuths, thetas, source, on_click=_click if on_click else None)
+        self._on_click_cb = _click if on_click else None
+        self._radial = _Radial(self._levels3d[:, :, 0], azimuths, thetas, source, on_click=self._on_click_cb)
         lay.addWidget(self._radial, 1)
         if on_click is not None:
             lay.addWidget(_PlayerBar())
@@ -213,3 +234,15 @@ class MatrixDialog(QDialog):
         row.rejected.connect(self.reject)
         row.accepted.connect(self.accept)
         lay.addWidget(row)
+        self._update_title()
+
+    def _update_title(self):
+        i = self._combo.currentData() or 0
+        f = self._freqs[i]
+        from core.data_store import freq_label
+        self.setWindowTitle("Matriz radial — " + ("RMS total" if f is None else f"{freq_label(f)} Hz"))
+
+    def _on_band(self, _=None):
+        i = self._combo.currentData() or 0
+        self._radial.set_levels(self._levels3d[:, :, i])
+        self._update_title()
