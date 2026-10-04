@@ -29,6 +29,9 @@ _GCC_HELP = '<b>¿Para qué sirve?</b><br>Al alinear los micrófonos se estima e
 _CAP_W = 78   # ancho de la columna de títulos de fila (Cálculo, Vista…)
 
 
+# Paletas de color de los gráficos 3D y esfera (Opciones ▸ Gráficos ▸ Paleta de colores).
+PALETTES = ("RdBu v4", "Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis")
+
 class _StateVal:
     """Imita QLineEdit.text() / QComboBox.currentText() leyendo Bridge.state (usado por MainWindow)."""
     def __init__(self, state: dict, key: str, default=''):
@@ -350,6 +353,15 @@ class NativeRibbon(QWidget):
         load_smooth()
         self._act['smooth'] = sm
 
+    def _set_palette(self, name: str):
+        self._b.state['colorscale'] = name
+        self._b.dirDisplayChanged()
+
+    def _sync_palette_menu(self):
+        cur = self._b.state.get('colorscale', 'RdBu v4')
+        for name, a in self._palette_actions.items():
+            a.setChecked(name == cur)
+
     def _make_menubar(self) -> QMenuBar:
         mb = QMenuBar()
         m = mb.addMenu("&Archivo")
@@ -390,6 +402,17 @@ class NativeRibbon(QWidget):
             a.triggered.connect(lambda _=False, k=key: self.sig_open_options.emit(k))
             a.setToolTip("Tamaño, DPI y formato de las imágenes exportadas" if key == "images"
                          else "Todas las opciones de este gráfico (escala, ejes, líneas, estilos…)")
+        g.addSeparator()
+        pal = g.addMenu("Paleta de colores (3D y Esfera)")
+        pal_group = QActionGroup(self)          # exclusivas: siempre hay una paleta elegida
+        self._palette_actions = {}
+        for name in PALETTES:
+            a = pal.addAction(name)
+            a.setCheckable(True)
+            a.setActionGroup(pal_group)
+            a.triggered.connect(lambda _=False, n=name: self._set_palette(n))
+            self._palette_actions[name] = a
+        pal.aboutToShow.connect(self._sync_palette_menu)
 
         m = mb.addMenu("A&yuda")
         m.addAction("Acerca de…", self._about)
@@ -647,9 +670,6 @@ class NativeRibbon(QWidget):
                 ("Simetría", self._combo('symmetry', 112, "Simetría: espeja los datos medidos para completar el patrón",
                                          [("Sin simetría", "none"), ("XZ (izq↔der)", "azimuth"),
                                           ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp))]),
-            ("Paleta de color", [
-                (None, self._combo('colorscale', 84, "Paleta de colores de los gráficos 3D y esfera",
-                                   [(c, c) for c in ("Plasma", "Viridis", "Turbo", "Inferno", "Magma", "Cividis", "RdBu v4")], disp))]),
             ("Corte (Superficie 3D)", [
                 ("Elevación (°)", self._num('cut3d_elevation', 52,
                     "Elevación del plano/curva de referencia (0° a 90°)")),
