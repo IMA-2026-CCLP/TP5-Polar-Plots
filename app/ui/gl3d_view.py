@@ -106,8 +106,8 @@ def _shade_vertex_colors(md) -> np.ndarray:
     colors = md.vertexColors().copy()
     normals = md.vertexNormals()
     lambert = np.clip(normals @ _LIGHT_DIR, 0.0, 1.0)
-    spec = np.clip(normals @ _SPEC_DIR, 0.0, 1.0) ** 24 * 0.35
-    colors[:, :3] = np.clip(colors[:, :3] * (0.85 + 0.15 * lambert)[:, None] + spec[:, None], 0.0, 1.0)
+    spec = np.clip(normals @ _SPEC_DIR, 0.0, 1.0) ** 12 * 0.25
+    colors[:, :3] = np.clip(colors[:, :3] * (0.9 + 0.25 * lambert)[:, None] + spec[:, None], 0.0, 1.0)
     return colors
 
 
