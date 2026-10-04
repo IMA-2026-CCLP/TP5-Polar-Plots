@@ -104,19 +104,22 @@ def _shade_vertex_colors(md) -> np.ndarray:
     return colors
 
 
-def _replace_broken_mics(lev_2d: np.ndarray, thetas) -> np.ndarray:
+def _replace_broken_mics(lev_2d: np.ndarray, thetas, azimuths) -> np.ndarray:
     """Un mic roto deja su columna (theta) con datos falsos en todos los azimuts, y la grilla lo
     combina con su par frontal/trasero (theta y 180-theta) → media superficie se hunde. Se
-    "miente" el dato: la columna rota toma la del mic opuesto (180-theta)."""
+    "miente" el dato: en cada azimut a, la columna rota toma el dato del mic opuesto (180-theta)
+    en el azimut espejado (180-a) — el patrón es simétrico izquierda/derecha."""
     thetas = np.asarray(thetas, dtype=float)
+    azimuths = np.asarray(azimuths, dtype=float)
     out = lev_2d.astype(float).copy()
+    # índice del azimut espejado (180-a) para cada azimut medido
+    mirror_az = np.array([int(np.argmin(np.abs(azimuths - (180.0 - a)))) for a in azimuths])
     for bad in BROKEN_MIC_THETAS:
         i_bad = int(np.argmin(np.abs(thetas - bad)))
         i_opp = int(np.argmin(np.abs(thetas - (180.0 - bad))))
         if i_bad != i_opp and np.abs(thetas[i_bad] - bad) <= 1.0 and np.abs(thetas[i_opp] - (180.0 - bad)) <= 1.0:
-            out[:, i_bad] = out[:, i_opp]
+            out[:, i_bad] = lev_2d[mirror_az, i_opp]
     return out
-
 
 def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
     """Repara el dato de micrófonos rotos antes de la grilla: los thetas ausentes y los valores
@@ -401,7 +404,7 @@ class GL3DView(QWidget):
         lev_2d = self._levels[:, :, self._band_index]
         band_hz = float(self._bands[self._band_index])
 
-        lev_2d, thetas = _fill_missing_thetas(_replace_broken_mics(lev_2d, self._elevations), self._elevations)
+        lev_2d, thetas = _fill_missing_thetas(_replace_broken_mics(lev_2d, self._elevations, self._azimuths), self._elevations)
         R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
             lev_2d, self._azimuths, thetas,
             interp_deg=style.get('interp_deg', DEFAULT_INTERP_DEG),
