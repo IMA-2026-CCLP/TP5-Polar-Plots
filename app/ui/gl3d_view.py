@@ -637,9 +637,8 @@ class GL3DView(QWidget):
         """Regla de dB sobre el eje Z (cénit): cada marca está a la altura del radio que le
         corresponde, así se ve de qué a qué valores va el balloon (p. ej. −12 a +6 dB)."""
         A = getattr(self, '_rad_A', 0.0)
-        lo = getattr(self, '_rad_lo', 12.0)
-        hi = getattr(self, '_rad_hi', 6.0)
-        dmin, dmax = A - lo, A + hi
+        dmin = A + getattr(self, '_rad_min', -12.0)
+        dmax = A + getattr(self, '_rad_max', 6.0)
         step = 3.0 if (dmax - dmin) <= 24 else 6.0
         font = QFont("Segoe UI", max(1, int(self._style.get('axis_label_size', FONT_SIZE))))
         items = []
@@ -705,8 +704,10 @@ class GL3DView(QWidget):
         """Fija el valor dB que queda en el borde (radio 1), según 'balloon_anchor':
         'max' = máximo de cualquier ángulo (el pico toca el borde; no hay margen por encima),
         'onaxis' = nivel en 0°/0° (el eje queda en el borde; hay margen por encima)."""
-        lo = max(0.5, float(self._style.get('balloon_range_db', 12.0)))
-        hi = max(0.0, float(self._style.get('balloon_headroom_db', 6.0)))
+        dmin = float(self._style.get('balloon_min_db', -12.0))     # extremo del centro (dB, relativo al anclaje)
+        dmax = float(self._style.get('balloon_max_db', 6.0))       # extremo del borde (dB, relativo al anclaje)
+        if dmax - dmin < 0.5:
+            dmax = dmin + 0.5
         anchor = str(self._style.get('balloon_anchor', 'onaxis'))
         A = None
         if anchor == 'onaxis':
@@ -720,18 +721,18 @@ class GL3DView(QWidget):
                     A = float(v)
         if A is None:                       # 'max' o on-axis no disponible
             A = float(np.nanmax(R_dB))
-            hi = 0.0
-        self._rad_A, self._rad_lo, self._rad_hi = A, lo, hi
+        self._rad_A, self._rad_min, self._rad_max = A, dmin, dmax
 
     def _balloon_radius(self, dB):
         """Radio del balloon con escala FIJA en dB (como en la nota de Audiomatica AN-002, fig. 14):
         0 dB (eje/referencia) toca el borde (radio 1); cada dB por debajo acorta el radio, y a
         −rango el radio es el mínimo. El rango es configurable (Propiedades ▸ Escala, 12 dB)."""
         A = getattr(self, '_rad_A', 0.0)
-        lo = getattr(self, '_rad_lo', 12.0)
-        hi = getattr(self, '_rad_hi', 6.0)
-        r = (np.asarray(dB, dtype=float) - A + lo) / (lo + hi)   # A (valor elegido) queda en lo/(lo+hi)
-        return np.clip(r, 0.01, None)   # sin tope superior: lo que supera el anclaje sale de la esfera
+        dmin = getattr(self, '_rad_min', -12.0)
+        dmax = getattr(self, '_rad_max', 6.0)
+        # lineal en dB: dmin (relativo al anclaje) en el centro, dmax en el borde (radio 1)
+        r = (np.asarray(dB, dtype=float) - A - dmin) / (dmax - dmin)
+        return np.clip(r, 0.01, None)   # sin tope superior: lo que supera dmax sale de la esfera
 
     def _colorbar_pt(self) -> float:
         """Tamaño (pt) de la escala: Propiedades ▸ Escala (por gráfico); si no hay, Opciones ▸ Imágenes."""
