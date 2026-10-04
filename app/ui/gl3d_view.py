@@ -516,9 +516,9 @@ class GL3DView(QWidget):
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
-        items += self._make_box_items()
-        if self._show_hemisphere_grid:
+        if self._show_hemisphere_grid:          # misma casilla: grilla de la esfera + caja de planos
             items += self._make_grid_items()
+            items += self._make_box_items()
         if self._cut_visible:
             items += self._make_cut_ring_items(g)
             if self._show_ref_plane:
@@ -604,29 +604,30 @@ class GL3DView(QWidget):
         return items
 
     def _make_box_items(self) -> list:
-        """Caja de fondo con grilla en los planos XY (piso, z=0) y XZ / YZ (paredes en y=-1 y x=-1),
-        como la caja de Plotly. Mismo color y grosor que la grilla de Propiedades ▸ Ejes / grilla."""
+        """Planos de fondo con grilla que se extienden (casi) sin fin: piso z=0 y paredes x=-L e
+        y=-L, con L=10 y paso de 0.25 — más allá de la escena, como un plano infinito. Se activan y
+        desactivan con la misma casilla que la grilla de la esfera (Propiedades ▸ Ejes / grilla)."""
         qc = QColor(self._axis_color or '#8a8f9a')
         color = (qc.redF(), qc.greenF(), qc.blueF(), 0.45)
-        width = float(self._axis_width or 1) * self._px_scale
-        t = np.linspace(-1.0, 1.0, 9)
-        h = np.linspace(0.0, 1.0, 5)
-        lines = []
-        for x in t:                                   # piso: líneas paralelas a Y
-            lines.append([[x, -1, 0], [x, 1, 0]])
-        for y in t:                                   # piso: líneas paralelas a X
-            lines.append([[-1, y, 0], [1, y, 0]])
-        for x in t:                                   # pared y=-1: líneas verticales y horizontales
-            lines.append([[x, -1, 0], [x, -1, 1]])
+        width = float(self._axis_width or 1)
+        L, step = 10.0, 0.25
+        t = np.arange(-L, L + step / 2, step)
+        h = np.arange(0.0, L + step / 2, step)
+        segs = []
+        for x in t:                                  # piso: paralelas al eje Y y al eje X
+            segs += [[x, -L, 0], [x, L, 0]]
+        for y in t:
+            segs += [[-L, y, 0], [L, y, 0]]
+        for x in t:                                  # pared y=-L
+            segs += [[x, -L, 0], [x, -L, L]]
         for z in h:
-            lines.append([[-1, -1, z], [1, -1, z]])
-        for y in t:                                   # pared x=-1
-            lines.append([[-1, y, 0], [-1, y, 1]])
+            segs += [[-L, -L, z], [L, -L, z]]
+        for y in t:                                  # pared x=-L
+            segs += [[-L, y, 0], [-L, y, L]]
         for z in h:
-            lines.append([[-1, -1, z], [-1, 1, z]])
-        return [gl.GLLinePlotItem(pos=np.array(seg, dtype=float), color=color, width=width,
-                                  antialias=True, mode='lines', glOptions='translucent')
-                for seg in lines]
+            segs += [[-L, -L, z], [-L, L, z]]
+        return [gl.GLLinePlotItem(pos=np.array(segs, dtype=float), color=color, width=width,
+                                  antialias=True, mode='lines', glOptions='translucent')]
 
     def _make_grid_items(self) -> list:
         """Círculos de referencia (latitud/longitud) — ver nota de diseño en el docstring
@@ -746,6 +747,105 @@ class GL3DView(QWidget):
             self._export_clone.show()
         return self._export_clone
 
+    def _render_scene_at(self, W: int, H: int, k: float) -> QImage:
+        """Escena a W×H píxeles reales. La superficie se renderiza en GL a esa resolución; las
+        líneas (ejes, caja, grilla) y los textos se dibujan con QPainter proyectando sus puntos con
+        la misma cámara, porque el driver no admite líneas gruesas en un framebuffer grande."""
+        from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat
+        from PyQt6.QtCore import QSize, QPointF
+        from PyQt6.QtGui import QPainter, QPen, QMatrix4x4, QVector4D
+        from OpenGL import GL
+        view = self._gl
+        on_screen = list(view.items)
+        self._px_scale = 1.0
+        export_items = self._build_items(self._last_grid)
+        mesh = [it for it in export_items if type(it).__name__ == 'GLMeshItem']
+        for it in on_screen:
+            view.removeItem(it)
+        for it in mesh:
+            view.addItem(it)
+        try:
+            view.makeCurrent()
+            fmt = QOpenGLFramebufferObjectFormat()
+            fmt.setAttachment(QOpenGLFramebufferObject.Attachment.CombinedDepthStencil)
+            fbo = QOpenGLFramebufferObject(QSize(W, H), fmt)
+            fbo.bind()
+            GL.glViewport(0, 0, W, H)
+            view.paint(region=(0, 0, W, H), viewport=(0, 0, W, H))
+            # Buffer de profundidad de la escena: sirve para tapar las líneas que quedan detrás
+            depth = np.asarray(GL.glReadPixels(0, 0, W, H, GL.GL_DEPTH_COMPONENT, GL.GL_FLOAT),
+                               dtype=float).reshape(H, W)
+            img = fbo.toImage()
+            fbo.release()
+            view.doneCurrent()
+        finally:
+            for it in mesh:
+                view.removeItem(it)
+            for it in on_screen:
+                view.addItem(it)
+        img = img.convertToFormat(QImage.Format.Format_ARGB32)
+
+        # Cámara y proyección (mismas matrices que usa pyqtgraph para dibujar)
+        mvp = QMatrix4x4(view.projectionMatrix((0, 0, W, H), (0, 0, W, H))) * view.viewMatrix()
+
+        def to_px(p):
+            v = mvp * QVector4D(float(p[0]), float(p[1]), float(p[2]), 1.0)
+            if abs(v.w()) < 1e-9:
+                return None
+            return QPointF((v.x() / v.w() + 1) / 2 * W, (1 - v.y() / v.w()) / 2 * H)
+
+        def visible(pt, p):
+            """True si el punto 3D p no queda detrás de la superficie (test contra el depth buffer)."""
+            v = mvp * QVector4D(float(p[0]), float(p[1]), float(p[2]), 1.0)
+            if abs(v.w()) < 1e-9 or pt is None:
+                return False
+            z = (v.z() / v.w() + 1) / 2
+            r = min(H - 1, max(0, int(H - 1 - pt.y())))
+            c = min(W - 1, max(0, int(pt.x())))
+            return z <= depth[r, c] + 2e-4
+
+        def draw_segment(painter, a, b, n=48):
+            """Dibuja el segmento 3D a→b sólo en los tramos visibles (ocluidos por la superficie, no)."""
+            a = np.asarray(a, dtype=float); b = np.asarray(b, dtype=float)
+            run = []
+            for t in np.linspace(0.0, 1.0, n):
+                q = a + (b - a) * t
+                pt = to_px(q)
+                if pt is not None and visible(pt, q):
+                    run.append(pt)
+                else:
+                    if len(run) > 1:
+                        painter.drawPolyline(*run)
+                    run = []
+            if len(run) > 1:
+                painter.drawPolyline(*run)
+
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for it in export_items:
+            name = type(it).__name__
+            if name == 'GLLinePlotItem' and it.pos is not None:
+                c = it.color if np.ndim(it.color) == 1 else np.asarray(it.color)[0]
+                qc = QColor.fromRgbF(*[float(x) for x in c[:3]], float(c[3]) if len(c) > 3 else 1.0)
+                pen = QPen(qc)
+                pen.setWidthF(float(it.width) * k)
+                painter.setPen(pen)
+                P = np.asarray(it.pos, dtype=float)
+                step = 2 if it.mode == 'lines' else 1
+                for a in range(0, len(P) - 1, step):
+                    draw_segment(painter, P[a], P[a + 1])
+            elif name == 'GLTextItem' and it.pos is not None:
+                pt = to_px(it.pos)
+                if pt is None or not visible(pt, it.pos):
+                    continue
+                f = QFont(it.font)
+                f.setPixelSize(max(1, round(f.pointSizeF() * 96 / 72 * k)))
+                painter.setFont(f)
+                painter.setPen(QColor(it.color) if it.color is not None else QColor('#1a1a1a'))
+                painter.drawText(pt, it.text)
+        painter.end()
+        return img
+
     def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, size_cm=None):
         """Exporta EXACTAMENTE lo que se ve en pantalla: captura el gráfico tal como está (mismo
         tamaño de panel, misma cámara, mismos ejes y caja), lo escala por el DPI y le agrega la
@@ -773,9 +873,7 @@ class GL3DView(QWidget):
             QApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
             try:
                 from PyQt6.QtGui import QPainter
-                scene = self._gl.grabFramebuffer()
-                scene = scene.scaled(W, H, Qt.AspectRatioMode.IgnoreAspectRatio,
-                                     Qt.TransformationMode.SmoothTransformation)
+                scene = self._render_scene_at(W, H, k)
                 pad = int(8 * k)
                 cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=H - 2 * pad,
                                           font_px=self._colorbar_pt() / 72.0 * 96)
