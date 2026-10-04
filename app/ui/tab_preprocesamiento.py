@@ -7,7 +7,7 @@ corregir la alineación arrastrando el cursor de onset.
 """
 import numpy as np
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtCore import pyqtSignal
 
 from core.worker import Worker
@@ -15,6 +15,8 @@ from ui.waveform_editor import WaveformEditorWidget
 
 
 class TabPreprocesamiento(QWidget):
+    view_chosen = pyqtSignal(str)       # 'matrix' | 'db' | 'envelope' | 'amp' (desde el desplegable)
+
     ma_updated = pyqtSignal(object)
     log        = pyqtSignal(str)
 
@@ -28,13 +30,29 @@ class TabPreprocesamiento(QWidget):
     def _build_ui(self):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        from PyQt6.QtWidgets import QStackedWidget
+        from PyQt6.QtWidgets import QStackedWidget, QComboBox, QHBoxLayout
+        top = QHBoxLayout()                     # selector de vista, arriba a la derecha
+        top.addStretch(1)
+        top.addWidget(QLabel("Vista:"))
+        self._view_combo = QComboBox()
+        for label, key in (("Matriz radial", "matrix"), ("dB", "db"), ("Envolvente", "envelope"), ("Amplitud", "amp")):
+            self._view_combo.addItem(label, key)
+        self._view_combo.currentIndexChanged.connect(lambda _=None: self.view_chosen.emit(self._view_combo.currentData()))
+        top.addWidget(self._view_combo)
+        lay.addLayout(top)
         self._stack = QStackedWidget()          # Vista: señal (waveform) o matriz radial
         self._editor = WaveformEditorWidget()
         self._editor.log.connect(self.log)
         self._editor.onset_dragged.connect(self._on_onset_dragged)
         self._stack.addWidget(self._editor)
         lay.addWidget(self._stack)
+
+    def set_view_choice(self, key):
+        i = self._view_combo.findData(key)
+        if i >= 0 and i != self._view_combo.currentIndex():
+            self._view_combo.blockSignals(True)
+            self._view_combo.setCurrentIndex(i)
+            self._view_combo.blockSignals(False)
 
     def show_matrix(self, panel):
         if self._stack.indexOf(panel) < 0:

@@ -168,6 +168,8 @@ class MainWindow(QMainWindow):
 
         self.view_prepro.ma_updated.connect(self._on_ma_ready)
         self.view_prepro.log.connect(self._append_log)
+        self.view_prepro.view_chosen.connect(self._on_view_choice)
+        self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
 
         self.view_notas.ma_updated.connect(self._on_ma_ready)
         self.view_notas.log.connect(self._append_log)
@@ -277,6 +279,7 @@ class MainWindow(QMainWindow):
             if view.get('view_dir'):                   # propiedades de cada gráfico
                 self.view_dir.apply_view_config(view['view_dir'])
             self.view_dir.apply_display_params(self.ribbon.get_dir_display_params())
+            self.ribbon._b.emitPlotParams()          # aplica la vista activa (matriz por defecto)
             self.ribbon.set_dir_status(
                 f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
@@ -373,6 +376,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_matrix(self):
         """Pone al día el panel de la matriz radial (si existe) con los datos actuales."""
+        if self.ribbon._b.state.get('matrix') and self._matrix_win is None:
+            self.ribbon._b.emitPlotParams()                  # hay datos nuevos: la matriz aparece por defecto
+            return
         win = self._matrix_win
         if win is None:
             return
@@ -381,14 +387,22 @@ class MainWindow(QMainWindow):
             levels, az, th, freqs, src, unit = m
             win.refresh(levels, az, th, freqs, source=src, unit=unit)
 
+    def _on_view_choice(self, key):
+        """Desplegable de Procesamiento (arriba a la derecha): cambia la misma vista que el menú Vista."""
+        st = self.ribbon._b.state
+        st.update(matrix=key == 'matrix', db=key == 'db', envelope=key in ('db', 'envelope'))
+        self.ribbon._b.emitPlotParams()
+
     def _on_plot_params(self, theta, azimuth, env, db, yrange, smoothing):
-        if self.ribbon._b.state.get('matrix'):              # Vista ▸ Matriz radial
+        key = 'matrix' if self.ribbon._b.state.get('matrix') else 'db' if db else 'envelope' if env else 'amp'
+        self.view_prepro.set_view_choice(key)
+        if self.ribbon._b.state.get('matrix'):              # Vista ▸ Matriz radial (por defecto)
             panel = self._ensure_matrix_panel()
             if panel is not None:
                 self.view_prepro.show_matrix(panel)
                 return
-            self.ribbon._b.state['matrix'] = False          # sin datos: vuelve a la señal
-            self.ribbon._b.emitPlotParams()
+            self.view_prepro.show_waveform()                # sin datos todavía: muestra la señal, sin cambiar la preferencia
+            self.view_prepro.refresh_plot(theta, azimuth, env, db, yrange, smoothing)
             return
         self.view_prepro.show_waveform()
         self.view_prepro.refresh_plot(theta, azimuth, env, db, yrange, smoothing)
