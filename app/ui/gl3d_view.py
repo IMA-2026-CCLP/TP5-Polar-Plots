@@ -540,6 +540,8 @@ class GL3DView(QWidget):
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
+        if self._geometry_mode != 'sphere':        # la regla de dB sólo tiene sentido si el radio varía
+            items += self._make_db_scale_items()
         self._gl_line_items = []
         if self._show_hemisphere_grid:
             self._gl_line_items += self._make_grid_items()
@@ -629,6 +631,25 @@ class GL3DView(QWidget):
             # Etiqueta un poco más allá de la punta: si no, el texto arranca encima de la línea.
             items.append(gl.GLTextItem(pos=np.array(vec, dtype=float) * _LABEL_OFFSET, text=label, color=color,
                                         font=QFont("Segoe UI", label_size)))
+        return items
+
+    def _make_db_scale_items(self) -> list:
+        """Regla de dB sobre el eje Z (cénit): cada marca está a la altura del radio que le
+        corresponde, así se ve de qué a qué valores va el balloon (p. ej. −12 a +6 dB)."""
+        A = getattr(self, '_rad_A', 0.0)
+        lo = getattr(self, '_rad_lo', 12.0)
+        hi = getattr(self, '_rad_hi', 6.0)
+        dmin, dmax = A - lo, A + hi
+        step = 3.0 if (dmax - dmin) <= 24 else 6.0
+        font = QFont("Segoe UI", max(1, int(self._style.get('axis_label_size', FONT_SIZE))))
+        items = []
+        d = np.ceil(dmin / step) * step
+        while d <= dmax + 1e-9:
+            r = float(self._balloon_radius(d))
+            if r <= 1.45:
+                items.append(gl.GLTextItem(pos=np.array([0.03, 0.0, r]), text=f"{d:+.0f} dB",
+                                           color=QColor('#4a4a4a'), font=font))
+            d += step
         return items
 
     def _make_box_items(self) -> list:
