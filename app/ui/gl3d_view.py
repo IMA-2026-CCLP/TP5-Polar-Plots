@@ -101,6 +101,35 @@ def _shade_vertex_colors(md) -> np.ndarray:
     return colors
 
 
+def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
+    """Completa los thetas que faltan en la grilla medida (mic roto/quitado) con una
+    interpolación lineal en dB entre sus vecinos medidos, por azimut. Sin esto, la grilla
+    toma el theta medido más cercano por error y media superficie queda hundida.
+    Devuelve (lev_2d, thetas) con la grilla regular completa."""
+    thetas = np.asarray(thetas, dtype=float)
+    if len(thetas) < 3:
+        return lev_2d, thetas
+    order = np.argsort(thetas)
+    th = thetas[order]
+    lev = lev_2d[:, order]
+    step = float(np.median(np.diff(th)))
+    if step <= 0:
+        return lev_2d, thetas
+    grid = np.arange(th[0], th[-1] + step * 0.5, step)
+    missing = [g for g in grid if np.min(np.abs(th - g)) > step * 0.6]
+    if not missing:
+        return lev_2d, thetas
+    new_lev = np.empty((lev.shape[0], len(th) + len(missing)))
+    new_th = np.concatenate([th, missing])
+    for a in range(lev.shape[0]):
+        row = lev[a]
+        ok = np.isfinite(row)
+        new_lev[a, :len(th)] = row
+        new_lev[a, len(th):] = np.interp(missing, th[ok], row[ok]) if ok.any() else 0.0
+    o = np.argsort(new_th)
+    return new_lev[:, o], new_th[o]
+
+
 def _colorscale_stops(name: str):
     """(t_stops, rgb_stops 0–1) desde COLORSCALES (listas [pos, color] de plot/balloon.py,
     mismas que usa Plotly) — listo para np.interp."""
@@ -350,8 +379,9 @@ class GL3DView(QWidget):
         lev_2d = self._levels[:, :, self._band_index]
         band_hz = float(self._bands[self._band_index])
 
+        lev_2d, thetas = _fill_missing_thetas(lev_2d, self._elevations)
         R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
-            lev_2d, self._azimuths, self._elevations,
+            lev_2d, self._azimuths, thetas,
             interp_deg=style.get('interp_deg', DEFAULT_INTERP_DEG),
             smoothing=style.get('smoothing', 0.0),
             smoothing_method=style.get('smoothing_method', DEFAULT_SMOOTH_METHOD),
