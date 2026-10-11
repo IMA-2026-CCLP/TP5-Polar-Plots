@@ -31,15 +31,25 @@ class TabPreprocesamiento(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         from PyQt6.QtWidgets import QStackedWidget, QComboBox, QHBoxLayout
-        top = QHBoxLayout()                     # selector de vista, arriba a la derecha
-        top.addStretch(1)
-        top.addWidget(QLabel("Vista:"))
+        # Selector de vista: arriba a la izquierda; con la matriz radial se mueve a su fila, junto a "Frecuencia:".
+        self._top_w = QWidget()
+        self._top = QHBoxLayout(self._top_w)
+        self._top.setContentsMargins(0, 0, 0, 0)
+        self._vista_box = QWidget()
+        vb = QHBoxLayout(self._vista_box)
+        vb.setContentsMargins(0, 0, 18, 0)
+        vlabel = QLabel("Vista:")
+        vlabel.setStyleSheet("font-weight: bold;")
+        vb.addWidget(vlabel)
         self._view_combo = QComboBox()
+        self._view_combo.setMinimumWidth(130)
         for label, key in (("Matriz radial", "matrix"), ("dB", "db"), ("Envolvente", "envelope"), ("Amplitud", "amp")):
             self._view_combo.addItem(label, key)
         self._view_combo.currentIndexChanged.connect(lambda _=None: self.view_chosen.emit(self._view_combo.currentData()))
-        top.addWidget(self._view_combo)
-        lay.addLayout(top)
+        vb.addWidget(self._view_combo)
+        self._top.addWidget(self._vista_box)
+        self._top.addStretch(1)
+        lay.addWidget(self._top_w)
         self._stack = QStackedWidget()          # Vista: señal (waveform) o matriz radial
         self._editor = WaveformEditorWidget()
         self._editor.log.connect(self.log)
@@ -55,11 +65,17 @@ class TabPreprocesamiento(QWidget):
             self._view_combo.blockSignals(False)
 
     def show_matrix(self, panel):
+        panel.set_leading_widget(self._vista_box)     # Vista junto a Frecuencia, en la misma fila
+        self._top_w.hide()
         if self._stack.indexOf(panel) < 0:
             self._stack.addWidget(panel)
         self._stack.setCurrentWidget(panel)
 
     def show_waveform(self):
+        if self._vista_box.parent() is not self._top_w:
+            self._vista_box.setParent(None)
+            self._top.insertWidget(0, self._vista_box)
+        self._top_w.show()
         self._stack.setCurrentWidget(self._editor)
 
     # ── API pública (llamada desde MainWindow / Ribbon) ───────────────────────

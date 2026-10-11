@@ -530,7 +530,10 @@ class MatrixPanel(QWidget):
         else:
             origin = os.path.basename(source) if source else "cálculo desde audio"
         top = QHBoxLayout()
-        top.addWidget(QLabel("Frecuencia:"))
+        self._top_row = top
+        flabel = QLabel("Frecuencia:")
+        flabel.setStyleSheet("font-weight: bold;")
+        top.addWidget(flabel)
         self._combo = QComboBox()
         for i, f in enumerate(freqs):
             from core.data_store import freq_label
@@ -672,6 +675,14 @@ class MatrixPanel(QWidget):
         self._radial.set_unit(unit)
         self._radial.set_axes(azimuths, thetas)
         self._radial.set_levels(self._levels3d[:, :, self._combo.currentData() or 0])
+
+    def set_leading_widget(self, w):
+        """Pone un widget (el selector de Vista) al comienzo de la fila de Frecuencia."""
+        if w.parent() is not self and w.parent() is not None:
+            w.setParent(None)
+        if self._top_row.indexOf(w) < 0:
+            self._top_row.insertWidget(0, w)
+        w.show()
 
     def _on_band(self, _=None):
         i = self._combo.currentData() or 0
