@@ -59,12 +59,12 @@ _DEFAULT_STYLE_BY_MODE = {
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
                  "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
-                 "colorbar_pt": 12.0},
+                 "colorbar_pt": 12.0, "colorbar_step": 4.0},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
                  "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
-                 "colorbar_pt": 12.0},
+                 "colorbar_pt": 12.0, "colorbar_step": 4.0},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -407,6 +407,13 @@ class _ViewSection(QWidget):
                 spin_cb.setToolTip("Tamaño (pt) de los valores de la escala de colores, en pantalla y en las imágenes exportadas.")
                 form.addRow("Tamaño de texto de la escala (pt):", spin_cb)
                 fields['colorbar_pt'] = spin_cb
+                spin_step = _NumEdit()
+                spin_step.setRange(0.5, 20)
+                spin_step.setDecimals(1)
+                spin_step.setValue(self._style.get('colorbar_step', 4.0))
+                spin_step.setToolTip("Cada cuántos dB hay una marca (y un tramo de color) en la escala de colores.")
+                form.addRow("Paso de la escala (dB):", spin_step)
+                fields['colorbar_step'] = spin_step
                 spin_min = _NumEdit()
                 spin_min.setRange(-80, 0)
                 spin_min.setDecimals(1)
@@ -655,6 +662,8 @@ class _ViewSection(QWidget):
                 new_style['color_distribution'] = fields['color_distribution'].currentData()
             if 'colorbar_pt' in fields:
                 new_style['colorbar_pt'] = fields['colorbar_pt'].value()
+            if 'colorbar_step' in fields:
+                new_style['colorbar_step'] = fields['colorbar_step'].value()
             if 'balloon_min_db' in fields:
                 new_style['balloon_min_db'] = fields['balloon_min_db'].value()
                 new_style['balloon_max_db'] = fields['balloon_max_db'].value()
