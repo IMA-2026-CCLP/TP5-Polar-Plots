@@ -916,6 +916,87 @@ class TabDirectividad(QWidget):
             self._undo_stack = getattr(self, '_undo_stack', []) + [('tensor', snap, prev_src)]
         return f"Aplicados {n} reemplazos al audio."
 
+    @staticmethod
+    def _rms_db(x):
+        return 20 * np.log10(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2)) + 1e-12)
+
+    def plan_gain_correction(self, pairs):
+        """Prepara "Corregir ganancia": para cada celda destino calcula cuántos dB hay que subir o bajar su señal
+        para que quede al nivel de su simétrica (nivel total de la toma completa, ya calibrado). Devuelve un dict
+        con lo que se va a modificar, o un texto si no hay nada para hacer."""
+        ma = self._ma
+        tensor = getattr(ma, 'tensor', None) if ma is not None else None
+        files = getattr(ma, 'source_files', None) if ma is not None else None
+        if tensor is None or not files:
+            return "No hay audio cargado desde una carpeta (sesión .cclp): cargá los WAV para corregir la ganancia."
+        items = {}
+        for t_d, g_d, t_s, g_s in pairs:
+            i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
+            i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
+            if None in (i_d, j_d, i_s, j_s) or (i_d, j_d) == (i_s, j_s):
+                continue
+            path = files.get((i_d, j_d))
+            if not path:
+                continue
+            g = float(self._rms_db(tensor[i_s, j_s, :]) - self._rms_db(tensor[i_d, j_d, :]))
+            if np.isfinite(g) and abs(g) >= 0.05:
+                items[(i_d, j_d)] = (path, i_d, j_d, g)
+        if not items:
+            return "Las celdas elegidas ya están al mismo nivel que sus simétricas (diferencia menor a 0,05 dB)."
+        from pathlib import Path
+        backup = str(Path(getattr(ma, 'source_dir', None) or Path(next(iter(items.values()))[0]).parent) / "Originales_respaldo")
+        return {"items": list(items.values()), "backup": backup}
+
+    def execute_gain_correction(self, plan):
+        """Aplica el plan: copia cada WAV original a Originales_respaldo (solo si todavía no está ahí, así el
+        respaldo siempre es el original), reescribe el WAV de la carpeta con la ganancia corregida y aplica la misma
+        ganancia al audio en memoria y a los niveles ya calculados. No hay Ctrl+Z: el respaldo es la vuelta atrás."""
+        import shutil
+        from pathlib import Path
+        import soundfile as sf
+        ma = self._ma
+        bak = Path(plan["backup"])
+        bak.mkdir(parents=True, exist_ok=True)
+        targets = [ma] + list((ma.notes or {}).values())
+        done, skipped = [], []
+        for path, i, j, g in plan["items"]:
+            p = Path(path)
+            factor = 10 ** (g / 20)
+            try:
+                info = sf.info(str(p))
+                data, sr = sf.read(str(p), dtype='float64', always_2d=True)
+                new = data * factor
+                if info.subtype.startswith('PCM') and float(np.max(np.abs(new))) >= 1.0:
+                    skipped.append(f"{p.name}: con +{g:.1f} dB se saturaría")
+                    continue
+                if not (bak / p.name).exists():
+                    shutil.copy2(str(p), str(bak / p.name))
+                sf.write(str(p), new, sr, subtype=info.subtype, format=info.format)
+            except Exception as e:
+                skipped.append(f"{p.name}: {e}")
+                continue
+            for t in targets:                          # audio en memoria y niveles ya calculados
+                if getattr(t, 'tensor', None) is not None:
+                    t.tensor[i, j, :] *= factor
+                cache = getattr(t, '_leq_cache', None)
+                if cache is not None:
+                    cache[0][i, j, :] += g
+                    cache[1][i, j] += g
+                glob = getattr(t, '_leq_global_cache', None)
+                if glob is not None:
+                    glob[i, j] += g
+            done.append((p.name, g))
+        if done and getattr(ma, '_leq_cache', None) is not None:
+            self._rebuild_after_leq()
+        for name, g in done:
+            self.log.emit(f"[Ganancia] {name}: {g:+.2f} dB")
+        for s in skipped:
+            self.log.emit(f"[Ganancia] NO modificado: {s}")
+        msg = f"Ganancia corregida en {len(done)} archivos; originales en {bak.name}."
+        if skipped:
+            msg += f" {len(skipped)} sin modificar (ver Log)."
+        return msg
+
     def _set_mirror_src(self, i_d, j_d, i_s, j_s):
         """Anota de qué toma (giro) vino el dato de una posición reemplazada, para que la corrección
         por toma use la de esa toma y no la del giro destino. Si la fuente ya era un reemplazo, sigue la cadena."""

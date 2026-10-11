@@ -259,6 +259,19 @@ class _Radial(QWidget):
             out.append((t_dst, g_dst, t_src, g_src))
         return out
 
+    def gain_pairs(self):
+        """Celdas seleccionadas con su simétrica: (θ destino, giro destino, θ fuente, giro fuente), mismas
+        reglas que el reemplazo por espejo. Sirve para igualar la ganancia del destino a la de su simétrica."""
+        out = []
+        for key in list(self._sel_order):
+            if key not in self._cells:
+                continue
+            d, h = key
+            t_src, g_src = self._mirror_source(key)
+            t_dst, g_dst = (90.0 - d, h) if h <= 180 else (90.0 + d, h - 180.0)
+            out.append((t_dst, g_dst, t_src, g_src))
+        return out
+
     def clear_overrides(self):
         self._overrides.clear(); self._clear_sel(); self._recalc()
 
@@ -515,9 +528,10 @@ class _PlayerBar(QWidget):
 
 class MatrixPanel(QWidget):
     def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None,
-                 undo_cb=None, unit='dB', corr=None, onaxis=None, parent=None):
+                 undo_cb=None, gain_cb=None, unit='dB', corr=None, onaxis=None, parent=None):
         super().__init__(parent)
         self._undo_cb = undo_cb
+        self._gain_cb = gain_cb
         self._onaxis = None if onaxis is None else np.asarray(onaxis, dtype=float)
         self._corr = None if corr is None else np.asarray(corr, dtype=float)
         self._apply_cb = apply_cb
@@ -559,6 +573,12 @@ class MatrixPanel(QWidget):
         self._b_rep.setToolTip("Ctrl + clic en las celdas a reemplazar (en orden). Luego: Reemplazar.")
         self._b_rep.clicked.connect(self._on_replace_btn)
         bar.addWidget(self._b_rep)
+        self._b_gain = QPushButton("Corregir ganancia")
+        self._b_gain.setToolTip("Iguala la ganancia de las celdas seleccionadas (Ctrl + clic) a la de su simétrica. "
+                                "Modifica los WAV de la carpeta de audios y deja una copia de los originales en la subcarpeta "
+                                "Originales_respaldo.")
+        self._b_gain.clicked.connect(self._on_gain_btn)
+        bar.addWidget(self._b_gain)
         bar.addStretch(1)
         lay.addLayout(bar)
         self._pick_dest = None        # modo "Elegir tomas": celdas a reemplazar (en orden)
@@ -598,6 +618,17 @@ class MatrixPanel(QWidget):
             self._radial.clear_selection()
             self._status.setText(f"Destino: {len(keys)} celdas. Ahora Ctrl + clic en las tomas de origen, en orden, y tocá Reemplazar…")
         self._sync_button()
+
+    def _on_gain_btn(self):
+        pairs = self._radial.gain_pairs()
+        if not pairs:
+            self._status.setText("Seleccioná las celdas a corregir (Ctrl + clic).")
+            return
+        if self._gain_cb is None:
+            return
+        msg = self._gain_cb(pairs)
+        if msg:
+            self._status.setText(msg)
 
     def _on_replace_btn(self):
         if self._radial._overrides:

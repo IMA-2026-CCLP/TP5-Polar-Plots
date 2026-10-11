@@ -384,6 +384,32 @@ class MainWindow(QMainWindow):
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
 
+    def _correct_gain(self, pairs):
+        """Corregir ganancia (matriz radial): iguala el nivel de las celdas elegidas al de su simétrica,
+        modificando los WAV de la carpeta de audios (con respaldo de los originales)."""
+        plan = self.view_dir.plan_gain_correction(pairs)
+        if isinstance(plan, str):
+            return plan
+        gains = [g for _p, _i, _j, g in plan["items"]]
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Corregir ganancia")
+        box.setText(f"Se van a modificar {len(gains)} archivos WAV de la carpeta de audios.")
+        box.setInformativeText(
+            f"Cada uno se iguala al nivel de su simétrico (entre {min(gains):+.1f} y {max(gains):+.1f} dB).\n\n"
+            f"Antes de tocarlos se copian los originales a:\n{plan['backup']}\n\n"
+            "Esto no se deshace con Ctrl+Z: para volver atrás hay que restaurar los archivos de esa carpeta.")
+        b_ok = box.addButton("Corregir y guardar", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is not b_ok:
+            return "Corrección cancelada."
+        msg = self.view_dir.execute_gain_correction(plan)
+        self._append_log(f"[Ganancia] {msg}")
+        self._refresh_matrix()
+        self.ribbon._b.emitPlotParams()
+        return msg
+
     def _apply_mirror_replacements(self, pairs):
         """Aplica los reemplazos de la matriz al audio y vuelve a dibujar la señal en el tiempo."""
         msg = self.view_dir.apply_mirror_replacements(pairs)
@@ -543,7 +569,7 @@ class MainWindow(QMainWindow):
         levels, az, th, freqs, src, unit = m
         if self._matrix_win is None:
             self._matrix_win = MatrixPanel(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
-                                           apply_cb=self._apply_mirror_replacements,
+                                           apply_cb=self._apply_mirror_replacements, gain_cb=self._correct_gain,
                                            undo_cb=self._undo_replacement, unit=unit,
                                            corr=self.view_dir.corr_delta_2d(), onaxis=self.view_dir.onaxis_ref_1d())
             self.view_dir.on_data_changed = self._refresh_matrix
