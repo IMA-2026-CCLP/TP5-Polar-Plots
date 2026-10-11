@@ -573,7 +573,12 @@ class MatrixPanel(QWidget):
 
     def _sync_button(self):
         """El botón de abajo: 'Aplicar Reemplazo' si hay reemplazos listos, si no 'Reemplazar…'."""
-        self._b_rep.setText("Aplicar Reemplazo" if self._radial._overrides else "Reemplazar…")
+        ready = bool(self._radial._overrides)
+        self._b_rep.setText("Aplicar Reemplazo" if ready else "Reemplazar…")
+        # Verde cuando hay reemplazos listos para aplicar, así se nota que falta ese paso.
+        self._b_rep.setStyleSheet(
+            "QPushButton { background:#2e7d32; color:white; font-weight:bold; }"
+            "QPushButton:hover { background:#36913a; }" if ready else "")
 
     def _menu_choice(self, mode):
         """Elegido en el menú (cierra solo). 'Simétrico' aplica el espejo a la selección actual;
