@@ -772,12 +772,26 @@ class NativeRibbon(QWidget):
                     "vibrato sin cortar la nota; más bajo → corta el segmento ante el mínimo movimiento de pitch.")),
                 ("Mic", self._c_note_th),
                 (None, self._button("Detectar", "Detecta y segmenta automáticamente las notas",
-                                    lambda: b.detectNotes(), 'detect', enabled=False, min_width=0)),
-                (None, self._tool('save_mask', min_width=0)),
-                (None, self._tool('load_mask', min_width=0))))])
+                                    lambda: b.detectNotes(), 'detect', enabled=False, min_width=0))))])
+        mask_w = QWidget()
+        mh = QHBoxLayout(mask_w)
+        mh.setContentsMargins(0, 0, 0, 0)
+        mh.setSpacing(4)
+        for name, text in (('save_mask', "Guardar"), ('load_mask', "Cargar")):
+            a = self._act[name]            # mismas acciones que el menú Herramientas, con texto corto (el grupo ya dice "Máscara")
+            t = QToolButton()
+            t.setText(text)
+            t.setToolTip(a.toolTip() or a.text())
+            t.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            t.setFixedHeight(22)
+            t.setEnabled(a.isEnabled())
+            t.clicked.connect(lambda _=False, a=a: a.trigger())
+            a.changed.connect(lambda a=a, t=t: t.setEnabled(a.isEnabled()))
+            mh.addWidget(t)
+        g_mask = self._group("Máscara", [(None, mask_w)])
 
         # Fila 1: las 3 cajas chicas una al lado de la otra. Fila 2: Detectar notas, ancho completo.
-        for g in (g_tomas, g_mics, g_scale, g_detect):
+        for g in (g_tomas, g_mics, g_scale, g_detect, g_mask):
             g.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         def strip(*groups):
             w = QWidget()
@@ -789,15 +803,7 @@ class NativeRibbon(QWidget):
             h.addStretch(1)
             return w
         # una tira por paso de Segmentación por notas: 1 tomas · 2 TDOA · 3 escala + detección
-        def stack(*rows):          # filas una debajo de la otra (la tira 3 no entra en una sola fila)
-            w = QWidget()
-            v = QVBoxLayout(w)
-            v.setContentsMargins(0, 0, 0, 0)
-            v.setSpacing(0)
-            for r in rows:
-                v.addWidget(r)
-            return w
-        return (strip(g_tomas), strip(g_mics), stack(strip(g_scale), strip(g_detect)))
+        return (strip(g_tomas), strip(g_mics), strip(g_detect, g_scale, g_mask))
 
     # ── Ventana de Notas (filas horizontales) ─────────────────────────────
     def _panel_dir(self):
