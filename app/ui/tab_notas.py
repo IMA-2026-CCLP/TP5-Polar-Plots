@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView,
-    QDialog, QTabWidget,
+    QDialog, QTabWidget, QComboBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex
 from PyQt6.QtGui import QColor
@@ -95,8 +95,27 @@ class TabNotas(QWidget):
         body.addWidget(self.f0_editor, 1)
         body.addWidget(self._build_table_panel())
 
+        # Un solo giro: el micrófono de referencia contra el resto de los micrófonos del array.
+        self.mics_editor = WaveformEditorWidget()
+        self.mics_editor.log.connect(self.log)
+        self._mics_az = QComboBox()
+        self._mics_az.setToolTip("Giro (azimut) de la toma a mostrar")
+        self._mics_az.currentIndexChanged.connect(lambda _=None: self._render_mics())
+        mics_page = QWidget()
+        mv = QVBoxLayout(mics_page)
+        mv.setContentsMargins(0, 4, 0, 0)
+        mrow = QHBoxLayout()
+        mlabel = QLabel("Giro:")
+        mlabel.setStyleSheet("font-weight: bold;")
+        mrow.addWidget(mlabel)
+        mrow.addWidget(self._mics_az)
+        mrow.addStretch(1)
+        mv.addLayout(mrow)
+        mv.addWidget(self.mics_editor, 1)
+
         self.tabs = QTabWidget()
         self.tabs.addTab(self.sig_editor, "Señal (dB) · onset")
+        self.tabs.addTab(mics_page, "Ref vs micrófonos")
         self.tabs.addTab(f0_page, "Detección F0")
         root.addWidget(self.tabs, 1)
 
@@ -368,12 +387,23 @@ class TabNotas(QWidget):
         ma.scale = self._current_scale
         self.f0_editor.set_ma(ma)
         self.sig_editor.set_ma(ma)
+        self.mics_editor.set_ma(ma)
+        keep = self._mics_az.currentData()
+        self._mics_az.blockSignals(True)
+        self._mics_az.clear()
+        for a in ma.angles:
+            self._mics_az.addItem(f"{a}°", a)
+        i = self._mics_az.findData(keep) if keep is not None else -1
+        self._mics_az.setCurrentIndex(i if i >= 0 else 0)
+        self._mics_az.blockSignals(False)
         self._render_signal()
+        self._render_mics()
 
     def set_signal_view(self, yrange, smoothing_ms):
         """Rango Y y suavizado de la señal dB (los mismos que usa Procesamiento)."""
         self._sig_view = (yrange, float(smoothing_ms))
         self._render_signal()
+        self._render_mics()
 
     def _render_signal(self):
         if self._ma is None:
@@ -382,11 +412,19 @@ class TabNotas(QWidget):
         # micrófono de referencia, todas las tomas superpuestas, en dB (envolvente)
         self.sig_editor.render('ref', None, True, True, yrange, smooth)
 
+    def _render_mics(self):
+        az = self._mics_az.currentData()
+        if self._ma is None or az is None:
+            return
+        yrange, smooth = self._sig_view
+        # theta=None + azimut fijo → todos los micrófonos de esa toma superpuestos (con leyenda por mic)
+        self.mics_editor.render(None, az, True, True, yrange, smooth)
+
     def set_align_params(self, onset, thresh, theta):
         self.sig_editor.set_align_params(onset, thresh, theta)
 
     def show_f0(self):
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentIndex(2)
 
     def detect_notes(self, tol: float, purity: float, start_s: float,
                      grad: float, ref_theta):
@@ -399,3 +437,4 @@ class TabNotas(QWidget):
     def apply_theme(self, palette: dict):
         self.f0_editor.apply_theme(palette)
         self.sig_editor.apply_theme(palette)
+        self.mics_editor.apply_theme(palette)
