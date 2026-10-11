@@ -58,7 +58,7 @@ _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
-                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
+                 "show_ref_plane": True, "show_hemisphere_grid": False, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
                  "colorbar_pt": 12.0, "colorbar_step": 4.0},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
@@ -81,8 +81,9 @@ _DEFAULT_STYLE_BY_MODE = {
     },
     "spectrum": {"bg_color": "#ffffff", "text_color": "#000000", "bar_color": "#146B64"},
 }
-_DEFAULT_MIN_DB_BY_MODE = {"polar2d": -16.0, "3d": -16.0, "sphere": -16.0}
-_DEFAULT_MAX_DB_BY_MODE = {"polar2d": 4.0, "3d": 4.0, "sphere": 4.0}
+# Superficie 3D sin límites fijos: la escala de color se ajusta al mínimo y máximo de cada banda
+_DEFAULT_MIN_DB_BY_MODE = {"polar2d": -16.0, "sphere": -16.0}
+_DEFAULT_MAX_DB_BY_MODE = {"polar2d": 4.0, "sphere": 4.0}
 
 
 # ── Worker para cómputo batch (todo el audio + todas las notas) ───────────────

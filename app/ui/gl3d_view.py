@@ -461,8 +461,13 @@ class GL3DView(QWidget):
         if not np.isfinite(R_dB).all():
             R_dB = np.nan_to_num(R_dB, nan=vmin, posinf=vmax, neginf=vmin)
 
-        cmin = self._min_db if self._min_db is not None else vmin
-        cmax = self._max_db if self._max_db is not None else vmax
+        # Sin límites fijos: la escala de color va del mínimo al máximo de la banda, redondeados al paso de la
+        # escala para que las fronteras queden en valores enteros.
+        step = max(0.5, float(style.get('colorbar_step', 4.0)))
+        cmin = self._min_db if self._min_db is not None else float(np.floor(vmin / step) * step)
+        cmax = self._max_db if self._max_db is not None else float(np.ceil(vmax / step) * step)
+        if cmax - cmin < step:
+            cmax = cmin + step
         span = (vmax - vmin) or 1.0
         R_clip = np.clip(R_dB, cmin, cmax)
         # Valor que va en el borde de la esfera: máximo del balloon o el on-axis (Propiedades ▸ Escala)
