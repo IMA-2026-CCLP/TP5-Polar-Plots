@@ -176,6 +176,7 @@ class MainWindow(QMainWindow):
         self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
 
         self.view_notas.ma_updated.connect(self._on_ma_ready)
+        self.view_notas.onset_dragged.connect(self.view_prepro._on_onset_dragged)   # onset manual en la ventana de notas
         self.view_notas.log.connect(self._append_log)
         self.view_notas.log.connect(self._on_notas_log)
 
@@ -490,6 +491,7 @@ class MainWindow(QMainWindow):
         st = self.ribbon._b.state
         key = ('matrix' if st.get('matrix') else 'db' if db else 'envelope' if env else 'amp')
         self.view_prepro.set_view_choice(key)
+        self.view_notas.set_signal_view(yrange, smoothing)     # señal dB de Segmentación por notas
         if st.get('matrix'):              # Vista ▸ Matriz radial (por defecto)
             panel = self._ensure_matrix_panel()
             if panel is not None:
@@ -529,6 +531,7 @@ class MainWindow(QMainWindow):
 
     def _on_align_preview(self, onset, thresh, theta):
         self.view_prepro.set_align_params(onset, thresh, theta)
+        self.view_notas.set_align_params(onset, thresh, theta)
 
     def _on_align_ref(self, gcc_thresh):
         self.view_prepro.align_ref(gcc_thresh)
@@ -581,6 +584,7 @@ class MainWindow(QMainWindow):
             self.ribbon._act['save_mask'].setEnabled(True)
             if "Detección completada" in msg:
                 self.ribbon.mark_done('detect', "notas detectadas")
+                self.view_notas.show_f0()          # el resultado de la detección se ve en la pestaña F0
 
     def _on_edit_scale(self):
         dlg = ScaleEditorDialog(self.view_notas.get_scale(), self.ribbon.current_scale_name(), self)

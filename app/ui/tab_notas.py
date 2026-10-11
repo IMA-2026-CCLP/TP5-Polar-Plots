@@ -8,13 +8,14 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView,
-    QDialog,
+    QDialog, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex
 from PyQt6.QtGui import QColor
 
 from core.worker import Worker
 from ui.f0_editor import F0EditorWidget
+from ui.waveform_editor import WaveformEditorWidget
 
 from ui.scale_dialog import ScaleEditorDialog   # noqa: F401  (MainWindow lo importa desde acá)
 from core import scales as _scales
@@ -29,6 +30,7 @@ class TabNotas(QWidget):
     """
     ma_updated = pyqtSignal(object)
     log        = pyqtSignal(str)
+    onset_dragged = pyqtSignal(int, float)   # onset marcado a mano en la señal dB (az_idx, segundos)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -76,15 +78,27 @@ class TabNotas(QWidget):
         btn_row.addStretch(1)
         root.addLayout(btn_row)
 
-        # Editor F0 interactivo (ocupa el resto del alto) y, al costado, la tabla de segmentos.
+        # Dos vistas en pestañas. Por defecto la señal en dB del micrófono de referencia con todas las tomas
+        # (ahí se alinea y se marca el onset a mano); la otra es el editor F0 con la tabla de segmentos.
+        self.sig_editor = WaveformEditorWidget()
+        self.sig_editor.log.connect(self.log)
+        self.sig_editor.onset_dragged.connect(self.onset_dragged)
+        self._sig_view = (None, 20.0)          # (yrange, suavizado ms) que fija la ventana principal
+
         self.f0_editor = F0EditorWidget()
         self.f0_editor.log.connect(self.log)
         self.f0_editor.segments_changed.connect(self._on_f0_segments_changed)
-        body = QHBoxLayout()
+        f0_page = QWidget()
+        body = QHBoxLayout(f0_page)
+        body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(6)
         body.addWidget(self.f0_editor, 1)
         body.addWidget(self._build_table_panel())
-        root.addLayout(body, 1)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.sig_editor, "Señal (dB) · onset")
+        self.tabs.addTab(f0_page, "Detección F0")
+        root.addWidget(self.tabs, 1)
 
     def set_notas_controls(self, widget):
         """Recibe el panel armado por NativeRibbon.build_notas_panel() y lo embebe arriba de todo."""
@@ -353,6 +367,26 @@ class TabNotas(QWidget):
         self.table_segs.setRowCount(0)
         ma.scale = self._current_scale
         self.f0_editor.set_ma(ma)
+        self.sig_editor.set_ma(ma)
+        self._render_signal()
+
+    def set_signal_view(self, yrange, smoothing_ms):
+        """Rango Y y suavizado de la señal dB (los mismos que usa Procesamiento)."""
+        self._sig_view = (yrange, float(smoothing_ms))
+        self._render_signal()
+
+    def _render_signal(self):
+        if self._ma is None:
+            return
+        yrange, smooth = self._sig_view
+        # micrófono de referencia, todas las tomas superpuestas, en dB (envolvente)
+        self.sig_editor.render('ref', None, True, True, yrange, smooth)
+
+    def set_align_params(self, onset, thresh, theta):
+        self.sig_editor.set_align_params(onset, thresh, theta)
+
+    def show_f0(self):
+        self.tabs.setCurrentIndex(1)
 
     def detect_notes(self, tol: float, purity: float, start_s: float,
                      grad: float, ref_theta):
@@ -364,3 +398,4 @@ class TabNotas(QWidget):
 
     def apply_theme(self, palette: dict):
         self.f0_editor.apply_theme(palette)
+        self.sig_editor.apply_theme(palette)
