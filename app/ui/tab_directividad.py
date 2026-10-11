@@ -1071,7 +1071,7 @@ class TabDirectividad(QWidget):
             return m
         from mic_array import grid_refine as gr
         lv, az, th, freqs, src, unit = m
-        lv = gr.smooth(lv, st.get('smooth_method', 'ninguno'), int(st.get('smooth_int', 0)))
+        lv = gr.smooth(lv, st.get('smooth_method', 'ninguno'), min(4, int(st.get('smooth_int', 0))))
         lv, az, th = gr.interpolate(lv, az, th, st.get('interp_method', 'lineal'), float(st.get('interp_step', 0)))
         return (lv, az, th, freqs, src, unit)
 
