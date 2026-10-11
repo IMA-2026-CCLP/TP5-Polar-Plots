@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QPushButton, QSizePolicy,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 
 from core.worker import Worker
 
@@ -24,7 +24,8 @@ _PALETTE = [
     (255, 100, 220),
 ]
 
-HOP_LENGTH = 512   # debe coincidir con detect_notes
+HOP_LENGTH   = 512    # debe coincidir con detect_notes
+FRAME_LENGTH = 2048   # default de librosa.pyin: por debajo de esto, pyin crashea en vez de tirar error
 BAND_CENTS = 50    # semiancho de banda coloreada (¢)
 
 
@@ -139,6 +140,10 @@ class F0EditorWidget(QWidget):
         self.combo_theta.blockSignals(False)
 
         self.btn_compute.setEnabled(True)
+        # un tick después: set_ma() se llama en medio de la carga de audio, junto con otras cosas
+        # pesadas (la matriz radial se arma casi al mismo tiempo); arrancar el cómputo en segundo
+        # plano ahí mismo competía por CPU con eso y podía tumbar el proceso.
+        QTimer.singleShot(0, self._compute_f0)
 
     def set_segments(self, segments):
         """Carga segmentos y redibuja cursores si ya hay F0."""
@@ -185,7 +190,12 @@ class F0EditorWidget(QWidget):
         if scale is None:
             raise RuntimeError("Definí la escala antes de calcular F0.")
 
-        i_th       = ma._th_to_col(theta)
+        i_th   = ma._th_to_col(theta)
+        n_samp = ma.tensor.shape[2]
+        if n_samp < FRAME_LENGTH:
+            # librosa.pyin no tira una excepción con señales más cortas que su ventana de análisis:
+            # revienta el proceso entero (crash nativo, sin traceback de Python). Frenarlo acá antes.
+            raise RuntimeError(f"La toma tiene {n_samp} muestras; hacen falta al menos {FRAME_LENGTH} para calcular F0.")
         note_names = list(scale.keys())
         note_freqs = np.array(list(scale.values()), dtype=float)
         fmin       = float(note_freqs.min() * 0.9)

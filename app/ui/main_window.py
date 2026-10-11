@@ -26,20 +26,6 @@ from ui.tab_directividad     import TabDirectividad
 from core.data_store         import load_results, save_results
 
 
-class _NotasWindow(QWidget):
-    """Ventana no modal de Notas: parámetros de detección arriba y la vista de segmentos/F0 abajo."""
-    def __init__(self, params: QWidget, view: QWidget, parent=None):
-        super().__init__(parent, Qt.WindowType.Window)
-        self.setWindowTitle("Detección de notas")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(params)
-        lay.addWidget(view, 1)
-        avail = self.screen().availableGeometry()
-        self.resize(min(1000, avail.width() - 40), min(680, avail.height() - 40))
-
-
 class MainWindow(QMainWindow):
 
     def __init__(self):
@@ -74,6 +60,7 @@ class MainWindow(QMainWindow):
 
         # Ribbon
         self.ribbon = NativeRibbon()
+        self.view_notas.set_notas_controls(self.ribbon.notas_panel)
 
         # Stack de contenido
         self._stack = QStackedWidget()
@@ -100,9 +87,15 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._params_dock)
         self.setCorner(Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
         self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
-        self.resizeDocks([self._params_dock], [300], Qt.Orientation.Horizontal)
+        # Ancho inicial = lo que de verdad necesitan los dos paneles (nunca debe haber un
+        # deslizable horizontal: el QScrollArea lo tiene apagado a propósito, así que si el
+        # dock queda angosto el contenido se recorta sin forma de verlo).
+        needed = max(self.ribbon.proc_panel.widget().minimumSizeHint().width(),
+                     self.ribbon.dir_panel.widget().minimumSizeHint().width()) + 24
+        start_w = max(340, needed)
+        self.resizeDocks([self._params_dock], [start_w], Qt.Orientation.Horizontal)
+        self._params_dock.setMinimumWidth(start_w)   # resizeDocks solo no sobrevive el primer layout
         self.ribbon.add_view_action(self._params_dock.toggleViewAction())
-        self.notas_win = _NotasWindow(self.ribbon.notas_page, self.view_notas, self)
 
         self._setup_log_dock()
 
@@ -133,7 +126,6 @@ class MainWindow(QMainWindow):
         # ── Archivo
         rb.sig_load_audio.connect(lambda: self.loader.load_audio(self))
         rb.sig_edit_patterns.connect(lambda: self.loader.edit_patterns(self))
-        rb.sig_open_notas.connect(self._open_notas)
         rb.sig_open_options.connect(self._open_graph_options)
         rb.sig_save_session.connect(self._on_save_session)
         rb.sig_save_session_as.connect(self._on_save_session_as)
@@ -155,7 +147,6 @@ class MainWindow(QMainWindow):
         rb.sig_load_mask.connect(self._on_load_mask)
 
         # ── Directividad
-        rb.sig_compute_dir.connect(self._on_compute_dir)
         rb.sig_export_all_images.connect(self._on_export_all_images)
         rb.sig_dir_display_changed.connect(self._on_dir_display_changed)
         rb.sig_intersect_cut3d.connect(self._on_intersect_cut3d)
@@ -173,6 +164,10 @@ class MainWindow(QMainWindow):
         self.ribbon._b.sig_corr_recalc.connect(self._on_corr_recalc)
         self.ribbon._b.sig_filter_bands.connect(self._on_filter_bands)
         self.ribbon._b.sig_nivelar_onaxis.connect(self._on_nivelar_onaxis)
+        self.ribbon._b.sig_matrix_grid.connect(self._on_matrix_grid)
+        self.ribbon._b.sig_save_grid.connect(self._on_save_grid)
+        self.ribbon._b.sig_load_grid.connect(self._on_load_grid)
+        self.view_dir.grid_state = self.ribbon._b.state   # suavizado/interpolación de la matriz (en vivo)
         self.view_prepro._editor.set_corr_offset(self._corr_offset_db)
         QTimer.singleShot(0, self.ribbon._b.emitPlotParams)   # al abrir: matriz radial (esqueleto si no hay datos)
         self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
@@ -182,8 +177,6 @@ class MainWindow(QMainWindow):
         self.view_notas.log.connect(self._on_notas_log)
 
         self.view_dir.log.connect(self._append_log)
-        self.view_dir.computed.connect(self._on_dir_computed)
-        self.view_dir.compute_finished.connect(lambda: QTimer.singleShot(0, self._offer_save_directivity))
 
     # ── Tema ──────────────────────────────────────────────────────────────────
 
@@ -252,11 +245,6 @@ class MainWindow(QMainWindow):
             return
         self.ribbon._switch_tab(1)          # Directividad
         self.view_dir._show_properties_panel(kind)
-
-    def _open_notas(self):
-        self.notas_win.show()
-        self.notas_win.raise_()
-        self.notas_win.activateWindow()
 
     # ── Slots de Archivo ──────────────────────────────────────────────────────
 
@@ -400,6 +388,47 @@ class MainWindow(QMainWindow):
         glob = getattr(ma, 'dir_delta_global', None)   # dB vs tiempo es banda ancha: corrección global
         return None if glob is None else np.asarray(glob)
 
+    def _on_save_grid(self):
+        """Guardar grilla (.gcclp): la grilla de 10° ya procesada, sin interpolar ni suavizar."""
+        from core.grid_file import save_grid, EXT
+        snap = self.view_dir.grid_snapshot()
+        if snap is None:
+            self._append_log("[Grilla] No hay grilla procesada para guardar.")
+            return
+        start = str(self._settings.value("last_grid_dir", "")) + "/grilla" + EXT
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar grilla", start, "Grilla procesada (*.gcclp)")
+        if not path:
+            return
+        if not path.endswith(EXT):
+            path += EXT
+        st = self.ribbon._b.state
+        meta = {"corr_ref": st.get('corr_ref', 'ref'), "corr_base": st.get('corr_base', 0),
+                "view": self.view_dir.get_view_config()}   # estilos de los gráficos (como el .cclp)
+        save_grid(path, snap['levels'], snap['azimuths'], snap['thetas'], snap['freqs'], snap['unit'], meta,
+                  ref_raw=snap['ref_raw'], ref_eq=snap['ref_eq'])
+        self._settings.setValue("last_grid_dir", str(Path(path).parent))
+        self._append_log(f"[Grilla] Guardada → {path}")
+
+    def _on_load_grid(self):
+        """Abrir grilla (.gcclp): muestra la grilla guardada en la matriz y los gráficos."""
+        from core.grid_file import load_grid
+        path, _ = QFileDialog.getOpenFileName(self, "Abrir grilla", str(self._settings.value("last_grid_dir", "")),
+                                              "Grilla procesada (*.gcclp)")
+        if not path:
+            return
+        d = load_grid(path)
+        self.ribbon._b.state.update({k: v for k, v in d['meta'].items() if k in ('corr_ref', 'corr_base')})
+        self.view_dir.load_grid_snapshot(d)
+        if d['meta'].get('view'):
+            self.view_dir.apply_view_config(d['meta']['view'])   # estilos guardados en la grilla
+        self._settings.setValue("last_grid_dir", str(Path(path).parent))
+        self._append_log(f"[Grilla] Abierta: {Path(path).name}")
+
+    def _on_matrix_grid(self):
+        """Cambió la interpolación o el suavizado: matriz y gráficos se actualizan."""
+        self._refresh_matrix()
+        self.view_dir.show_graphs()
+
     def _on_nivelar_onaxis(self):
         """Nivelar a on-axis (paso 3): sobre la grilla corregida por toma."""
         if not self.view_dir.nivelar_onaxis():
@@ -450,40 +479,21 @@ class MainWindow(QMainWindow):
             th = ma.thetas[i_th]
             self._append_log(f"    giro {ma.angles[i_az]:>3}°, θ {th}: {float(diff[i_az, i_th]):+6.2f} dB")
 
-    def _on_corr_request(self):
-        """Corrección por toma: elige el micrófono de referencia (paso 2) y recalcula la directividad."""
-        from PyQt6.QtWidgets import QInputDialog
-        ma = self.view_dir._get_current_ma()
-        if ma is None or getattr(ma, 'tensor', None) is None:
-            self._append_log("[Corrección] Cargá los audios para elegir el micrófono de referencia.")
-            return
-        opts = ['ref']
-        for t in ma.thetas:
-            try:
-                opts.append(str(int(float(t))))
-            except (TypeError, ValueError):
-                continue
-        cur = str(self.view_dir.corr_ref_th)
-        cur = cur if cur in opts else 'ref'
-        val, ok = QInputDialog.getItem(self, "Corrección por toma",
-                                       "Micrófono de referencia (todas las tomas se corrigen con su nivel):",
-                                       opts, opts.index(cur), False)
-        if not ok:
-            return
-        self.view_dir.corr_ref_th = 'ref' if val == 'ref' else int(val)
-        self._append_log(f"[Corrección] Referencia: {val}. Recalculando…")
-        self.ribbon._b.computeDir()
-
     def _on_view_choice(self, key):
         """Desplegable de Procesamiento (arriba a la derecha): cambia la misma vista que el menú Vista."""
         st = self.ribbon._b.state
-        st.update(matrix=key == 'matrix', db=key == 'db', envelope=key in ('db', 'envelope'))
+        st.update(matrix=key == 'matrix', db=key == 'db', envelope=key in ('db', 'envelope'), detect=key == 'detect')
         self.ribbon._b.emitPlotParams()
 
     def _on_plot_params(self, theta, azimuth, env, db, yrange, smoothing):
-        key = 'matrix' if self.ribbon._b.state.get('matrix') else 'db' if db else 'envelope' if env else 'amp'
+        st = self.ribbon._b.state
+        key = ('detect' if st.get('detect') else 'matrix' if st.get('matrix')
+               else 'db' if db else 'envelope' if env else 'amp')
         self.view_prepro.set_view_choice(key)
-        if self.ribbon._b.state.get('matrix'):              # Vista ▸ Matriz radial (por defecto)
+        if st.get('detect'):                                 # Vista ▸ Detección: f0/segmentos de Notas
+            self.view_prepro.show_detect(self.view_notas)
+            return
+        if st.get('matrix'):              # Vista ▸ Matriz radial (por defecto)
             panel = self._ensure_matrix_panel()
             if panel is not None:
                 self.view_prepro.show_matrix(panel)
@@ -565,14 +575,17 @@ class MainWindow(QMainWindow):
     # ── Slots de Notas ────────────────────────────────────────────────────────
 
     def _on_detect_notes(self, tol, purity, start_s, grad, ref_theta):
+        self._on_view_choice('detect')   # mostrar el panel ya al hacer click, no recién cuando termine
         self.view_notas.detect_notes(tol, purity, start_s, grad, ref_theta)
 
     def _on_notas_log(self, msg: str):
         if "Detección completada" in msg or "Máscara cargada" in msg:
-            self.ribbon.btn_save_mask.setEnabled(True)
+            self.view_notas.btn_extract.setEnabled(True)
+            self.ribbon._act['save_mask'].setEnabled(True)
+            self._on_view_choice('detect')   # resultado listo: lo mostramos, sin que haga falta ir a buscarlo
 
     def _on_edit_scale(self):
-        dlg = ScaleEditorDialog(self.view_notas.get_scale(), self.ribbon.current_scale_name(), self.notas_win)
+        dlg = ScaleEditorDialog(self.view_notas.get_scale(), self.ribbon.current_scale_name(), self)
         accepted = dlg.exec() == QDialog.DialogCode.Accepted
         if dlg.db_changed or (accepted and dlg.selected_name):
             self.ribbon.refresh_scales(dlg.selected_name)      # actualiza el combo (y elige la escala)
@@ -594,41 +607,8 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.view_notas.load_mask(path)
-            self.ribbon.btn_save_mask.setEnabled(True)
 
     # ── Slots de Directividad ─────────────────────────────────────────────────
-
-    def _on_compute_dir(self, bands, hz_min, hz_max, ref_az, ref_th):
-        if not self._confirm_uncalibrated():
-            return
-        self.view_dir.compute_all(bands, hz_min, hz_max, ref_az, ref_th)
-
-    def _confirm_uncalibrated(self) -> bool:
-        """Calcular sin calibrar está permitido, pero se advierte de la limitación (True = continuar)."""
-        ma = self.view_dir.get_ma() or self._ma
-        if ma is None or ma._is_spl:
-            return True
-        box = QMessageBox(QMessageBox.Icon.Warning, "Calibración no aplicada", "", parent=self)
-        box.setText("No se aplicó la calibración de los micrófonos.")
-        box.setInformativeText(
-            "En mediciones con múltiples micrófonos, la sensibilidad de cada canal puede diferir "
-            "(del orden de 1 a 3 dB). Sin calibrar, esas diferencias no se corrigen y se confunden "
-            "con directividad real, por lo que los resultados pueden no ser adecuados para un análisis "
-            "cuantitativo.\n\n"
-            "Los niveles se expresarán en dBFS (no en dB SPL) y el patrón quedará relativo a la "
-            "posición de referencia.\n\n"
-            "Si la medición se hizo con un único micrófono, o con canales de sensibilidad equivalente, "
-            "el efecto es despreciable."
-        )
-        btn_go = box.addButton("Ok, continuar", QMessageBox.ButtonRole.AcceptRole)
-        btn_cal = box.addButton("Calibrar", QMessageBox.ButtonRole.ActionRole)
-        box.setDefaultButton(btn_cal)      # cerrar la ventana (Esc / X) cancela el cálculo
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is btn_cal:
-            self._open_calibracion_dialog()
-            return False
-        return clicked is btn_go
 
     def _on_export_all_images(self):
         if self.view_dir._full_bands is None:
@@ -741,28 +721,6 @@ class MainWindow(QMainWindow):
         sec._style['cut_elevation'] = elevation
         sec.view.set_style(sec._style)
 
-    def _offer_save_directivity(self):
-        """Tras Calcular: ofrece guardar el archivo de directividad (elige la ubicación en el diálogo de archivo)."""
-        ma = self.view_dir.get_ma()
-        if ma is None or ma.dir_levels is None:
-            return
-        box = QMessageBox(self)
-        box.setWindowTitle("Directividad calculada")
-        box.setText("¿Querés guardar la sesión?")
-        box.setInformativeText("Así podés volver a ver los gráficos más adelante sin reprocesar los audios.")
-        btn_save = box.addButton("Guardar…", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Ahora no", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(btn_save)
-        box.exec()
-        if box.clickedButton() is btn_save:
-            self._on_save_session()
-
-    def _on_dir_computed(self, thetas, status: str):
-        self.ribbon.set_dir_computed(thetas)
-        self.ribbon.set_dir_status(status)
-
-    # ── Propagación de MicArray ───────────────────────────────────────────────
-
     def _on_ma_ready(self, ma):
         self._ma = ma
         self._refresh_matrix()
@@ -783,7 +741,11 @@ class MainWindow(QMainWindow):
         # Primero inyectar ma en las vistas para que estén listas
         # antes de que ribbon dispare _emit_plot_params()
         self.view_prepro.set_ma(ma)
-        self.view_notas.set_ma(ma)
+        # Deferido: set_ma dispara un cómputo F0 en un Worker thread que, si arranca
+        # en medio de la reconstrucción pesada de la matriz/vista 3D de más abajo,
+        # cuelga el proceso entero (crash nativo sin traceback). Un tick después ya
+        # terminó esa reconstrucción y no compiten por CPU/GL al mismo tiempo.
+        QTimer.singleShot(0, lambda: self.view_notas.set_ma(ma))
         self.view_dir.set_ma(ma)
 
         self.ribbon.set_ma_loaded(ma)

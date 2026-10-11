@@ -164,10 +164,12 @@ def export_pg_svg(plot_widget, path: str, w: int, h: int) -> None:
     p.end()
 
 
-_WIDTH_DEFAULTS = {'line_width': 2.5, 'ring_width': 1, 'spoke_width': 1, 'axis_line_width': 3, 'err_width': 2}
+_LEGEND_ZOOM = 1.6   # factor de la muestra del trazo en el export
+_LEGEND_TEXT_FACTOR = 1.25   # proporción texto de leyenda / ejes igual a la de pantalla
+_WIDTH_DEFAULTS = {'line_width': 2.5, 'ring_width': 0.5, 'spoke_width': 0.5, 'axis_line_width': 3, 'err_width': 2}
 
 
-def _scaled_style(style: dict, k: float) -> dict:
+def _scaled_style(style: dict, k: float, s: float = 1.0) -> dict:
     """Copia de style con los *_width (y el 'width' de cada banda comparada) multiplicados por k.
 
     Las plumas de pyqtgraph son "cosméticas" (ancho fijo en píxeles del dispositivo): al agrandar el
@@ -175,12 +177,55 @@ def _scaled_style(style: dict, k: float) -> dict:
     el ancho en la misma proporción que los píxeles, para que el grosor físico (en cm) no cambie.
     Se fija siempre (con el mismo valor por defecto que usa el pincel) porque la mayoría de estas claves
     no están en `style` salvo que el usuario las haya tocado en Propiedades."""
-    if k == 1:
+    if k == 1 and s == 1:
         return style
     out = dict(style)
     for key, default in _WIDTH_DEFAULTS.items():
-        out[key] = float(out.get(key, default)) * k
+        out[key] = float(out.get(key, default)) * k * s
+    for key in list(out):                       # fuentes: escala del gráfico (el render ya aplica el DPI)
+        if key.endswith('_font_size') and key != 'legend_font_size':
+            out[key] = float(out[key]) * s
+    # la leyenda es HTML: no acompaña el escalado del render, va con el DPI explícito
+    # leyenda más grande en el export (texto y muestra del trazo) para que se vean bien los tipos de línea
+    # el texto de la leyenda (HTML) sale más chico que el de los ejes al exportar: se corrige a la proporción de pantalla
+    out['legend_font_size'] = float(out.get('legend_font_size', 12)) * k * s * _LEGEND_TEXT_FACTOR
+    out['legend_sample_scale'] = s * _LEGEND_ZOOM   # la muestra del trazo, en unidades del gráfico (el render ya aplica el DPI)
     return out
+
+
+def _paste_legend(clone, leg, img, k, margin: float = 10.0) -> None:
+    """Dibuja la leyenda a mano (nombre, color y tipo de línea de cada banda) y la pega en la esquina
+    superior derecha de la imagen, en el espacio libre a la derecha del círculo."""
+    from PyQt6.QtCore import QPointF, QRectF
+    from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter
+    from pyqtgraph import functions as fn
+    st = clone._style
+    fs = float(st.get('legend_font_size', 12))                 # px de dispositivo
+    sample_len = 20.0 * float(st.get('legend_sample_scale', 1.0)) * k
+    gap = 6.0 * k
+    row_h = fs * 1.5
+    font = QFont("Segoe UI")
+    font.setPixelSize(max(1, int(round(fs))))
+    fm = QFontMetricsF(font)
+    rows = [(sample.item.opts['pen'], label.text) for sample, label in leg.items]
+    if not rows:
+        return
+    text_w = max(fm.horizontalAdvance(t) for _, t in rows)
+    total_w = sample_len + gap + text_w
+    total_h = row_h * len(rows)
+    x0 = img.width() - total_w - margin * k
+    y0 = margin * k
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    p.setFont(font)
+    for i, (pen_opt, text) in enumerate(rows):
+        y = y0 + i * row_h + row_h / 2
+        p.setPen(fn.mkPen(pen_opt))
+        p.drawLine(QPointF(x0, y), QPointF(x0 + sample_len, y))
+        p.setPen(QColor('#000000'))
+        p.drawText(QPointF(x0 + sample_len + gap, y + fm.ascent() / 2 - fm.descent() / 2), text)
+    p.end()
 
 
 def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) -> None:
@@ -201,12 +246,16 @@ def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) 
     clone.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     clone.resize(W, H)
     clone.show()
-    if k != 1 and getattr(clone, '_compare_styles', None):   # Polar 2D: bandas comparadas, mismo motivo
-        clone._compare_styles = {b: {**st, 'width': float(st.get('width', 2.5)) * k}
+    s = W / max(1.0, float(view.width()))   # lo que se ve en pantalla (el viewport configurado) se exporta con esa proporción
+    if getattr(clone, '_compare_styles', None):   # Polar 2D: bandas comparadas, mismo motivo
+        clone._compare_styles = {b: {**st, 'width': float(st.get('width', 2)) * k * s}
                                   for b, st in clone._compare_styles.items()}
     try:
         QApplication.processEvents()
-        clone.set_style(_scaled_style(view._style, k))   # también aplica estilo de ejes/grilla y vuelve a dibujar
+        # proporción igual a la pantalla: lo que se achica el gráfico al tamaño físico se achica también el texto y las líneas
+        if hasattr(clone, '_tick_font_size'):
+            clone._tick_font_size = float(view._tick_font_size) * s
+        clone.set_style(_scaled_style(view._style, k, s))   # también aplica estilo de ejes/grilla y vuelve a dibujar
         QApplication.processEvents()
         if fmt == 'svg':
             export_pg_svg(clone._plot, path, W, H)
@@ -216,12 +265,21 @@ def export_pg_view(view, path: str, dpi: float, fmt: str = 'png', size_cm=None) 
             from PyQt6.QtGui import QColor, QPainter
             img = QImage(int(round(W * k)), int(round(H * k)), QImage.Format.Format_ARGB32)
             img.fill(QColor("#ffffff"))
+            # la leyenda se dibuja aparte y se pega a la derecha del círculo (como la barra de color 3D)
+            leg = getattr(clone, '_legend', None)
+            had_leg = leg is not None and leg.isVisible()
+            if had_leg:
+                leg.setVisible(False)
             p = QPainter(img)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-            clone._plot.scene().render(p, QRectF(0, 0, img.width(), img.height()),
-                                       clone._plot.getPlotItem().sceneBoundingRect())
+            # se copia el widget completo (como se ve en pantalla), no sólo el área del gráfico
+            src = clone._plot.mapToScene(clone._plot.viewport().rect()).boundingRect()
+            clone._plot.scene().render(p, QRectF(0, 0, img.width(), img.height()), src)
             p.end()
+            if had_leg:
+                leg.setVisible(True)
+                _paste_legend(clone, leg, img, k)
             img.save(path)
             set_png_dpi(path, dpi)
     finally:

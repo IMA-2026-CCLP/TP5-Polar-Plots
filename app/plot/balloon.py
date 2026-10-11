@@ -760,6 +760,37 @@ _COMPARE_COLORS = [
     "#c084fc", "#22d3ee", "#fb923c", "#f472b6",
 ]
 
+# Estilo por defecto de cada banda comparada en Polar 2D, por frecuencia (Hz): los colores y tipos de
+# línea de la exportación compar6. Así cada banda conserva su color al cambiar de plano o de selección.
+_COMPARE_BY_HZ = {
+    315:   {'color': '#000080', 'width': 2, 'dash': 'dash'},
+    400:   {'color': '#ffa500', 'width': 2, 'dash': 'dot'},
+    500:   {'color': '#00ff7f', 'width': 2, 'dash': 'solid'},
+    630:   {'color': '#ff00ff', 'width': 2, 'dash': 'dashdot'},
+    800:   {'color': '#50c878', 'width': 2, 'dash': 'solid'},
+    1000:  {'color': '#000080', 'width': 2, 'dash': 'dash'},
+    1250:  {'color': '#ffa500', 'width': 2, 'dash': 'dot'},
+    1600:  {'color': '#00ced1', 'width': 2, 'dash': 'solid'},
+    2000:  {'color': '#ff8c42', 'width': 2, 'dash': 'solid'},
+    2500:  {'color': '#00ff7f', 'width': 2, 'dash': 'solid'},
+    3150:  {'color': '#ff00ff', 'width': 2, 'dash': 'dashdot'},
+    4000:  {'color': '#ffa500', 'width': 2, 'dash': 'solid'},
+    5000:  {'color': '#20b2aa', 'width': 2, 'dash': 'solid'},
+    6300:  {'color': '#ff6b6b', 'width': 2, 'dash': 'solid'},
+    8000:  {'color': '#4caf50', 'width': 2, 'dash': 'solid'},
+    10000: {'color': '#ffd43b', 'width': 2, 'dash': 'solid'},
+}
+
+
+def default_compare_style(hz, band_index):
+    """Estilo por defecto de una banda comparada: por frecuencia si está en _COMPARE_BY_HZ,
+    si no, por su índice de banda (no por su posición en la selección)."""
+    st = dict(_COMPARE_BY_HZ.get(int(round(float(hz))), {}))
+    st.setdefault('color', _COMPARE_COLORS[int(band_index) % len(_COMPARE_COLORS)])
+    st.setdefault('dash', 'solid')
+    return st
+
+
 # Posición del texto de los anillos de dB relativa al punto sobre el eje
 # angular (ring_label_angle): 'center' = centrado sobre la línea, 'left'/
 # 'right' = corrido a un lado para no tapar la línea radial ni la curva.

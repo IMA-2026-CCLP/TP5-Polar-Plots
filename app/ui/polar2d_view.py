@@ -19,7 +19,7 @@ from PyQt6.QtGui import QCursor, QFont
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QToolTip
 
 from core.symmetry_utils import apply_symmetry
-from plot.balloon import compute_polar2d_ring, _COMPARE_COLORS, FONT_SIZE
+from plot.balloon import compute_polar2d_ring, default_compare_style, FONT_SIZE
 
 pg.setConfigOptions(antialias=True)
 
@@ -30,6 +30,42 @@ _DASH_QT = {
     "dashdot": Qt.PenStyle.DashDotLine,
     "longdash": Qt.PenStyle.DashLine,
 }
+
+
+def _legend_sample_type(scale: float):
+    """Muestra de la leyenda con el largo escalado (igual que el grosor del trazo al exportar). pyqtgraph
+    dibuja la muestra con 20 px fijos: con el grosor escalado, la raya punteada se pierde."""
+    from pyqtgraph.graphicsItems.LegendItem import ItemSample
+    from pyqtgraph import functions as fn
+    from PyQt6.QtWidgets import QSizePolicy
+    class _Sample(ItemSample):
+        def __init__(self, item):
+            super().__init__(item)
+            self.setFixedWidth(int(round(20 * scale)))
+        def paint(self, p, *args):
+            opts = self.item.opts
+            if opts.get('antialias'):
+                p.setRenderHint(p.RenderHint.Antialiasing)
+            p.setPen(fn.mkPen(opts['pen']))
+            p.drawLine(0, 11, int(round(20 * scale)), 11)
+    return _Sample
+
+
+# Patrones de raya en unidades de grosor: espacios amplios para que cada tipo se distinga de la línea continua
+_DASH_PATTERN = {
+    'dash':     [4.0, 3.0],
+    'longdash': [8.0, 4.0],
+    'dot':      [1.0, 2.5],
+    'dashdot':  [4.0, 2.5, 1.0, 2.5],
+}
+
+
+def _line_pen(color, width, dash_name):
+    """Lápiz de la curva con el tipo de línea elegido y espacios visibles."""
+    pen = pg.mkPen(color, width=width, style=_DASH_QT.get(dash_name, Qt.PenStyle.SolidLine))
+    if dash_name in _DASH_PATTERN:
+        pen.setDashPattern(_DASH_PATTERN[dash_name])
+    return pen
 
 
 def _px_font(size) -> QFont:
@@ -235,12 +271,10 @@ class Polar2DView(QWidget):
         ]
         self._rings_last = rings
 
-        step = self._style.get('ring_step', 5.0)
-        all_min = min(r['gmin'] for r in rings)
-        all_max = max(r['gmax'] for r in rings)
-        r_floor = self._min_db if self._min_db is not None else math.floor(all_min / step) * step
-        r_ceil  = self._max_db if self._max_db is not None else (
-            math.ceil(all_max / step) * step if multi else 0.0)
+        step = float(self._style.get('ring_step', 4.0))
+        # escala por defecto −16 a 4 dB; los límites que elegís reemplazan esos valores
+        r_floor = float(self._min_db) if self._min_db is not None else -16.0
+        r_ceil  = float(self._max_db) if self._max_db is not None else 4.0
         if r_ceil <= r_floor:
             r_ceil = r_floor + step
         dyn_range = r_ceil - r_floor
@@ -258,22 +292,22 @@ class Polar2DView(QWidget):
 
         st = self._style
         ring_color = st.get('ring_color') or '#000000'
-        ring_pen   = pg.mkPen(ring_color, width=float(st.get('ring_width', 1)),
+        ring_pen   = pg.mkPen(ring_color, width=float(st.get('ring_width', 0.5)),
                               style=_DASH_QT.get(st.get('ring_dash', 'dot'), Qt.PenStyle.DotLine))
-        spoke_pen  = pg.mkPen(st.get('spoke_color') or ring_color, width=float(st.get('spoke_width', 1)),
+        spoke_pen  = pg.mkPen(st.get('spoke_color') or ring_color, width=float(st.get('spoke_width', 0.5)),
                               style=_DASH_QT.get(st.get('spoke_dash', 'dot'), Qt.PenStyle.DotLine))
         # Líneas radiales cada N grados (0 = ninguna); los números de ángulo se siguen mostrando cada 30°
-        spoke_step = float(st.get('spoke_step', 30 if st.get('show_spokes', True) else 0) or 0)
+        spoke_step = float(st.get('spoke_step', 45 if st.get('show_spokes', True) else 0) or 0)
         ring_font  = self._style.get('ring_font_size', 9)
-        ring_vals  = np.arange(math.ceil(r_floor / step) * step, r_ceil + 0.01, step)
-        ring_vals  = ring_vals[(ring_vals > r_floor) & (ring_vals <= r_ceil)]
+        # anillos cada `step` dB partiendo del límite inferior (−16, −12, −8, −4, 0, 4 ...)
+        ring_vals  = r_floor + step * np.arange(1, int(math.floor((r_ceil - r_floor) / step + 1e-9)) + 1)
         theta_ring = np.linspace(0, 360, 181)
         for db in ring_vals:
             r_ring = float(db_to_r(db))
             rx, ry = to_xy(theta_ring, r_ring)
             circle = pg.PlotCurveItem(rx, ry, pen=ring_pen)
             self._plot.addItem(circle)
-            label_ang = self._style.get('ring_label_angle', 92)
+            label_ang = self._style.get('ring_label_angle', 15)
             lx, ly = to_xy(label_ang, r_ring)
             # 'left'/'right': el número queda a un costado del punto del anillo (no encima de la línea)
             anchor = {'left': (1.0, 0.5), 'right': (0.0, 0.5)}.get(self._style.get('ring_label_pos'), (0.5, 0.5))
@@ -282,7 +316,13 @@ class Polar2DView(QWidget):
             txt.setPos(lx, ly)
             self._plot.addItem(txt)
 
-        for a in range(0, 360, 30):
+        # borde exterior: siempre un círculo negro grueso en r = 1, aunque los límites de la escala
+        # no caigan en un múltiplo del paso de anillos
+        bx, by = to_xy(theta_ring, 1.0)
+        self._plot.addItem(pg.PlotCurveItem(bx, by, pen=pg.mkPen('#000000', width=1.0, style=Qt.PenStyle.SolidLine)))
+
+        label_step = int(spoke_step) if spoke_step > 0 else 45   # las etiquetas siguen al paso de las líneas radiales
+        for a in range(0, 360, label_step):
             ax, ay = to_xy(a, 1.14)   # separados del borde exterior, no pegados al anillo
             txt = pg.TextItem(f"{a}°", color='#000000', anchor=(0.5, 0.5))
             txt.setFont(_px_font(self._tick_font_size))
@@ -296,19 +336,22 @@ class Polar2DView(QWidget):
 
         self._update_legend(multi)
 
-        default_width = self._style.get('line_width', 2.5)
-        for i, ring in enumerate(rings):
-            band_style = self._compare_styles.get(ring['band_index'], {})
-            color = band_style.get('color', _COMPARE_COLORS[i % len(_COMPARE_COLORS)])
+        default_width = self._style.get('line_width', 2)
+        for ring in rings:
+            band_style = {**default_compare_style(ring['band_hz'], ring['band_index']),
+                          **self._compare_styles.get(ring['band_index'], {})}
+            color = band_style['color']
             width = band_style.get('width', default_width)
             dash  = _DASH_QT.get(band_style.get('dash', 'solid'), Qt.PenStyle.SolidLine)
             r_plot = db_to_r(ring['r_closed'])
             x, y = to_xy(ring['az_closed'], r_plot)
             name = f"{ring['band_hz']:.0f} Hz" if multi else None
-            curve = pg.PlotDataItem(x, y, pen=pg.mkPen(color, width=width, style=dash), name=name)
+            pen = _line_pen(color, width, band_style.get('dash', 'solid'))
+            curve = pg.PlotDataItem(x, y, pen=pen, name=name)
             self._plot.addItem(curve)
 
         self._vb.setRange(xRange=(-1.4, 1.4), yRange=(-1.4, 1.4), padding=0)   # margen para los números de grados
+        self._shift_legend()
 
         r0 = rings[0]
         if multi:
@@ -325,7 +368,7 @@ class Polar2DView(QWidget):
         self._db_to_r_params = (r_floor, dyn_range, rotation)
 
     _LEGEND_POS = {                      # (ancla del cuadro, ancla del gráfico, desplazamiento)
-        'top-right':    ((1, 0), (1, 0), (-10, 10)),
+        'top-right':    ((1, 0), (1, 0), (0, 10)),
         'top-left':     ((0, 0), (0, 0), (10, 10)),
         'bottom-right': ((1, 1), (1, 1), (-10, -10)),
         'bottom-left':  ((0, 1), (0, 1), (10, -10)),
@@ -342,15 +385,32 @@ class Polar2DView(QWidget):
             return
         if pi.legend is None or pi.legend.scene() is None:
             pi.legend = None
-            self._legend = self._plot.addLegend(offset=(-10, 10))
+            self._legend = self._plot.addLegend(offset=(-2, 10))
+            # anclada al área del gráfico completa (no al cuadrado del círculo): así puede ir a los costados
+            self._legend.setParentItem(self._plot.getPlotItem())
         else:
             self._legend = pi.legend
         lg = self._legend
         lg.setVisible(True)
         pos = self._LEGEND_POS.get(self._style.get('legend_pos', 'top-right'), self._LEGEND_POS['top-right'])
-        lg.anchor(*pos)
+        lg.anchor(pos[0], pos[1], (pos[2][0], pos[2][1]))
         lg.setLabelTextSize(f"{int(self._style.get('legend_font_size', FONT_SIZE))}px")
+        lg.sampleType = _legend_sample_type(float(self._style.get('legend_sample_scale', 1.0)))
         lg.setLabelTextColor('#000000')
+
+    def _shift_legend(self):
+        """Leyenda en la esquina superior derecha de TODO el gráfico (a la derecha del círculo)."""
+        lg = self._legend
+        pi = self._plot.getPlotItem()
+        pi.layout.setContentsMargins(0, 0, 0, 0)
+        if lg is None or not lg.isVisible() or self._style.get('legend_pos', 'top-right') != 'top-right':
+            return
+        lg.updateSize()
+        w = float(lg.boundingRect().width())
+        vp = self._plot.viewport()
+        right = pi.mapFromScene(self._plot.mapToScene(vp.width(), 0)).x()   # borde derecho del widget
+        top = pi.mapFromScene(self._plot.mapToScene(0, 0)).y()
+        lg.setPos(right - w - 10, top + 10)
 
     # ── Hover ────────────────────────────────────────────────────────────
 

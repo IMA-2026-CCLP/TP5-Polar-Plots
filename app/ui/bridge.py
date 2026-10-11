@@ -32,6 +32,9 @@ class Bridge(QObject):
     sig_corr_recalc        = pyqtSignal()
     sig_filter_bands       = pyqtSignal()
     sig_nivelar_onaxis     = pyqtSignal()
+    sig_matrix_grid        = pyqtSignal()
+    sig_save_grid         = pyqtSignal()
+    sig_load_grid         = pyqtSignal()
     sig_align_takes        = pyqtSignal(float, float, object, float)
     sig_align_ref          = pyqtSignal(object)
     sig_align_preview      = pyqtSignal(float, float, object)
@@ -42,7 +45,6 @@ class Bridge(QObject):
     sig_preset_changed     = pyqtSignal(str)
     sig_save_mask          = pyqtSignal()
     sig_load_mask          = pyqtSignal()
-    sig_compute_dir        = pyqtSignal(str, float, float, int, int)
     sig_export_all_images  = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
     sig_intersect_cut3d     = pyqtSignal()   # "Intersectar" (Corte, Superficie 3D) — no toca Polar 2D
@@ -54,8 +56,10 @@ class Bridge(QObject):
         self.state = {
             'tab':        0,
             'theta':      'ref',  'az':        'Todos',
-            'envelope':   True,   'db':         True,   'matrix': True,
+            'envelope':   True,   'db':         True,   'matrix': True,  'detect': False,
             'corr_ref':   'ref',  'corr_view':  '0',  'corr_base':  0,
+            'interp_method': 'lineal', 'interp_step': 0,
+            'smooth_method': 'ninguno', 'smooth_int': 0,
             'smooth':     20.0,   'ymin':       -60.0,  'ymax': 0.0,
             'hpf_hz':     200.0,
             'onset':      1.0,    'thresh':    -40.0,   'window_ms': 50.0,
@@ -137,6 +141,15 @@ class Bridge(QObject):
     def nivelarOnaxis(self):
         self.sig_nivelar_onaxis.emit()
 
+    def matrixGridChanged(self):
+        self.sig_matrix_grid.emit()
+
+    def saveGrid(self):
+        self.sig_save_grid.emit()
+
+    def loadGrid(self):
+        self.sig_load_grid.emit()
+
     def applyHpf(self):
         self.sig_apply_hpf.emit(float(self.state.get('hpf_hz', 200.0)))
 
@@ -194,15 +207,6 @@ class Bridge(QObject):
         self.sig_load_mask.emit()
 
     @pyqtSlot()
-    def computeDir(self):
-        self.sig_compute_dir.emit(
-            str(self.state.get('bands', '1/3')),
-            float(self.state.get('hz_min', 315.0)),
-            float(self.state.get('hz_max', 10000.0)),
-            int(self.state.get('ref_az', 0)),
-            int(self.state.get('ref_th', 0)),
-        )
-
     @pyqtSlot()
     def exportAllImages(self):
         self.sig_export_all_images.emit()

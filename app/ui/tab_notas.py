@@ -4,11 +4,11 @@ ui/tab_notas.py — Tab 3: Detección y edición de segmentos de notas.
 import json
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QSplitter,
-    QDialog, QDialogButtonBox,
+    QAbstractItemView,
+    QDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex
 from PyQt6.QtGui import QColor
@@ -46,39 +46,68 @@ class TabNotas(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(8, 6, 8, 6)
+        root.setSpacing(6)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setHandleWidth(6)
+        # Arriba: panel de trabajo de notas (alinear tomas/mics, escala, detectar), armado por
+        # NativeRibbon y embebido acá — ver set_notas_controls(). Placeholder hasta entonces.
+        self._controls_slot = QVBoxLayout()
+        self._controls_slot.setContentsMargins(0, 0, 0, 0)
+        root.addLayout(self._controls_slot)
 
-        # Mitad superior — tabla de segmentos
-        top = QWidget()
-        top_lay = QVBoxLayout(top)
-        top_lay.setContentsMargins(12, 8, 12, 4)
-        top_lay.setSpacing(4)
-        top_lay.addWidget(self._make_group_segmentos())
-        splitter.addWidget(top)
+        btn_row = QHBoxLayout()
+        self.btn_apply_edits = QPushButton("Aplicar ediciones")
+        self.btn_apply_edits.setEnabled(False)
+        self.btn_apply_edits.clicked.connect(self._on_apply_edits)
 
-        # Mitad inferior — editor F0 interactivo
+        # Verde formal: distingue el paso que hay que apretar para que las notas detectadas
+        # pasen a existir como MicArray (ma.notes) — sin esto, "A procesar" no tiene nada.
+        self.btn_extract = QPushButton("Extraer notas")
+        self.btn_extract.setEnabled(False)
+        self.btn_extract.clicked.connect(self._on_extract)
+        self.btn_extract.setStyleSheet(
+            "QPushButton { background:#2e7d32; color:white; font-weight:bold; }"
+            "QPushButton:hover:!disabled { background:#36913a; }"
+            "QPushButton:disabled { background:#9e9e9e; color:#e0e0e0; }"
+        )
+
+        self.btn_view_table = QPushButton("Ver tabla")
+        self.btn_view_table.setCheckable(True)
+        self.btn_view_table.setToolTip("Muestra/oculta la tabla de segmentos detectados, en una ventana aparte")
+        self.btn_view_table.toggled.connect(self._on_toggle_table)
+
+        btn_row.addWidget(self.btn_apply_edits)
+        btn_row.addWidget(self.btn_extract)
+        btn_row.addWidget(self.btn_view_table)
+        btn_row.addStretch(1)
+        root.addLayout(btn_row)
+
+        # Editor F0 interactivo — ocupa todo el resto del alto disponible.
         self.f0_editor = F0EditorWidget()
         self.f0_editor.log.connect(self.log)
         self.f0_editor.segments_changed.connect(self._on_f0_segments_changed)
-        splitter.addWidget(self.f0_editor)
+        root.addWidget(self.f0_editor, 1)
 
-        splitter.setSizes([260, 400])
-        root.addWidget(splitter)
+        self._build_table_window()
 
-    def _make_group_segmentos(self) -> QGroupBox:
-        g = QGroupBox("SEGMENTOS DETECTADOS")
-        lay = QVBoxLayout(g)
-        lay.setSpacing(6)
+    def set_notas_controls(self, widget):
+        """Recibe el panel armado por NativeRibbon.build_notas_panel() y lo embebe arriba de todo."""
+        widget.setMaximumHeight(300)   # compacto: el resto del alto es para el editor F0
+        self._controls_slot.addWidget(widget)
+
+    def _build_table_window(self):
+        """Tabla de segmentos: ventana aparte, angosta, no modal — se abre/cierra con 'Ver tabla'."""
+        self._table_win = QDialog(self)
+        self._table_win.setWindowTitle("Segmentos detectados")
+        self._table_win.resize(380, 420)
+        lay = QVBoxLayout(self._table_win)
 
         hint = QLabel(
             "Doble clic en Start/End para editar. "
             "Arrastrá los cursores en el plot F0 para ajuste visual."
         )
         hint.setObjectName("label_hint")
+        hint.setWordWrap(True)
         lay.addWidget(hint)
 
         self.table_segs = QTableWidget(0, 5)
@@ -87,25 +116,17 @@ class TabNotas(QWidget):
         )
         self.table_segs.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_segs.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
-        self.table_segs.setMinimumHeight(120)
         lay.addWidget(self.table_segs)
 
-        btn_row = QHBoxLayout()
-        self.btn_apply_edits = QPushButton("Aplicar ediciones")
-        self.btn_apply_edits.setEnabled(False)
-        self.btn_apply_edits.clicked.connect(self._on_apply_edits)
+        self._table_win.finished.connect(lambda _=0: self.btn_view_table.setChecked(False))
 
-        self.btn_extract = QPushButton("Extraer todas las notas")
-        self.btn_extract.setObjectName("btn_primary")
-        self.btn_extract.setEnabled(False)
-        self.btn_extract.clicked.connect(self._on_extract)
-
-        btn_row.addWidget(self.btn_apply_edits)
-        btn_row.addWidget(self.btn_extract)
-        btn_row.addStretch()
-        lay.addLayout(btn_row)
-
-        return g
+    def _on_toggle_table(self, checked: bool):
+        if checked:
+            self._table_win.show()
+            self._table_win.raise_()
+            self._table_win.activateWindow()
+        else:
+            self._table_win.hide()
 
     # ── Escala API ────────────────────────────────────────────────────────
 

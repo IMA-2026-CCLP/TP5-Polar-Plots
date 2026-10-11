@@ -4,7 +4,7 @@ ui/native_ribbon.py — Barra superior nativa estilo VituixCAD: menú + pestaña
 Reemplaza a HtmlRibbon (shell.html + QWebChannel) con widgets Qt normales, pero
 conserva exactamente su API pública (señales, proxies, métodos) para que
 MainWindow no cambie. `Bridge` se sigue usando como contenedor de `state` y de
-los slots que arman los parámetros de cada señal (`emitPlotParams`, `computeDir`…);
+los slots que arman los parámetros de cada señal (`emitPlotParams`…);
 ahora los llaman los widgets directamente en vez de JS.
 
 Los valores por defecto de los controles salen de `Bridge.state`: no se repiten acá.
@@ -14,8 +14,8 @@ import json
 from PyQt6.QtCore import Qt, QLocale, pyqtSignal
 from PyQt6.QtGui import QAction, QActionGroup, QDoubleValidator
 from PyQt6.QtWidgets import (
-    QDialog, QFormLayout, QGroupBox, QInputDialog, QMenu, QMessageBox, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
-    QComboBox, QLineEdit, QCheckBox, QFrame, QToolButton,
+    QFormLayout, QGridLayout, QGroupBox, QInputDialog, QMenu, QMessageBox, QScrollArea, QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QTabBar, QLabel, QPushButton,
+    QComboBox, QLineEdit, QFrame, QToolButton,
 )
 
 from ui.bridge import Bridge
@@ -66,7 +66,6 @@ class NativeRibbon(QWidget):
 
     sig_load_audio      = pyqtSignal()
     sig_edit_patterns   = pyqtSignal()
-    sig_open_notas      = pyqtSignal()
     sig_open_options    = pyqtSignal(str)     # 'polar2d' | 'spectrum' | 'sphere' | '3d' | 'images'
     sig_save_session    = pyqtSignal()
     sig_save_session_as = pyqtSignal()
@@ -85,7 +84,6 @@ class NativeRibbon(QWidget):
     sig_save_mask        = pyqtSignal()
     sig_load_mask        = pyqtSignal()
 
-    sig_compute_dir         = pyqtSignal(str, float, float, int, int)
     sig_export_all_images   = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
     sig_intersect_cut3d     = pyqtSignal()
@@ -107,9 +105,9 @@ class NativeRibbon(QWidget):
         lay.addLayout(self._make_tabbar())
         # Paneles laterales (uno por pestaña) y página de Notas: MainWindow los aloja en un dock / ventana.
         self._make_align_dialogs()
+        self.notas_panel = self.build_notas_panel()
         self.proc_panel = self._panel_proc()
         self.dir_panel  = self._panel_dir()
-        self.notas_page = self._page_notas()
         line = QFrame()
         line.setObjectName("rb_line")
         line.setFixedHeight(1)
@@ -134,7 +132,7 @@ class NativeRibbon(QWidget):
             'sig_apply_hpf', 'sig_corr_recalc', 'sig_align_takes',
             'sig_align_preview', 'sig_align_ref', 'sig_open_calibracion',
             'sig_plot_params', 'sig_detect_notes', 'sig_edit_scale', 'sig_preset_changed',
-            'sig_save_mask', 'sig_load_mask', 'sig_compute_dir',
+            'sig_save_mask', 'sig_load_mask',
             'sig_export_all_images', 'sig_dir_display_changed', 'sig_intersect_cut3d', 'sig_theme_toggled',
         ):
             src = 'sig_tab_changed' if name == 'tab_changed' else name
@@ -219,8 +217,11 @@ class NativeRibbon(QWidget):
                 # Si el valor guardado ya no existe, state pasa a lo que muestra el combo.
                 self._b.state[key] = c.currentData() if key not in _INT_KEYS else int(c.currentData())
 
-    def _button(self, text, tip, fn, name=None, primary=False, enabled=True):
+    def _button(self, text, tip, fn, name=None, primary=False, enabled=True, min_width=92):
         b = QPushButton(text)
+        if min_width:
+            b.setMinimumWidth(min_width)   # tamaño mínimo uniforme (texto corto no se ve "achicado" al lado de otros)
+        b.setFixedHeight(22)    # misma altura que los combos/_tool() — Qt los calcula distinto si no
         b.setToolTip(tip)
         if primary:
             b.setObjectName("btn_primary")
@@ -230,30 +231,85 @@ class NativeRibbon(QWidget):
             self._btn[name] = b
         return b
 
-    def _corr_row(self, b) -> QWidget:
-        """Corrección por toma: fila 1 = mic de referencia + toma base (desplegables angostos);
-        fila 2 = Aplicar."""
+    @staticmethod
+    def _green(btn):
+        """Botón verde de acción principal."""
+        btn.setStyleSheet("QPushButton { background:#2e7d32; color:white; font-weight:bold; padding:4px 10px; }"
+                          "QPushButton:disabled { background:#9e9e9e; }")
+        return btn
+
+    def _row2(self, *pairs, expand_last: bool = False) -> QWidget:
+        """Varios (label_o_None, widget) en una sola fila horizontal, para no gastar una fila
+        de QFormLayout por campo cuando entran varios controles angostos juntos.
+        `expand_last=True`: el último widget (p. ej. un botón "Aplicar") ocupa todo el resto
+        del ancho en vez de dejarlo en blanco con un stretch."""
         w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(0, 0, 0, 0)
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.addWidget(QLabel("Mic"))
-        top.addWidget(self._combo('corr_ref', 60, "Micrófono de referencia que mide la emisión de cada toma (paso 2)",
-                                  [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)]))
-        top.addWidget(QLabel("Base"))
-        top.addWidget(self._combo('corr_base', 60, "Giro (HOR) contra el que se compara cada toma. Por defecto 0°",
-                                  [(f'{a}°', str(a)) for a in range(0, 181, 10)]))
-        top.addStretch(1)
-        v.addLayout(top)
-        v.addWidget(self._button("Aplicar", "Recalcula sólo la corrección por toma con la referencia y toma base elegidas (matriz y dB vs tiempo)",
-                                 lambda: b.corrRecalc()))
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+        last = pairs[-1][1] if pairs else None
+        for label, widget in pairs:
+            if label:
+                h.addWidget(QLabel(label))
+            if expand_last and widget is last:
+                widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                h.addWidget(widget, 1)
+            else:
+                h.addWidget(widget)
+        if not expand_last:
+            h.addStretch(1)
         return w
 
-    def _tool(self, name) -> QToolButton:
+    def _grid_row(self, label, widget) -> QWidget:
+        """Una fila: etiqueta + control angosto."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(QLabel(label))
+        h.addWidget(widget)
+        h.addStretch(1)
+        return w
+
+    def _int_field(self, key, width, tip):
+        """Campo de texto para un entero (sin flechitas); guarda en state[key] al confirmar."""
+        from PyQt6.QtGui import QIntValidator
+        le = QLineEdit(str(self._b.state.get(key, 0)))
+        le.setFixedWidth(width)
+        le.setToolTip(tip)
+        le.setValidator(QIntValidator(0, 10, le))
+        def done():
+            self._b.state[key] = int(le.text() or 0)
+        le.editingFinished.connect(done)
+        return le
+
+    def _corr_row(self, b) -> QWidget:
+        """Nivelación: mic de referencia + toma base + 'Nivelar por toma' + 'Nivelar on axis',
+        todo en una sola fila (tamaño de botón natural, igual que el resto — no se estira)."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(4)
+        h.addWidget(QLabel("Mic"))
+        h.addWidget(self._combo('corr_ref', 80, "Micrófono de referencia que mide la emisión de cada toma (paso 2)",
+                                [('ref', 'ref')] + [(str(t), str(t)) for t in range(0, 181, 10)]))
+        h.addWidget(QLabel("Base"))
+        h.addWidget(self._combo('corr_base', 80, "Giro (HOR) contra el que se compara cada toma. Por defecto 0°",
+                                [(f'{a}°', str(a)) for a in range(0, 181, 10)]))
+        h.addWidget(self._button("Nivelar por toma", "Recalcula sólo la corrección por toma con la referencia y toma base elegidas (matriz y dB vs tiempo)",
+                                 lambda: b.corrRecalc()))
+        h.addWidget(self._button("Nivelar on axis",
+                                 "Paso 3: cada banda queda en 0 dB en la posición on-axis (giro 0°, θ 0°) sobre la grilla corregida.",
+                                 lambda: b.nivelarOnaxis()))
+        h.addStretch(1)
+        return w
+
+    def _tool(self, name, min_width=92) -> QToolButton:
         t = QToolButton()
         t.setDefaultAction(self._act[name])
         t.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        if min_width:
+            t.setMinimumWidth(min_width)
+        t.setFixedHeight(22)    # misma altura que _button()/los combos (Qt los calcula distinto si no)
         return t
 
     def _row(self, caption, items):
@@ -291,14 +347,13 @@ class NativeRibbon(QWidget):
         act('load_audio',  "Cargar audio…",   "Carga una carpeta de audios WAV y construye el tensor de medición", b.loadAudio)
         act('patterns',    "Patrones de archivos…", "Cómo se llaman los archivos de audio ({MIC} = micrófono, {H} = azimut)", b.editPatterns)
         self._make_view_actions()
-        act('notas',       "Detección de notas…", "Abre la ventana para detectar, editar y extraer las notas", self.sig_open_notas.emit)
         act('load_session', "Cargar",  "Abre una sesión (.cclp) guardada: los gráficos ya calculados y toda la interfaz, sin necesidad de los audios", b.loadSession)
         act('save_session', "Guardar", "Guarda en el mismo archivo .cclp cargado o guardado antes; si todavía no hay ninguno, pregunta dónde (como 'Guardar como…')", b.saveSession, False)
+        act('save_grid', "Guardar grilla…", "Guarda la grilla procesada de 10° (corregida y nivelada, sin interpolar ni suavizar) en un .gcclp", b.saveGrid)
+        act('load_grid', "Abrir grilla…", "Abre una grilla procesada guardada (.gcclp) y la muestra en la matriz y los gráficos", b.loadGrid)
         act('save_session_as', "Guardar como…", "Guarda los gráficos ya calculados (global y por nota) y toda la interfaz, sin los audios, eligiendo el archivo .cclp", b.saveSessionAs, False)
         # "Cargar/Guardar directividad (.npz)…" se sacó del menú: la sesión .cclp ya cubre el mismo caso
         # (mismo contenido, sin audio) y guarda además toda la interfaz, no sólo Directividad.
-        act('align_takes', "Alinear entre tomas (onset)…", "Opcional: alinea el inicio de cada toma para superponerlas en la vista de Procesamiento", lambda: self._dlg_takes.exec(), False)
-        act('align_mics',  "Alinear entre micrófonos (retardo)…", "Opcional: corrige el retardo de cada micrófono respecto al de referencia (GCC-PHAT)", lambda: self._dlg_mics.exec(), False)
         act('calibrar',    "Calibración…",    "Abre la calibración: al aplicarla, el tensor pasa a dB SPL automáticamente", b.openCalibracion, False)
         act('save_mask',   "Guardar máscara…", "Guarda la segmentación de notas detectadas", b.saveMask, False)
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
@@ -395,6 +450,9 @@ class NativeRibbon(QWidget):
         for n in ('load_session', 'save_session', 'save_session_as'):
             m.addAction(self._act[n])
         m.addSeparator()
+        for n in ('save_grid', 'load_grid'):
+            m.addAction(self._act[n])
+        m.addSeparator()
         m.addMenu("Exportar").addAction(self._act['export_all'])
         m.addSeparator()
         m.addAction("Salir", lambda: self.window().close())
@@ -410,10 +468,7 @@ class NativeRibbon(QWidget):
         self._act_dark.triggered.connect(lambda _=False: self.sig_theme_toggled.emit())
 
         m = mb.addMenu("&Herramientas")
-        for n in ('align_takes', 'align_mics'):
-            m.addAction(self._act[n])
-        m.addSeparator()
-        for n in ('notas', 'edit_scale', 'smoothing', 'compare', 'save_mask', 'load_mask'):
+        for n in ('edit_scale', 'smoothing', 'compare', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
 
         m = mb.addMenu("&Opciones")
@@ -508,6 +563,17 @@ class NativeRibbon(QWidget):
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return w
 
+    def _row(self, *widgets: QWidget) -> QWidget:
+        """Varios widgets uno al lado del otro, sin nada entre medio (a diferencia de _pair)."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(4)
+        for wid in widgets:
+            h.addWidget(wid)
+        h.addStretch(1)
+        return w
+
     def _pair(self, a: QWidget, b: QWidget) -> QWidget:
         w = QWidget()
         h = QHBoxLayout(w)
@@ -551,7 +617,8 @@ class NativeRibbon(QWidget):
         v.setContentsMargins(6, 4, 6, 6)
         v.setSpacing(4)
         for title, rows in groups:
-            v.addWidget(self._group(title, rows))
+            # título None + un widget ya armado (en vez de filas): se agrega directo, sin QGroupBox alrededor
+            v.addWidget(rows if title is None else self._group(title, rows))
         v.addStretch()
         sc = QScrollArea()
         sc.setWidgetResizable(True)
@@ -564,117 +631,156 @@ class NativeRibbon(QWidget):
     def _panel_proc(self):
         b = self._b
         plot = b.emitPlotParams
+        disp = b.dirDisplayChanged
         th = dict(enc=lambda v: str(v), dec=lambda d: d)
         self._c_theta    = self._combo('theta', 78, "Elevación (micrófono) a visualizar", cb=plot, **th)
         self._c_az       = self._combo('az', 78, "Azimuth a visualizar, o 'Todos' para superponer las tomas", cb=plot, **th)
+        self._c_nota_proc = self._combo('nota', 190,
+            "Sobre qué se procesa y grafica: toda la toma, o una nota segmentada. Elegís libremente, no fuerza nada más.",
+            [("Todo el audio", "Todo el audio")], disp)
         return self._panel([
             ("Señal", [
-                ("Elevación θ (Mic)", self._c_theta),
-                ("Azimut (Toma)", self._c_az)]),
-            ("Eje Y", [
-                ("Mín – Máx", self._pair(
-                    self._num('ymin', 50, "Límite inferior del eje Y. Vacío = autoescala", plot, True, "auto"),
-                    self._num('ymax', 50, "Límite superior del eje Y. Vacío = autoescala", plot, True, "auto")))]),
-            ("Filtro pasa-altos", [
-                ("Frecuencia (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
-                (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
-                                    lambda: b.applyHpf(), 'hpf', enabled=False))]),
-            ("Calibración", [
-                (None, self._tool('calibrar'))]),
-            ("Filtrar por bandas", [
-                (None, self._button("Filtrar por bandas 1/3",
-                                    "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Aplicar.",
-                                    lambda: b.filterBands())),
-            ]),
-            ("Corrección por toma", [
+                (None, self._row2(
+                    ("Elev. (θ Mic)", self._c_theta),
+                    ("Azimut", self._c_az)))]),
+            ("Filtro y calibración", [
+                (None, self._row2(
+                    ("HPF (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
+                    (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
+                                        lambda: b.applyHpf(), 'hpf', enabled=False)),
+                    (None, self._tool('calibrar'))))]),
+            ("Procesar", [
+                (None, self._row2(
+                    ("Nota", self._c_nota_proc),
+                    (None, self._button("Filtrar 1/3 oct", "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Nivelar por toma.",
+                                        lambda: b.filterBands()))))]),
+            ("Nivelación", [
                 (None, self._corr_row(b)),
             ]),
-            ("Nivelar a on-axis", [
-                (None, self._button("Nivelar a on-axis",
-                                    "Paso 3: cada banda queda en 0 dB en la posición on-axis (giro 0°, θ 0°) sobre la grilla corregida.",
-                                    lambda: b.nivelarOnaxis())),
+            ("Interpolación", [
+                (None, self._row2(
+                    ("Método", self._combo('interp_method', 130,
+                        "Estima valores entre las mediciones de 10°. Lineal: rectas. Bicúbica: curva suave.",
+                        [('lineal', 'lineal'), ('bicúbica', 'bicúbica')])),
+                    ("Paso", self._combo('interp_step', 120,
+                        "Paso de la grilla interpolada: ninguna (medida, 10°), 5° o 2°.",
+                        [('ninguna', 0), ('5°', 5), ('2°', 2)])),
+                    (None, self._button("Aplicar", "Aplica la interpolación elegida a la matriz",
+                                        lambda: b.matrixGridChanged(), min_width=0)))),
+            ]),
+            ("Suavizado", [
+                (None, self._row2(
+                    ("Método", self._combo('smooth_method', 166,
+                        "Cambia los valores medidos para quitar ruido. Gaussiano es el más seguro.",
+                        [('ninguno', 'ninguno'), ('gaussiano', 'gaussiano'), ('savgol', 'savgol'), ('media móvil', 'media móvil')])),
+                    ("Int.", self._int_field('smooth_int', 60,
+                        "0 = sin suavizar. 1 a 2 = leve. 3 a 5 = fuerte.")),
+                    (None, self._button("Aplicar", "Aplica el suavizado elegido a la matriz",
+                                        lambda: b.matrixGridChanged(), min_width=0)))),
             ]),
         ])
 
-    # ── Alineaciones (opcionales): diálogos abiertos desde Herramientas ────
-    def _align_dialog(self, title: str, rows) -> QDialog:
-        dlg = QDialog(self)
-        dlg.setWindowTitle(title)
-        dlg.setMinimumWidth(380)
-        v = QVBoxLayout(dlg)
-        g = self._group("", rows)
-        g.setObjectName("prop_page")
-        v.addWidget(g)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        close = QPushButton("Cerrar")
-        close.clicked.connect(dlg.reject)
-        row.addWidget(close)
-        v.addLayout(row)
-        return dlg
-
+    # ── Alineaciones: controles en el panel de Procesamiento (antes, diálogos en Herramientas) ─
     def _make_align_dialogs(self):
-        b = self._b
-        prev = b.emitAlignPreview
         th = dict(enc=lambda v: str(v), dec=lambda d: d)
-        self._c_align_th = self._combo('align_theta', 64, "Micrófono de referencia para la alineación", cb=prev, **th)
-        self._dlg_takes = self._align_dialog("Alinear entre tomas (onset)", [
-            ("Onset (s)", self._num('onset', 44, "Tiempo objetivo del onset tras alinear (s)", prev)),
-            ("Umbral (dBFS)", self._num('thresh', 44, "Nivel mínimo para detectar el onset (dBFS)", prev)),
-            (None, self._button("Alinear tomas", "Alinea las tomas por onset según el umbral",
-                                lambda: b.alignTakes(), 'align_takes', primary=True, enabled=False))])
-        self._dlg_mics = self._align_dialog("Alinear entre micrófonos (retardo)", [
-            ("Ventana (ms)", self._num('window_ms', 40, "Ventana de análisis GCC-PHAT (ms)")),
-            ("Mic ref", self._c_align_th),
-            ("Umbral GCC (dBFS)", self._with_info(
-                self._num('gcc_thresh', 48, "Nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
-                          nullable=True, placeholder="sin filtro"),
-                "Umbral GCC", _GCC_HELP)),
-            (None, self._button("Alinear mics", "Alinea los micrófonos al de referencia con GCC-PHAT",
-                                lambda: b.alignRef(), 'align_ref', primary=True, enabled=False))])
-        # al aplicar, el diálogo se cierra (el progreso se ve en la barra de estado)
-        self._btn['align_takes'].clicked.connect(self._dlg_takes.accept)
-        self._btn['align_ref'].clicked.connect(self._dlg_mics.accept)
+        self._c_align_th = self._combo('align_theta', 80, "Micrófono de referencia para la alineación",
+                                       cb=self._b.emitAlignPreview, **th)
 
-    # ── Ventana de Notas (filas horizontales) ─────────────────────────────
-    def _page_notas(self):
+    # ── Panel de trabajo de notas: todo el flujo (alinear, escala, detectar) en la vista Notas,
+    # no en Procesamiento — TabNotas lo embebe arriba de la tabla/editor F0.
+    def build_notas_panel(self) -> QScrollArea:
         b = self._b
+        th = dict(enc=lambda v: str(v), dec=lambda d: d)
         self._c_preset = QComboBox()
-        self._c_preset.setFixedWidth(170)
+        self._c_preset.setFixedWidth(150)
+        # QComboBox.minimumSizeHint() ignora el setFixedWidth de arriba y mide según el ítem
+        # más largo de la lista (nombres de escala, sin tope) — eso infla el ancho mínimo que
+        # layouts padre (QFormLayout/QGridLayout) le exigen a todo el grupo. Lo acotamos a mano.
+        self._c_preset.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._c_preset.setMinimumContentsLength(8)
         self._c_preset.setToolTip("Escala musical de referencia para detectar notas")
         from ui.scale_dialog import fill_scale_combo
         self._fill_scales = fill_scale_combo
         fill_scale_combo(self._c_preset, "Fa mayor")
         self._c_preset.currentIndexChanged.connect(
             lambda _i: b.presetChanged(self._c_preset.currentData()) if self._c_preset.currentData() else None)
+        self._c_note_th = self._combo('note_theta', 80, "Micrófono usado para detectar notas", **th)
 
-        self._c_note_th = self._combo('note_theta', 64, "Micrófono usado para detectar notas",
-                                      enc=lambda v: str(v), dec=lambda d: d)
-        n = lambda k, w, tip: self._num(k, w, tip)
-        return self._page([
-            ("Escala", [self._c_preset, self._tool('edit_scale'), '|',
-                        self._tool('save_mask'), self._tool('load_mask')]),
-            ("Detección", [
-                "Tol ¢", n('note_tol', 40, "Tolerancia en cents para aceptar una frecuencia como nota (100 ¢ = 1 semitono)"),
-                "Pureza", n('note_purity', 40, "Fracción mínima de frames asignados a la nota (0–1)"),
-                "Inicio", n('note_start', 40, "Segundo desde el cual se analiza (omite el ataque)"),
-                "Grad", n('note_grad', 40, "Gradiente máx. (¢/frame) para considerar estable el tono"),
-                "Ref θ", self._c_note_th,
-                self._button("♪ Detectar notas", "Detecta y segmenta automáticamente las notas",
-                             lambda: b.detectNotes(), 'detect', enabled=False)]),
-        ])
+        g_tomas = self._group("Alinear entre tomas", [
+            (None, self._row2(
+                ("Onset", self._num('onset', 36, "Tiempo objetivo del onset tras alinear (s)", b.emitAlignPreview)),
+                ("Umbral", self._num('thresh', 36, "Nivel mínimo para detectar el onset (dBFS)", b.emitAlignPreview)))),
+            (None, self._button("Alinear", "Alinea las tomas por onset según el umbral",
+                                lambda: b.alignTakes(), 'align_takes', enabled=False, min_width=0))])
+        g_mics = self._group("Alinear entre micrófonos", [
+            (None, self._row2(
+                ("Vent.", self._num('window_ms', 32, "Ventana de análisis GCC-PHAT (ms)")),
+                ("Mic", self._c_align_th),
+                ("Umbral", self._num('gcc_thresh', 36, "Umbral GCC: nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
+                                     nullable=True, placeholder="—")))),
+            (None, self._button("Alinear", "Alinea los micrófonos al de referencia con GCC-PHAT",
+                                lambda: b.alignRef(), 'align_ref', enabled=False, min_width=0))])
+        edit_scale_btn = self._tool('edit_scale', min_width=0)
+        edit_scale_btn.setText("Editar")
+        g_scale = self._group("Escala musical", [
+            (None, self._c_preset),
+            (None, edit_scale_btn)])
 
+        # Detectar notas: todos los parámetros + el botón en una sola fila, usando todo el ancho
+        # disponible (la fila de arriba ya ocupa las 3 columnas, así que acá entra holgado).
+        g_detect = self._group("Detectar notas", [
+            (None, self._row2(
+                ("Toler.", self._num('note_tol', 38, "Cuánto puede desafinar un frame de la nota de la escala y seguir contando como esa nota, en cents "
+                    "(100 ¢ = 1 semitono). Valores típicos: 30–50 ¢. Más alto → acepta frames más desafinados (segmentos más largos pero menos precisos); "
+                    "más bajo → más estricto (puede partir una nota sostenida en varios segmentos si el cantante desafina un poco).")),
+                ("Pureza", self._num('note_purity', 38, "Fracción de frames del tramo que deben caer dentro de la tolerancia para aceptarlo como esa nota (0 a 1; "
+                    "0.8 = 80%). Valores típicos: 0.7–0.9. Más alto → sólo acepta tramos bien afinados y estables (descarta ataques/deslizamientos, puede "
+                    "perder notas cortas); más bajo → acepta tramos más sucios o con glissando (riesgo de falsos positivos).")),
+                ("Inicio", self._num('note_start', 38, "Segundos que se ignoran al principio de la toma antes de buscar notas (para saltar silencio o el "
+                    "ataque inicial del cantante, que suele desafinar). 0 = analiza desde el primer frame.")),
+                ("Grad.", self._num('note_grad', 38, "Cuánto puede variar el pitch entre frames consecutivos (¢ por frame) para seguir considerándose la "
+                    "misma nota sostenida, en vez de un vibrato/glissando que corta el segmento. Valores típicos: 20–30 ¢/frame. Más alto → tolera más "
+                    "vibrato sin cortar la nota; más bajo → corta el segmento ante el mínimo movimiento de pitch.")),
+                ("Mic", self._c_note_th),
+                (None, self._button("Detectar", "Detecta y segmenta automáticamente las notas",
+                                    lambda: b.detectNotes(), 'detect', enabled=False, min_width=0)),
+                (None, self._tool('save_mask', min_width=0)),
+                (None, self._tool('load_mask', min_width=0))))])
+
+        # Fila 1: las 3 cajas chicas una al lado de la otra. Fila 2: Detectar notas, ancho completo.
+        for g in (g_tomas, g_mics, g_scale, g_detect):
+            g.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        inner = QWidget()
+        grid = QGridLayout(inner)
+        grid.setContentsMargins(6, 4, 6, 6)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+        grid.addWidget(g_tomas,  0, 0)
+        grid.addWidget(g_mics,   0, 1)
+        grid.addWidget(g_scale,  0, 2)
+        grid.addWidget(g_detect, 1, 0, 1, 3)
+        grid.setRowStretch(2, 1)
+
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.Shape.NoFrame)
+        # A diferencia del dock de Parámetros (angosto, scroll horizontal prohibido), esta vista
+        # vive en el área central: casi siempre entra entero, pero si la ventana se achica mucho
+        # un scroll horizontal es preferible a recortar contenido sin forma de verlo.
+        sc.setWidget(inner)
+        return sc
+
+    # ── Ventana de Notas (filas horizontales) ─────────────────────────────
     def _panel_dir(self):
         b = self._b
         disp = b.dirDisplayChanged
         as_int = dict(enc=lambda v: str(int(float(v))) if v is not None else None,
                       dec=lambda d: int(float(d)) if d is not None else 0)
 
-        self._c_ref_az = self._combo('ref_az', 62, "Azimuth de referencia para normalizar (0° = frente)", **as_int)
-        self._c_ref_th = self._combo('ref_th', 62, "Elevación de referencia para normalizar (0° = plano horizontal)", **as_int)
-        self._c_nota = self._combo('nota', 130, "Nota a graficar, o 'Todo el audio'",
-                                   [("Todo el audio", "Todo el audio")], disp)
-        self._c_el = self._combo('el_idx', 84, "Elevación del corte polar 2D (sólo plano XY)",
+        self._c_el = self._combo('el_idx', 140, "Elevación del corte polar 2D (sólo plano XY)",
                                  [("Auto (0°)", 0)], disp,
                                  enc=lambda v: 0 if v is None else v + 1,
                                  dec=lambda d: None if d == 0 else d - 1)
@@ -683,43 +789,39 @@ class NativeRibbon(QWidget):
             self._c_el.setEnabled(b.state.get('polar_plane', 'XY') == 'XY')
             disp()
 
-        self._c_plane = self._combo('polar_plane', 128, "Plano del corte polar 2D",
-                                    [("XY (horizontal)", "XY"), ("XZ (vert. 0°/180°)", "XZ"),
-                                     ("YZ (vert. 90°/270°)", "YZ")], on_plane)
+        self._c_plane = self._combo('polar_plane', 150, "Plano del corte polar 2D",
+                                    [("XY (horiz.)", "XY"), ("XZ (0°/180°)", "XZ"),
+                                     ("YZ (90°/270°)", "YZ")], on_plane)
         self._dir_status = QLabel("Sin datos.")
         self._dir_status.setObjectName("rb_status")
         self._dir_status.setWordWrap(True)
         return self._panel([
             ("Cálculo", [
-                ("Bandas", self._combo('bands', 96, "Resolución frecuencial",
-                                       [("1/3 de octava", "1/3"), ("Octava", "octave")])),
                 ("Rango (Hz)", self._pair(self._num('hz_min', 52, "Frecuencia mínima a mostrar (Hz)", disp),
                                           self._num('hz_max', 56, "Frecuencia máxima a mostrar (Hz)", disp))),
-                ("Ref. azimut", self._c_ref_az),
-                ("Ref. elevación", self._c_ref_th),
-                (None, self._button("▶ Calcular", "Calcula el patrón de directividad. Se recomienda haber aplicado la calibración (Procesamiento ▸ Calibración)",
-                                    lambda: b.computeDir(), 'compute', primary=True, enabled=False)),
                 (None, self._dir_status)]),
-            ("Nota", [(None, self._c_nota)]),
             ("Polar 2D", [
-                ("Plano", self._c_plane),
-                ("Elevación", self._c_el),
-                ("Simetría", self._combo('symmetry', 112, "Simetría: espeja los datos medidos para completar el patrón",
-                                         [("Sin simetría", "none"), ("XZ (izq↔der)", "azimuth"),
-                                          ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp))]),
+                (None, self._row2(
+                    ("Plano", self._c_plane),
+                    ("Elev.", self._c_el))),
+                ("Simet.", self._combo('symmetry', 140, "Simetría: espeja los datos medidos para completar el patrón",
+                                       [("Ninguna", "none"), ("XZ (izq↔der)", "azimuth"),
+                                        ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp))]),
             ("Corte (Superficie 3D)", [
-                ("Elevación (°)", self._num('cut3d_elevation', 52,
-                    "Elevación del plano/curva de referencia (0° a 90°)")),
-                (None, self._button("Intersectar", "Muestra el plano de referencia y la curva real a esta "
-                    "elevación sobre la Superficie 3D — no afecta a Polar 2D, es independiente.",
-                    lambda: b.intersectCut3D()))]),
+                (None, self._row2(
+                    ("Elevación (°)", self._num('cut3d_elevation', 52,
+                        "Elevación del plano/curva de referencia (0° a 90°)")),
+                    (None, self._button("Intersectar", "Muestra el plano de referencia y la curva real a esta "
+                        "elevación sobre la Superficie 3D — no afecta a Polar 2D, es independiente.",
+                        lambda: b.intersectCut3D()))))]),
             ("Espectro", [
-                ("Audio", self._with_info(
-                    self._combo('spec_data', 130, "Señales originales, o igualadas en nivel para comparar la forma espectral",
-                                [("Originales", 0), ("Igualados en nivel", 1)], disp),
-                    "Espectro: Originales / Igualados en nivel", '<b>Originales</b><br>Espectro del micrófono de referencia en cada toma, tal como se midió. Incluye las diferencias de nivel con que el cantante emitió en cada toma.<br><br><b>Igualados en nivel</b><br>Espectro después de la corrección de emisión que usa el cálculo de directividad: se compensa, banda por banda, la diferencia de nivel de cada toma respecto de la toma de referencia (Ref. azimut). Así todas las tomas quedan al mismo nivel y solo importa la forma del espectro, no cuánto cantó más fuerte o más suave en cada toma.<br><br>Como la corrección se calcula con ese mismo micrófono, en <i>Igualados</i> todas las tomas coinciden; la vista Por toma sirve sobre todo con <i>Originales</i>.')),
-                ("Curvas", self._combo('spec_global', 84, "Global: promedio de todos los ángulos. Por toma: una curva por azimuth",
-                                       [("Global", True), ("Por toma", False)], disp))]),
+                (None, self._row2(
+                    ("Audio", self._with_info(
+                        self._combo('spec_data', 120, "Señales originales, o igualadas en nivel para comparar la forma espectral",
+                                    [("Originales", 0), ("Igualados", 1)], disp),
+                        "Espectro: Originales / Igualados en nivel", '<b>Originales</b><br>Espectro del micrófono de referencia en cada toma, tal como se midió. Incluye las diferencias de nivel con que el cantante emitió en cada toma.<br><br><b>Igualados en nivel</b><br>Espectro después de la corrección de emisión que usa el cálculo de directividad: se compensa, banda por banda, la diferencia de nivel de cada toma respecto de la toma de referencia (Ref. azimut). Así todas las tomas quedan al mismo nivel y solo importa la forma del espectro, no cuánto cantó más fuerte o más suave en cada toma.<br><br>Como la corrección se calcula con ese mismo micrófono, en <i>Igualados</i> todas las tomas coinciden; la vista Por toma sirve sobre todo con <i>Originales</i>.')),
+                    ("Curvas", self._combo('spec_global', 128, "Global: promedio de todos los ángulos. Por toma: una curva por azimuth",
+                                           [("Global", True), ("Por toma", False)], disp))))]),
         ])
 
     # ── API pública idéntica a HtmlRibbon ─────────────────────────────────
@@ -745,16 +847,11 @@ class NativeRibbon(QWidget):
         self._fill(self._c_align_th, th_items, 'align_theta')
         self._fill(self._c_note_th, th_items, 'note_theta')
         self._fill(self._c_az, [("Todos", "Todos")] + az_items, 'az')
-        self._fill(self._c_ref_az, az_items, 'ref_az')
-        self._fill(self._c_ref_th, [(tl(t), tv(t)) for t in thetas if t != 'ref'], 'ref_th')
 
         is_spl = bool(getattr(ma, '_is_spl', False))
         for n in ('hpf', 'align_takes', 'align_ref', 'detect'):
             self._btn[n].setEnabled(True)
-        self._btn['compute'].setEnabled(True)      # sin calibrar se puede calcular, con aviso (ver MainWindow)
         self._act['calibrar'].setEnabled(True)
-        self._act['align_takes'].setEnabled(True)
-        self._act['align_mics'].setEnabled(True)
 
         sr = getattr(ma, 'sr', 0) // 1000
         self._chip_last = (f"{len(angles)} × {len(thetas)} · {sr} kHz" + (' · SPL ✓' if is_spl else ''), True)
@@ -778,7 +875,8 @@ class NativeRibbon(QWidget):
         self._sync()
 
     def set_notes_loaded(self, notes: list):
-        self._fill(self._c_nota, [("Todo el audio", "Todo el audio")] + [(n, n) for n in notes], 'nota')
+        items = [("Todo el audio", "Todo el audio")] + [(n, n) for n in notes]
+        self._fill(self._c_nota_proc, items, 'nota')
 
     def set_dir_computed(self, thetas):
         self._fill(self._c_el, [("Auto (0°)", 0)] + [(f'{round(float(t))}°', i + 1) for i, t in enumerate(thetas)])

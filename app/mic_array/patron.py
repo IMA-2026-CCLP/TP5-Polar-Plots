@@ -828,54 +828,6 @@ class MicArray:
 
             segmentos.append(segs)
 
-        # ── Build styled DataFrame ────────────────────────────────────────────
-        import pandas as pd
-        from IPython.display import display
-
-        az_labels = [f"{a}°" for a in self.angles]
-        dur_data  = {}
-        pur_data  = {}
-        for note in note_names:
-            dur_col = []
-            pur_col = []
-            for i_az, segs in enumerate(segmentos):
-                if note in segs:
-                    dur = (segs[note]['end'] - segs[note]['start']) / self.sr
-                    pur = segs[note]['purity']
-                    dur_col.append(f"{dur:.2f}s")
-                    pur_col.append(pur)
-                else:
-                    dur_col.append("--")
-                    pur_col.append(None)
-            dur_data[note] = dur_col
-            pur_data[note] = pur_col
-
-        df_dur = pd.DataFrame(dur_data, index=az_labels)
-        df_pur = pd.DataFrame(pur_data, index=az_labels)
-
-        def _color(val, pur):
-            if pur is None:
-                return 'background-color: #e0e0e0; color: #888'
-            if pur >= 0.9:
-                return 'background-color: #c6efce; color: #276221'
-            if pur >= min_purity:
-                return 'background-color: #ffeb9c; color: #9c5700'
-            return 'background-color: #ffc7ce; color: #9c0006'
-
-        def _style(row):
-            note = row.name if hasattr(row, 'name') else None
-            return [_color(row[n], df_pur.loc[row.name, n])
-                    if hasattr(row, 'name') else '' for n in note_names]
-
-        styled = df_dur.style.apply(
-            lambda row: [_color(row[n], df_pur.loc[row.name, n]) for n in note_names],
-            axis=1
-        ).set_caption(
-            f"Detección de notas  |  tolerance={tolerance_cents}¢  "
-            f"min_purity={min_purity*100:.0f}%  "
-            f"(🟢 ≥90%  🟡 ≥{min_purity*100:.0f}%  ⬜ rechazado)"
-        )
-        display(styled)
         return segmentos
 
     def edit_segment(self, segments, azimuth, note, start_s, end_s):

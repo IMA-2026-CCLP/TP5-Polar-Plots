@@ -35,7 +35,7 @@ class TabPreprocesamiento(QWidget):
         top.addStretch(1)
         top.addWidget(QLabel("Vista:"))
         self._view_combo = QComboBox()
-        for label, key in (("Matriz radial", "matrix"), ("dB", "db"), ("Envolvente", "envelope"), ("Amplitud", "amp")):
+        for label, key in (("Matriz radial", "matrix"), ("dB", "db"), ("Envolvente", "envelope"), ("Amplitud", "amp"), ("Notas", "detect")):
             self._view_combo.addItem(label, key)
         self._view_combo.currentIndexChanged.connect(lambda _=None: self.view_chosen.emit(self._view_combo.currentData()))
         top.addWidget(self._view_combo)
@@ -58,6 +58,11 @@ class TabPreprocesamiento(QWidget):
         if self._stack.indexOf(panel) < 0:
             self._stack.addWidget(panel)
         self._stack.setCurrentWidget(panel)
+
+    def show_detect(self, widget):
+        if self._stack.indexOf(widget) < 0:
+            self._stack.addWidget(widget)
+        self._stack.setCurrentWidget(widget)
 
     def show_waveform(self):
         self._stack.setCurrentWidget(self._editor)

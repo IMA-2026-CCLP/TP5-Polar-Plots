@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QSize, QPointF, QRectF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPainterPath, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QDialogButtonBox,
-                             QToolTip, QPushButton, QComboBox, QCheckBox, QFormLayout, QLineEdit)
+                             QToolTip, QPushButton, QComboBox, QCheckBox, QFormLayout, QLineEdit, QMenu)
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtGui import QPainterPath
 
@@ -28,6 +28,12 @@ def _energy_mean(values):
     return float(10 * np.log10(np.mean(10 ** (v / 10.0))))
 
 
+def _grid_step(azimuths):
+    """Paso de la grilla en grados (10 para la medida; 5 si está interpolada)."""
+    a = np.unique(np.round(np.asarray(azimuths, dtype=float), 6))
+    return int(round(float(np.min(np.diff(a))))) if len(a) > 1 else 10
+
+
 def radial_cells(levels, azimuths, thetas, overrides=None):
     """Devuelve {(d, hor): (valor, [(θ, giro, dB), ...])} con la regla de la matriz radial:
     d = |θ − 90°| (anillo), hor = giro/HOR de 10°. Delante (θ = 90 − d) mide HOR = giro;
@@ -36,6 +42,7 @@ def radial_cells(levels, azimuths, thetas, overrides=None):
     L = np.asarray(levels, dtype=float)
     az = [float(a) for a in azimuths]
     th = [float(t) for t in thetas]
+    st = _grid_step(azimuths)
     def get(giro, t):
         ia = [i for i, a in enumerate(az) if abs(a - giro) < 0.5]
         it = [j for j, x in enumerate(th) if abs(x - t) < 0.5]
@@ -45,9 +52,9 @@ def radial_cells(levels, azimuths, thetas, overrides=None):
     cen = [c for c in cen if c]
     if cen:
         cells[(0, None)] = (_energy_mean([c[0] for c in cen]), [(c[2], c[1], c[0]) for c in cen])
-    for d in range(10, 91, 10):
+    for d in range(st, 91, st):
         tf, tb = 90.0 - d, 90.0 + d
-        for hor in range(0, 360, 10):
+        for hor in range(0, 360, st):
             if overrides and (d, hor) in overrides:          # celda reemplazada por su espejo
                 t_src, g_src = overrides[(d, hor)]
                 m = get(g_src, t_src)
@@ -68,6 +75,7 @@ class _Radial(QWidget):
     def __init__(self, levels, azimuths, thetas, source=None, on_click=None, parent=None):
         super().__init__(parent)
         self._az, self._th = azimuths, thetas
+        self._step = _grid_step(azimuths)
         self._cells = radial_cells(levels, azimuths, thetas)
         self._source = source
         self._on_click = on_click
@@ -82,6 +90,8 @@ class _Radial(QWidget):
         self._scale_fixed = False      # escala fija (no cambia al cambiar de banda)
         self._scale_user = None        # (mín, máx, paso) elegidos a mano, en dB
         self._cb_press = False         # clic derecho sobre la escala de colores
+        self._show_lines = True        # líneas de subdivisión del mallado
+        self._press = None             # posición del clic derecho (para distinguir clic de arrastre)
         self._apply_scale()
         self.setMouseTracking(True)
         self.setMinimumSize(QSize(460, 460))
@@ -98,6 +108,7 @@ class _Radial(QWidget):
 
     def set_axes(self, azimuths, thetas):
         self._az, self._th = azimuths, thetas
+        self._step = _grid_step(azimuths)
 
     def set_onaxis(self, value_db):
         """Valor restado para nivelar al on-axis en la banda mostrada (dB); sólo se muestra en el hover."""
@@ -278,7 +289,7 @@ class _Radial(QWidget):
             if self._cbar_rect().contains(ev.position()):
                 self._cb_press = True
                 return
-            self._drag = ev.position()
+            self._drag = ev.position(); self._press = ev.position()
             return
         if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:   # Ctrl + clic: seleccionar celda
             key = self._key_at(ev.position())
@@ -296,7 +307,21 @@ class _Radial(QWidget):
             self._cb_press = False
             self._edit_scale()
             return
+        if self._drag is not None and self._press is not None:
+            d = ev.position() - self._press
+            if abs(d.x()) + abs(d.y()) < 4:          # clic sin arrastrar: menú
+                self._drag = None
+                self._menu_mesh(ev.globalPosition().toPoint())
+                return
         self._drag = None
+
+    def _menu_mesh(self, gpos):
+        menu = QMenu(self)
+        act = menu.addAction("Líneas de subdivisión")
+        act.setCheckable(True); act.setChecked(self._show_lines)
+        if menu.exec(gpos) is act:
+            self._show_lines = not self._show_lines
+            self.update()
 
     def _color(self, v):
         t = min(1.0, max(0.0, (v - self._vmin) / ((self._vmax - self._vmin) or 1.0)))
@@ -308,10 +333,11 @@ class _Radial(QWidget):
         r = math.hypot(dx, dy)
         if r > R:
             return None
-        if r < 5 / 90.0 * R:
+        st = self._step
+        if r < (st / 2.0) / 90.0 * R:
             return (0, None)
-        d = max(10, min(90, int(round(r / R * 90 / 10)) * 10))
-        hor = int(round(math.degrees(math.atan2(-dx, -dy)) % 360 / 10)) * 10 % 360
+        d = max(st, min(90, int(round(r / R * 90 / st)) * st))
+        hor = int(round(math.degrees(math.atan2(-dx, -dy)) % 360 / st)) * st % 360
         return (d, hor)
 
     def paintEvent(self, _):
@@ -319,20 +345,21 @@ class _Radial(QWidget):
         cx, cy, R = self._geom()
         r_of = lambda d: d / 90.0 * R
         # esqueleto: todas las celdas del mallado, con o sin dato
-        p.setPen(QPen(QColor('#bdbdbd'), 0.5)); p.setBrush(QBrush(QColor('#ffffff')))
-        for d in range(10, 91, 10):
-            for hor in range(0, 360, 10):
+        p.setPen(QPen(QColor('#bdbdbd'), 0.5) if self._show_lines else Qt.PenStyle.NoPen); p.setBrush(QBrush(QColor('#ffffff')))
+        st, hf = self._step, self._step / 2.0
+        for d in range(st, 91, st):
+            for hor in range(0, 360, st):
                 if (d, hor) in self._cells:
                     continue
-                d1, d2 = d - 5, min(90, d + 5)
-                m1, m2 = 90 + (hor - 5), 90 + (hor + 5)
+                d1, d2 = d - hf, min(90, d + hf)
+                m1, m2 = 90 + (hor - hf), 90 + (hor + hf)
                 outer = QRectF(cx - r_of(d2), cy - r_of(d2), 2 * r_of(d2), 2 * r_of(d2))
                 inner = QRectF(cx - r_of(d1), cy - r_of(d1), 2 * r_of(d1), 2 * r_of(d1))
-                pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, 10.0)
-                pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
+                pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, float(st))
+                pp.arcTo(inner, m2, -float(st)); pp.closeSubpath()
                 p.drawPath(pp)
         if (0, None) not in self._cells:
-            p.setPen(QPen(QColor('#bdbdbd'), 0.5)); p.setBrush(QBrush(QColor('#ffffff')))
+            p.setPen(QPen(QColor('#bdbdbd'), 0.5) if self._show_lines else Qt.PenStyle.NoPen); p.setBrush(QBrush(QColor('#ffffff')))
             p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
         for key, (v, ms) in self._cells.items():
             if key[0] == 0:
@@ -346,12 +373,12 @@ class _Radial(QWidget):
                     p.setPen(QPen(QColor('#555'), 1)); p.drawEllipse(QPointF(cx, cy), r_of(5), r_of(5))
                 continue
             d, hor = key
-            d1, d2 = d - 5, min(90, d + 5)
-            m1, m2 = 90 + (hor - 5), 90 + (hor + 5)
+            d1, d2 = d - hf, min(90, d + hf)
+            m1, m2 = 90 + (hor - hf), 90 + (hor + hf)
             outer = QRectF(cx - r_of(d2), cy - r_of(d2), 2 * r_of(d2), 2 * r_of(d2))
             inner = QRectF(cx - r_of(d1), cy - r_of(d1), 2 * r_of(d1), 2 * r_of(d1))
-            pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, 10.0)
-            pp.arcTo(inner, m2, -10.0); pp.closeSubpath()
+            pp = QPainterPath(); pp.arcMoveTo(outer, m1); pp.arcTo(outer, m1, float(st))
+            pp.arcTo(inner, m2, -float(st)); pp.closeSubpath()
             p.setBrush(QBrush(self._color(v)))
             if key in self._sel:
                 _halo(p, pp, '#ffd400', 3.6, 3.0)              # selección: amarillo, borde apenas más grueso
@@ -359,12 +386,10 @@ class _Radial(QWidget):
                 p.setPen(QPen(QColor('#7b2cbf'), 2.5)); p.drawPath(pp)
                 continue
             else:
-                p.setPen(QPen(QColor('#ffffff'), 0.5)); p.drawPath(pp)
+                p.setPen(QPen(QColor('#ffffff'), 0.5) if self._show_lines else Qt.PenStyle.NoPen); p.drawPath(pp)
                 continue
             p.setPen(Qt.PenStyle.NoPen); p.drawPath(pp)
-        p.setPen(QPen(QColor('#444'), 1, Qt.PenStyle.DashLine)); p.setBrush(Qt.BrushStyle.NoBrush)
-        for d in range(10, 91, 10):
-            p.drawEllipse(QPointF(cx, cy), r_of(d), r_of(d))
+        p.setPen(QPen(QColor('#444'), 1)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
         for hor in range(0, 360, 30):
             t = math.radians(hor)
@@ -415,7 +440,8 @@ class _Radial(QWidget):
         for t, g, dbv in ms:
             k = int(round(t / 10)) + 1
             extra = '' if not corr or g not in corr else f" · corrección toma {corr[g]:+.2f} dB"
-            lines.append(f"  mic_{k}_ang_forte_{int(g)}.wav · θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB{extra}")
+            nombre = f"mic_{k}_ang_forte_{int(g)}.wav" if self._step == 10 else "celda interpolada"
+            lines.append(f"  {nombre} · θ={t:.0f}° · giro {g:.0f}° → {dbv:.1f} dB{extra}")
         if key in self._overrides:
             t_src, g_src = self._overrides[key]
             lines.append(f"↔ reemplazada por espejo: θ={t_src:.0f}° · giro {g_src:.0f}°")
@@ -625,7 +651,13 @@ class MatrixPanel(QWidget):
         """dict giro→dB de la corrección aplicada en la banda i (o None si no hubo Aplicar)."""
         if self._corr is None or i >= self._corr.shape[1]:
             return None
-        return {int(round(float(a))): float(self._corr[k, i]) for k, a in enumerate(self._az)}
+        # la corrección viene de los giros medidos (0..180 en pasos iguales); la grilla puede ser más fina
+        corr_az = np.linspace(0.0, 180.0, self._corr.shape[0])
+        out = {}
+        for a in self._az:
+            k = int(np.argmin(np.abs(corr_az - float(a))))
+            out[int(round(float(a)))] = float(self._corr[k, i])
+        return out
 
     def _onaxis_for_band(self, i):
         if self._onaxis is None or i >= len(self._onaxis):
@@ -657,6 +689,7 @@ class MatrixPanel(QWidget):
         self._radial.set_corr(self._corr_for_band(i))
         self._radial.set_onaxis(self._onaxis_for_band(i))
         self._radial.band_changed()
+        self._radial.set_axes(self._az, self._th)   # el mallado puede ser de 5° (interpolado)
         self._radial.set_levels(self._levels3d[:, :, i])
         self._update_title()
 

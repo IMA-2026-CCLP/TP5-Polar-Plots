@@ -540,8 +540,7 @@ class GL3DView(QWidget):
     def _build_items(self, g: dict) -> list:
         items = [self._make_surface_item(g)]
         items += self._make_axis_items()
-        if self._geometry_mode != 'sphere':        # la regla de dB sólo tiene sentido si el radio varía
-            items += self._make_db_scale_items()
+        # sin escala numérica sobre el eje Z (la de dB va en la barra de color)
         self._gl_line_items = []
         if self._show_hemisphere_grid:
             self._gl_line_items += self._make_grid_items()
@@ -609,6 +608,12 @@ class GL3DView(QWidget):
         tri1 = np.stack([a, b, c], axis=-1).reshape(-1, 3)
         tri2 = np.stack([b, d, c], axis=-1).reshape(-1, 3)
         faces = np.concatenate([tri1, tri2], axis=0)
+        # triángulos de área nula (p. ej. las columnas que caen en el cénit): sin ellos las normales
+        # quedan en 0/0 y pyqtgraph avisa con RuntimeWarning
+        e1 = verts[faces[:, 1]] - verts[faces[:, 0]]
+        e2 = verts[faces[:, 2]] - verts[faces[:, 0]]
+        area2 = np.linalg.norm(np.cross(e1, e2), axis=1)
+        faces = faces[np.isfinite(area2) & (area2 > 1e-12)]
 
         md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
         # Sin shader de pyqtgraph (su 'shaded' oscurece casi a negro las caras que no miran a la
@@ -680,32 +685,48 @@ class GL3DView(QWidget):
                                   antialias=True, mode='lines', glOptions='translucent')]
 
     def _make_grid_items(self) -> list:
-        """Círculos de referencia (latitud/longitud) — ver nota de diseño en el docstring
-        del módulo. Estilizados por 'Ejes / grilla' en Propiedades (mismo control que antes
-        manejaba la grilla de caja de Plotly)."""
+        """Esqueleto de la semiesfera: las líneas son los BORDES de las celdas de la grilla (a media
+        distancia entre valores), así que cada celda queda rodeada, como en la matriz radial."""
         qc = QColor(self._axis_color or '#8a8f9a')   # gris medio — el navy oscuro de antes se notaba poco
         color = (qc.redF(), qc.greenF(), qc.blueF(), 0.85)
         width = float(self._axis_width or 1)
         items = []
-        phi = np.linspace(0, 2 * np.pi, 73)
-        for elev_deg in (0, 30, 60, 90):
-            e = np.radians(elev_deg)
+
+        def _edges(vals, lo, hi):
+            """Bordes entre valores consecutivos, más los de los extremos, recortados a [lo, hi]."""
+            v = np.unique(np.asarray(vals, dtype=float))
+            if len(v) == 0:
+                return np.array([])
+            step = float(np.min(np.diff(v))) if len(v) > 1 else 10.0
+            mids = (v[:-1] + v[1:]) / 2.0
+            e = np.concatenate([[v[0] - step / 2.0], mids, [v[-1] + step / 2.0]])
+            return np.unique(np.clip(e, lo, hi))
+
+        # latitudes: elevación de cada punto del hemisferio = min(θ, 180 − θ)
+        th = np.asarray(self._elevations, dtype=float)
+        for e_deg in _edges(np.minimum(th, 180.0 - th), 0.0, 90.0):
+            if e_deg >= 90 - 1e-6:                  # el cénit es un punto, no un círculo
+                continue
+            phi = np.linspace(0, 2 * np.pi, 181)
+            e = np.radians(e_deg)
             r = np.cos(e)
             pts = np.stack([r * np.cos(phi), r * np.sin(phi), np.full_like(phi, np.sin(e))], axis=-1)
             items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
-        theta = np.linspace(0, np.pi / 2, 37)
-        for az_deg in range(0, 360, 45):
-            a = np.radians(az_deg)
-            pts = np.stack([np.cos(theta) * np.cos(a), np.cos(theta) * np.sin(a), np.sin(theta)], axis=-1)
-            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
+        # longitudes: bordes entre giros consecutivos (delante y su opuesto, atrás)
+        t = np.linspace(0, np.pi / 2, 46)
+        for a_deg in _edges(self._azimuths, -180.0, 360.0):
+            for extra in (0.0, 180.0):
+                a = np.radians(a_deg + extra)
+                pts = np.stack([np.cos(t) * np.cos(a), np.cos(t) * np.sin(a), np.sin(t)], axis=-1)
+                items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
         return items
 
     def _set_balloon_anchor(self, lev_2d, R_dB):
         """Fija el valor dB que queda en el borde (radio 1), según 'balloon_anchor':
         'max' = máximo de cualquier ángulo (el pico toca el borde; no hay margen por encima),
         'onaxis' = nivel en 0°/0° (el eje queda en el borde; hay margen por encima)."""
-        dmin = float(self._style.get('balloon_min_db', -12.0))     # extremo del centro (dB, relativo al anclaje)
-        dmax = float(self._style.get('balloon_max_db', 6.0))       # extremo del borde (dB, relativo al anclaje)
+        dmin = float(self._style.get('balloon_min_db', -16.0))     # extremo del centro (dB, relativo al anclaje)
+        dmax = float(self._style.get('balloon_max_db', 0.0))       # extremo del borde (dB, relativo al anclaje)
         if dmax - dmin < 0.5:
             dmax = dmin + 0.5
         anchor = str(self._style.get('balloon_anchor', 'onaxis'))
@@ -767,14 +788,25 @@ class GL3DView(QWidget):
         img = QImage(w, h, QImage.Format.Format_ARGB32)
         img.fill(QColor(0, 0, 0, 0))
         x0 = title_w
-        for y in range(bar_h):
-            t = 1.0 - y / (bar_h - 1)
+        # bloques de color, uno por cada tramo de `step` dB (igual que la escala de la grilla radial):
+        # cada bloque toma el color de su valor central
+        span = (cmax - cmin) or 1.0
+        step = float(self._style.get('colorbar_step', 4.0))
+        nb = max(1, int(round(span / step)))
+        blocks = []
+        for i in range(nb):
+            v_mid = cmax - (i + 0.5) * span / nb
+            t = min(1.0, max(0.0, (v_mid - cmin) / span))
             r = float(np.interp(t, ts, rgbs[:, 0]))
             gg = float(np.interp(t, ts, rgbs[:, 1]))
             b = float(np.interp(t, ts, rgbs[:, 2]))
-            color = QColor(int(r * 255), int(gg * 255), int(b * 255))
-            for x in range(bar_w):
-                img.setPixelColor(x0 + x, pad + y, color)
+            blocks.append((i, v_mid, QColor(int(r * 255), int(gg * 255), int(b * 255))))
+        for i, _, color in blocks:
+            y0 = pad + i * bar_h / nb
+            y1 = pad + (i + 1) * bar_h / nb
+            for y in range(int(round(y0)), int(round(y1))):
+                for x in range(bar_w):
+                    img.setPixelColor(x0 + x, y, color)
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -782,24 +814,15 @@ class GL3DView(QWidget):
         p.setPen(QPen(QColor("#444444"), max(1.0, 1.0 * s)))
         p.setBrush(_Qt.BrushStyle.NoBrush)
         p.drawRect(x0, pad, bar_w - 1, bar_h - 1)
-        # marcas y valores en números redondos dentro del rango (≈ 6 divisiones)
-        span = (cmax - cmin) or 1.0
-        raw = span / 6.0
-        mag = 10 ** np.floor(np.log10(raw))
-        step = min((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw), default=10 * mag)
         font = _QFont("Segoe UI")
         font.setPixelSize(max(1, round(fs)))
         p.setFont(font)
         p.setPen(QColor("#1a1a1a"))
-        first = np.ceil(cmin / step) * step
-        v = first
-        while v <= cmax + 1e-9:
-            y = pad + (cmax - v) / span * bar_h
-            p.drawLine(x0 + bar_w, int(y), x0 + bar_w + tick_len, int(y))
-            label = f"{v:.0f}" if step >= 1 else f"{v:.1f}"
+        # valor en el centro de cada bloque, sin decimales (como la escala radial)
+        for i, v_mid, _ in blocks:
+            y = pad + (i + 0.5) * bar_h / nb
             p.drawText(x0 + bar_w + tick_len + gap, int(y - fs * 0.6), label_w, int(fs * 1.2),
-                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, label)
-            v += step
+                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, f"{v_mid:.0f}")
         # "dB" horizontal, a la izquierda de la barra, arriba (pegado a la barra)
         p.drawText(0, pad, x0 - gap, int(fs * 1.2),
                    _Qt.AlignmentFlag.AlignRight | _Qt.AlignmentFlag.AlignVCenter, "dB")
@@ -880,15 +903,43 @@ class GL3DView(QWidget):
                 return None
             return QPointF((v.x() / v.w() + 1) / 2 * W, (1 - v.y() / v.w()) / 2 * H)
 
-        def visible(pt, p):
-            """True si el punto 3D p no queda detrás de la superficie (test contra el depth buffer)."""
-            v = mvp * QVector4D(float(p[0]), float(p[1]), float(p[2]), 1.0)
-            if abs(v.w()) < 1e-9 or pt is None:
+        # Oclusión por geometría (no por el depth buffer): un punto queda tapado si el rayo hacia la cámara
+        # atraviesa algún triángulo de la superficie. Así no depende del driver de OpenGL.
+        # la superficie es siempre el primer ítem de _build_items (los planos translúcidos no ocluyen)
+        surf = [export_items[0].opts['meshdata']] if type(export_items[0]).__name__ == 'GLMeshItem' else []
+        tris = [(md.vertexes()[md.faces()[:, 0]], md.vertexes()[md.faces()[:, 1]], md.vertexes()[md.faces()[:, 2]])
+                for md in surf]
+        cp = view.cameraPosition()
+        cam = np.array([cp.x(), cp.y(), cp.z()], dtype=float)
+
+        def occluded(p):
+            p = np.asarray(p, dtype=float)
+            d = cam - p
+            L = float(np.linalg.norm(d))
+            if L < 1e-9:
                 return False
-            z = (v.z() / v.w() + 1) / 2
-            r = min(H - 1, max(0, int(H - 1 - pt.y())))
-            c = min(W - 1, max(0, int(pt.x())))
-            return z <= depth[r, c] + 2e-4
+            dn = d / L
+            for A, B, C in tris:
+                e1, e2 = B - A, C - A
+                h = np.cross(dn, e2)
+                a = np.einsum('ij,ij->i', e1, h)
+                ok = np.abs(a) > 1e-12
+                inv = np.where(ok, 1.0 / np.where(ok, a, 1.0), 0.0)
+                sv = p - A
+                u = inv * np.einsum('ij,ij->i', sv, h)
+                q = np.cross(sv, e1)
+                v = inv * (q @ dn)
+                t = inv * np.einsum('ij,ij->i', e2, q)
+                hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-4 * L) & (t < L * (1 - 1e-4))
+                if hit.any():
+                    return True
+            return False
+
+        def visible(pt, p):
+            """True si el punto 3D p no queda detrás de la superficie (rayo a la cámara)."""
+            if pt is None:
+                return False
+            return not occluded(p)
 
         def draw_segment(painter, a, b, n=48):
             """Dibuja el segmento 3D a→b sólo en los tramos visibles (ocluidos por la superficie, no)."""
