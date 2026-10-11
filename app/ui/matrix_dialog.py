@@ -576,7 +576,7 @@ class MatrixPanel(QWidget):
         self._b_gain = QPushButton("Corregir ganancia")
         self._b_gain.setToolTip("Iguala la ganancia de las celdas seleccionadas (Ctrl + clic) a la de su simétrica. "
                                 "Modifica los WAV de la carpeta de audios y deja una copia de los originales en la subcarpeta "
-                                "Originales_respaldo.")
+                                "Originales_respaldo. Ctrl+Z lo deshace.")
         self._b_gain.clicked.connect(self._on_gain_btn)
         bar.addWidget(self._b_gain)
         bar.addStretch(1)

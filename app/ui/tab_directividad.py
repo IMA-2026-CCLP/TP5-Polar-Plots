@@ -958,11 +958,12 @@ class TabDirectividad(QWidget):
         bak = Path(plan["backup"])
         bak.mkdir(parents=True, exist_ok=True)
         targets = [ma] + list((ma.notes or {}).values())
-        done, skipped = [], []
+        done, skipped, undo_items = [], [], []
         for path, i, j, g in plan["items"]:
             p = Path(path)
             factor = 10 ** (g / 20)
             try:
+                old_bytes = p.read_bytes()                # para Ctrl+Z: el archivo exactamente como estaba
                 info = sf.info(str(p))
                 data, sr = sf.read(str(p), dtype='float64', always_2d=True)
                 new = data * factor
@@ -986,13 +987,17 @@ class TabDirectividad(QWidget):
                 if glob is not None:
                     glob[i, j] += g
             done.append((p.name, g))
+            undo_items.append((p, old_bytes, i, j, factor, g))
+        if undo_items:
+            self._undo_stack = getattr(self, '_undo_stack', []) + [
+                ('gain', undo_items, (dict(getattr(ma, '_mirror_src', None) or {}), dict(ma._mirror_cells)))]
         if done and getattr(ma, '_leq_cache', None) is not None:
             self._rebuild_after_leq()
         for name, g in done:
             self.log.emit(f"[Ganancia] {name}: {g:+.2f} dB")
         for s in skipped:
             self.log.emit(f"[Ganancia] NO modificado: {s}")
-        msg = f"Ganancia corregida en {len(done)} archivos; originales en {bak.name}."
+        msg = f"Ganancia corregida en {len(done)} archivos; originales en {bak.name}. Ctrl+Z la deshace."
         if skipped:
             msg += f" {len(skipped)} sin modificar (ver Log)."
         return msg
@@ -1052,6 +1057,24 @@ class TabDirectividad(QWidget):
         kind, snap, (prev_src, prev_cells) = stack.pop()
         self._ma._mirror_src = prev_src
         self._ma._mirror_cells = prev_cells
+        if kind == 'gain':
+            ma = self._ma
+            targets = [ma] + list((ma.notes or {}).values())
+            for p, old_bytes, i, j, factor, g in snap:
+                p.write_bytes(old_bytes)                  # el WAV vuelve a ser byte a byte el de antes
+                for t in targets:
+                    if getattr(t, 'tensor', None) is not None:
+                        t.tensor[i, j, :] /= factor
+                    cache = getattr(t, '_leq_cache', None)
+                    if cache is not None:
+                        cache[0][i, j, :] -= g
+                        cache[1][i, j] -= g
+                    glob = getattr(t, '_leq_global_cache', None)
+                    if glob is not None:
+                        glob[i, j] -= g
+            if getattr(ma, '_leq_cache', None) is not None:
+                self._rebuild_after_leq()
+            return f"Deshecha la corrección de ganancia ({len(snap)} archivos restaurados)."
         if kind == 'tensor':
             for i_d, j_d, old in snap:
                 self._ma.tensor[i_d, j_d, :] = old

@@ -398,7 +398,8 @@ class MainWindow(QMainWindow):
         box.setInformativeText(
             f"Cada uno se iguala al nivel de su simétrico (entre {min(gains):+.1f} y {max(gains):+.1f} dB).\n\n"
             f"Antes de tocarlos se copian los originales a:\n{plan['backup']}\n\n"
-            "Esto no se deshace con Ctrl+Z: para volver atrás hay que restaurar los archivos de esa carpeta.")
+            "Si sale mal, Ctrl+Z en la matriz lo deshace (mientras no cierres el programa); después queda solo la "
+            "copia de esa carpeta.")
         b_ok = box.addButton("Corregir y guardar", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
         box.exec()
