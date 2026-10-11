@@ -96,7 +96,9 @@ def save_results(
     # usuario haya trabajado únicamente por nota, en vez de quedar vacío.
     ma_global = ma if ma.dir_levels is not None else (
         ma.notes[notes_to_save[0]] if notes_to_save else None)
-    if ma_global is None and grids and grids.get("Todo el audio") is not None:
+    if grids and grids.get("Todo el audio") is not None:
+        # Lo que se ve en pantalla (grilla procesada y espectro de referencia de cada toma) es lo que se guarda, aunque
+        # haya resultados viejos de una corrida anterior de Calcular: así la sesión abre igual que se dejó.
         _save_from_grids(filepath, grids, bands, ref_azimuth, ref_theta_plot, view)
         return
     if ma_global is None:

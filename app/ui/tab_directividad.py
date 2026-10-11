@@ -1736,15 +1736,7 @@ class TabDirectividad(QWidget):
         self._ma = ma
         self._npz = None
         if ma.dir_levels is not None:
-            self._show_results(ma)
-            status = (
-                f"Dir. disponible — {ma.dir_levels.shape}  |  "
-                f"{ma.dir_freqs[0]:.0f}–{ma.dir_freqs[-1]:.0f} Hz"
-            )
-            self.computed.emit(
-                np.array([t for t in ma.thetas if t != 'ref'], dtype=np.float32),
-                status,
-            )
+            self._show_results(ma)      # el estado y las elevaciones los actualiza MainWindow (ribbon.set_dir_computed)
 
     def load_from_npz(self, data: dict) -> list:
         """Carga resultados desde el dict devuelto por data_store.load_results().
