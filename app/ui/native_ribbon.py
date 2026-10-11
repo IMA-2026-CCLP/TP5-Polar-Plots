@@ -240,6 +240,8 @@ class NativeRibbon(QWidget):
         b = self._btn.get(name)
         if b is None:
             return
+        if name == 'filter_bands':             # ya hay grilla por bandas: se pueden exportar las imágenes
+            self._act['export_all'].setEnabled(True)
         if name == 'align_takes':
             self._takes_aligned = True
             self._btn['align_ref'].setEnabled(True)
@@ -916,6 +918,9 @@ class NativeRibbon(QWidget):
         # GCC-PHAT sólo después de alinear las tomas por onset (si no, el desfase entre tomas lo falsea)
         self._btn['align_ref'].setEnabled(bool(getattr(self, '_takes_aligned', False)))
         self._act['calibrar'].setEnabled(True)
+        # Guardar sesión: alcanza con tener audio cargado (ya no hace falta haber apretado Calcular)
+        for n in ('save_session', 'save_session_as'):
+            self._act[n].setEnabled(True)
 
         sr = getattr(ma, 'sr', 0) // 1000
         self._chip_last = (f"{len(angles)} × {len(thetas)} · {sr} kHz" + (' · SPL ✓' if is_spl else ''), True)
