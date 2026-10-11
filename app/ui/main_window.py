@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         # dock queda angosto el contenido se recorta sin forma de verlo).
         needed = max(self.ribbon.proc_panel.widget().minimumSizeHint().width(),
                      self.ribbon.dir_panel.widget().minimumSizeHint().width()) + 24
-        start_w = max(340, needed)
+        start_w = max(340, needed, self.ribbon.flow_width_hint())   # filas que se envuelven: que entren en una línea
         self.resizeDocks([self._params_dock], [start_w], Qt.Orientation.Horizontal)
         self._params_dock.setMinimumWidth(start_w)   # resizeDocks solo no sobrevive el primer layout
         self.ribbon.add_view_action(self._params_dock.toggleViewAction())

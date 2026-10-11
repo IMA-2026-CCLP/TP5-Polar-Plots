@@ -290,6 +290,30 @@ class NativeRibbon(QWidget):
             h.addStretch(1)
         return w
 
+    def _flow(self, *widgets) -> QWidget:
+        """Controles en una sola fila; si el panel se angosta, los que no entran bajan a la fila de abajo."""
+        from ui.widgets import FlowLayout
+        w = QWidget()
+        lay = FlowLayout(w, spacing=6)
+        for x in widgets:
+            lay.addWidget(x)
+        self._flow_layouts = getattr(self, '_flow_layouts', []) + [lay]
+        return w
+
+    def flow_width_hint(self) -> int:
+        """Ancho del panel para que cada fila 'flow' entre en una sola línea (+ márgenes del grupo y del scroll)."""
+        return max((l.preferred_width() for l in getattr(self, '_flow_layouts', [])), default=0) + 64
+
+    def _labeled(self, label, widget) -> QWidget:
+        """Etiqueta + control como una sola pieza (para que un salto de fila no los separe)."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+        h.addWidget(QLabel(label))
+        h.addWidget(widget)
+        return w
+
     def _grid_row(self, label, widget) -> QWidget:
         """Una fila: etiqueta + control angosto."""
         w = QWidget()
@@ -671,14 +695,13 @@ class NativeRibbon(QWidget):
                     ("Elev. (θ Mic)", self._c_theta),
                     ("Azimut", self._c_az)))]),
             ("Filtro y calibración", [
-                (None, self._row2(
-                    ("HPF (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
-                    (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
-                                        lambda: b.applyHpf(), 'hpf', enabled=False)))),
-                (None, self._row2(
-                    (None, self._tool('calibrar')),
-                    (None, self._button("Filtrar 1/3 oct", "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Por toma.",
-                                        lambda: b.filterBands(), 'filter_bands'))))]),
+                (None, self._flow(
+                    self._labeled("HPF (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
+                    self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
+                                 lambda: b.applyHpf(), 'hpf', enabled=False),
+                    self._tool('calibrar'),
+                    self._button("Filtrar 1/3 oct", "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Por toma.",
+                                 lambda: b.filterBands(), 'filter_bands')))]),
             ("Nivelación", [
                 (None, self._corr_row(b)),
             ]),

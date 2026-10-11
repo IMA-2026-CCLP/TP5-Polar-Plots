@@ -38,3 +38,77 @@ class NumEdit(QLineEdit):
         if self._hi is not None:
             v = min(self._hi, v)
         return v
+
+
+# ── Fila que se envuelve (como flex-wrap): todo en una línea si entra, si no baja a la siguiente ──────────
+
+from PyQt6.QtCore import QRect, QSize, QPoint, Qt as _Qt
+from PyQt6.QtWidgets import QLayout as _QLayout, QSizePolicy as _QSizePolicy
+
+
+class FlowLayout(_QLayout):
+    """Acomoda sus items de izquierda a derecha y, cuando no entran en el ancho disponible, sigue en la fila
+    de abajo. Soporta altura según el ancho (heightForWidth), así que el contenedor crece solo al envolver."""
+
+    def __init__(self, parent=None, spacing=6):
+        super().__init__(parent)
+        self._items = []
+        self._spacing = spacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return _Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), apply=False)
+
+    def preferred_width(self):
+        """Ancho que hace falta para que todo quede en una sola fila."""
+        m = self.contentsMargins()
+        return (sum(it.sizeHint().width() for it in self._items) + self._spacing * max(0, len(self._items) - 1)
+                + m.left() + m.right())
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, apply=True)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for it in self._items:
+            size = size.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do_layout(self, rect, apply):
+        m = self.contentsMargins()
+        r = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y, line_h = r.x(), r.y(), 0
+        for it in self._items:
+            hint = it.sizeHint()
+            if x + hint.width() > r.right() + 1 and line_h > 0:      # no entra: fila siguiente
+                x = r.x()
+                y += line_h + self._spacing
+                line_h = 0
+            if apply:
+                it.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self._spacing
+            line_h = max(line_h, hint.height())
+        return y + line_h - rect.y() + m.bottom()
