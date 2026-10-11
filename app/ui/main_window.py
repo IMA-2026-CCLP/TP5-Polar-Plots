@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
 
     def _show_notas_dialog(self):
         """Herramientas ▸ Segmentación por notas…: el flujo de Notas (alinear, escala, detección y editor F0)
-        en un modal. El widget se arma una sola vez y se reutiliza."""
+        en una ventana no modal. El widget se arma una sola vez y se reutiliza."""
         dlg = getattr(self, '_notas_dlg', None)
         if dlg is None:
             dlg = QDialog(self)
@@ -233,8 +233,10 @@ class MainWindow(QMainWindow):
             lay.addWidget(self.view_notas)
             dlg.resize(1280, 720)
             self._notas_dlg = dlg
-        if not dlg.isVisible():
-            dlg.exec()
+        dlg.setModal(False)          # no bloquea la ventana principal: se puede seguir usando Procesamiento
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def _open_graph_options(self, kind: str):
         """Opciones ▸ Gráficos ▸ …: el mismo modal de Propiedades del gráfico (o el de Imágenes).
