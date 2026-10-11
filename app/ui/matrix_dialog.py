@@ -431,7 +431,7 @@ class _Radial(QWidget):
             p.drawRect(QRectF(x, top + i * hstep, w, hstep))
         # valor en cada frontera entre colores (el máximo arriba y el mínimo abajo incluidos), con su marca
         bounds = [vmax - i * (vmax - vmin) / N for i in range(N + 1)]
-        fmt = "{:.0f}" if all(abs(v - round(v)) < 1e-6 for v in bounds) else "{:.1f}"
+        fmt = "{:.0f}"                    # siempre sin decimales
         p.setPen(QPen(QColor('#444'), 1))
         for i in range(N + 1):
             y = top + i * hstep

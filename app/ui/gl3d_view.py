@@ -820,7 +820,7 @@ class GL3DView(QWidget):
         p.setPen(QColor("#1a1a1a"))
         # valor en cada frontera entre colores (incluidos el máximo arriba y el mínimo abajo), con su marca
         bounds = [cmax - i * span / nb for i in range(nb + 1)]
-        fmt = "{:.0f}" if all(abs(v - round(v)) < 1e-6 for v in bounds) else "{:.1f}"
+        fmt = "{:.0f}"                    # siempre sin decimales
         p.setPen(QPen(QColor("#444444"), max(1.0, 1.0 * s)))
         for i, v in enumerate(bounds):
             y = pad + i * bar_h / nb
