@@ -463,7 +463,7 @@ class GL3DView(QWidget):
 
         # Sin límites fijos: la escala de color va del mínimo al máximo de la banda, redondeados al paso de la
         # escala para que las fronteras queden en valores enteros.
-        step = max(0.5, float(style.get('colorbar_step', 4.0)))
+        step = max(0.5, float(style.get('colorbar_step', 1.0)))
         cmin = self._min_db if self._min_db is not None else float(np.floor(vmin / step) * step)
         cmax = self._max_db if self._max_db is not None else float(np.ceil(vmax / step) * step)
         if cmax - cmin < step:
@@ -796,7 +796,7 @@ class GL3DView(QWidget):
         # bloques de color, uno por cada tramo de `step` dB (igual que la escala de la grilla radial):
         # cada bloque toma el color de su valor central
         span = (cmax - cmin) or 1.0
-        step = float(self._style.get('colorbar_step', 4.0))
+        step = float(self._style.get('colorbar_step', 1.0))
         nb = max(1, int(round(span / step)))
         blocks = []
         for i in range(nb):
@@ -831,7 +831,12 @@ class GL3DView(QWidget):
             y = pad + i * bar_h / nb
             p.drawLine(x0 + bar_w, int(y), x0 + bar_w + tick_len, int(y))
         p.setPen(QColor("#1a1a1a"))
+        # con pasos chicos no entran todos los valores: se muestra uno cada tantas fronteras (siempre el máximo
+        # arriba y, si coincide con la separación, el mínimo abajo), sin que se pisen los textos
+        every = max(1, int(np.ceil(fs * 1.35 / (bar_h / nb))))
         for i, v in enumerate(bounds):
+            if i % every:
+                continue
             y = pad + i * bar_h / nb
             p.drawText(x0 + bar_w + tick_len + gap, int(y - fs * 0.6), label_w, int(fs * 1.2),
                        _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, fmt.format(v))

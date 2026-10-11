@@ -59,12 +59,12 @@ _DEFAULT_STYLE_BY_MODE = {
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
                  "show_ref_plane": True, "show_hemisphere_grid": False, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
-                 "colorbar_pt": 12.0, "colorbar_step": 4.0},
+                 "colorbar_pt": 12.0, "colorbar_step": 1.0},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
                  "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
-                 "colorbar_pt": 12.0, "colorbar_step": 4.0},
+                 "colorbar_pt": 12.0, "colorbar_step": 1.0},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -411,7 +411,7 @@ class _ViewSection(QWidget):
                 spin_step = _NumEdit()
                 spin_step.setRange(0.5, 20)
                 spin_step.setDecimals(1)
-                spin_step.setValue(self._style.get('colorbar_step', 4.0))
+                spin_step.setValue(self._style.get('colorbar_step', 1.0))
                 spin_step.setToolTip("Cada cuántos dB hay una marca (y un tramo de color) en la escala de colores.")
                 form.addRow("Paso de la escala (dB):", spin_step)
                 fields['colorbar_step'] = spin_step

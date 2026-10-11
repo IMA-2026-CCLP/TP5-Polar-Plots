@@ -726,8 +726,8 @@ def build_sphere_html(
             "titlefont": {"color": style.get('text_color') or _TEXT_COL, "size": FONT_SIZE},
             # marcas de la escala cada `colorbar_step` dB (alineadas a múltiplos del paso)
             "tickmode":  "linear",
-            "tick0":     float(np.ceil(float(cmin) / float(style.get('colorbar_step', 4.0))) * float(style.get('colorbar_step', 4.0))),
-            "dtick":     float(style.get('colorbar_step', 4.0)),
+            "tick0":     float(np.ceil(float(cmin) / float(style.get('colorbar_step', 1.0))) * float(style.get('colorbar_step', 1.0))),
+            "dtick":     float(style.get('colorbar_step', 1.0)),
         },
         "lighting":      {"ambient": 0.75, "diffuse": 0.7, "specular": 0.15, "roughness": 0.4},
         "lightposition": {"x": 100, "y": 100, "z": 150},
