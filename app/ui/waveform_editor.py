@@ -226,7 +226,10 @@ class WaveformEditorWidget(QWidget):
                 y = y + self._off(i_az)
                 ys.append(y)
                 col   = _OVERLAY_PALETTE[i_th_idx % len(_OVERLAY_PALETTE)]
-                curve = self._plot.plot(t, y, pen=pg.mkPen(color=(*col, 150), width=1))
+                rep   = (i_az, i_th_idx) in (getattr(ma, '_mirror_cells', None) or {})
+                pen   = pg.mkPen(color=(*col, 200), width=1.5, style=Qt.PenStyle.DashLine) if rep \
+                        else pg.mkPen(color=(*col, 150), width=1)      # punteado = reemplazado por su simétrico
+                curve = self._plot.plot(t, y, pen=pen)
                 self._curves.append(curve)
             self._build_legend(mode='th')
         else:

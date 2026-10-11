@@ -173,6 +173,7 @@ class TabPreprocesamiento(QWidget):
         one = [0] * ma.n_angles
         one[az_idx] = int(shift)
         ma._acc_shift('align_takes_shifts', one)     # el ajuste manual también viaja en la máscara
+        ma.reapply_mirrors()                          # los canales reemplazados siguen a su fuente
 
         self.log.emit(
             f"[Procesamiento] Toma {ma.angles[az_idx]}° desplazada "

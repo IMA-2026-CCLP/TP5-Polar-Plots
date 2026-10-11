@@ -902,7 +902,7 @@ class TabDirectividad(QWidget):
             return "No hay audio cargado en memoria (sesión .cclp): cargá los WAV para aplicar."
         n = 0
         snap = []
-        prev_src = dict(getattr(ma, '_mirror_src', None) or {})
+        prev_src = (dict(getattr(ma, '_mirror_src', None) or {}), dict(ma._mirror_cells))
         for t_d, g_d, t_s, g_s in pairs:
             i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
             i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
@@ -921,22 +921,27 @@ class TabDirectividad(QWidget):
         por toma use la de esa toma y no la del giro destino. Si la fuente ya era un reemplazo, sigue la cadena."""
         src = self._ma.__dict__.setdefault('_mirror_src', {})
         src[(i_d, j_d)] = src.get((i_s, j_s), i_s)
+        self._ma.register_mirror(i_d, j_d, i_s, j_s)     # el TDOA también lo tiene en cuenta
 
     def _mirror_on_leq(self, pairs):
         ma = self._ma
         spl = ma._leq_cache[0]
         glob = getattr(ma, '_leq_global_cache', None)
         snap, n = [], 0
-        prev_src = dict(getattr(ma, '_mirror_src', None) or {})
+        prev_src = (dict(getattr(ma, '_mirror_src', None) or {}), dict(ma._mirror_cells))
+        tensor = getattr(ma, 'tensor', None)             # el audio también cambia: así el TDOA lo ve siempre
         for t_d, g_d, t_s, g_s in pairs:
             i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
             i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
             if None in (i_d, j_d, i_s, j_s):
                 continue
-            snap.append((i_d, j_d, spl[i_d, j_d, :].copy(), None if glob is None else glob[i_d, j_d].copy()))
+            old_audio = None if tensor is None else tensor[i_d, j_d, :].copy()
+            snap.append((i_d, j_d, spl[i_d, j_d, :].copy(), None if glob is None else glob[i_d, j_d].copy(), old_audio))
             spl[i_d, j_d, :] = spl[i_s, j_s, :]           # todas las bandas de tercio a la vez
             if glob is not None:
                 glob[i_d, j_d] = glob[i_s, j_s]
+            if tensor is not None:
+                tensor[i_d, j_d, :] = tensor[i_s, j_s, :]
             self._set_mirror_src(i_d, j_d, i_s, j_s)
             n += 1
         if not n:
@@ -963,18 +968,22 @@ class TabDirectividad(QWidget):
         stack = getattr(self, '_undo_stack', [])
         if not stack or self._ma is None:
             return "Nada para deshacer."
-        kind, snap, prev_src = stack.pop()
+        kind, snap, (prev_src, prev_cells) = stack.pop()
         self._ma._mirror_src = prev_src
+        self._ma._mirror_cells = prev_cells
         if kind == 'tensor':
             for i_d, j_d, old in snap:
                 self._ma.tensor[i_d, j_d, :] = old
             return f"Deshecho el último reemplazo ({len(snap)} tomas)."
         spl = self._ma._leq_cache[0]
         glob = getattr(self._ma, '_leq_global_cache', None)
-        for i_d, j_d, old, old_g in snap:
+        tensor = getattr(self._ma, 'tensor', None)
+        for i_d, j_d, old, old_g, old_audio in snap:
             spl[i_d, j_d, :] = old
             if glob is not None and old_g is not None:
                 glob[i_d, j_d] = old_g
+            if tensor is not None and old_audio is not None:
+                tensor[i_d, j_d, :] = old_audio
         self._rebuild_after_leq()
         return f"Deshecho el último reemplazo ({len(snap)} tomas, todas las bandas)."
 

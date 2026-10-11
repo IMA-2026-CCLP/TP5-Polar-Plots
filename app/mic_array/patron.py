@@ -74,6 +74,9 @@ class MicArray:
         self.align_takes_shifts = None
         self.align_ref_taus     = None
         self.align_ref_theta    = 'ref'   # micrófono de referencia usado en el TDOA
+        # Canales reemplazados por su simétrico: {(giro_destino, mic_destino): (giro_fuente, mic_fuente)}.
+        # El TDOA no los usa para estimar el retardo y, tras alinear, se vuelven a copiar de su fuente ya alineada.
+        self._mirror_cells = {}
         self._leq_global_cache = None   # (n_angles, n_thetas) dB banda ancha, para Aplicar
 
         # Directivity results (relative to ref mic per take), None until compute_directivity()
@@ -524,6 +527,17 @@ class MicArray:
         cur = getattr(self, attr, None)
         setattr(self, attr, v if cur is None else np.asarray(cur, dtype=int) + v)
 
+    def register_mirror(self, i_d, j_d, i_s, j_s):
+        """Anota que el canal (i_d, j_d) es copia del (i_s, j_s). Si la fuente ya era un reemplazo, sigue la cadena."""
+        src = self._mirror_cells.get((i_s, j_s), (i_s, j_s))
+        self._mirror_cells[(i_d, j_d)] = src
+        return src
+
+    def reapply_mirrors(self):
+        """Vuelve a copiar cada canal reemplazado desde su fuente (ya alineada)."""
+        for (i_d, j_d), (i_s, j_s) in self._mirror_cells.items():
+            self.tensor[i_d, j_d, :] = self.tensor[i_s, j_s, :]
+
     def apply_alignment(self, takes_shifts=None, ref_taus=None, theta='ref'):
         """Reaplica desplazamientos ya calculados (de una máscara guardada), sin detectar nada:
         primero el de tomas (todos los canales de cada giro), después el TDOA (todos menos el ref)."""
@@ -552,6 +566,7 @@ class MicArray:
             for i_az, k in enumerate(ref_taus):
                 shift_rows(i_az, other_ix, int(k))
             self._acc_shift('align_ref_taus', ref_taus)
+        self.reapply_mirrors()
 
     def align_takes(self, target_onset=1.0, theta='ref', threshold_dB=-40, window_ms=50):
         """
@@ -604,6 +619,7 @@ class MicArray:
                   f"  shift = {shift:+d} smp  ({shift / self.sr * 1000:+.0f} ms)")
 
         self._acc_shift('align_takes_shifts', shifts)
+        self.reapply_mirrors()
         print("\n  Take alignment done.")
 
     def align_to_ref(self, theta='ref', energy_threshold_dB=None):
@@ -638,9 +654,11 @@ class MicArray:
             _progress(i_az, self.n_angles)
             ref_sig = self.tensor[i_az, i_ref, :].astype(np.float64)
 
+            # los canales reemplazados por su simétrico no sirven para estimar este retardo (son de otra toma)
+            valid_ix = [i_e for i_e in other_ix if (i_az, i_e) not in self._mirror_cells] or other_ix
             tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_e, :].astype(np.float64),
                                energy_threshold_dB=energy_threshold_dB)
-                     for i_e in other_ix]
+                     for i_e in valid_ix]
 
             tau = int(np.round(np.mean(tdoas)))
             taus[i_az] = tau
@@ -661,6 +679,7 @@ class MicArray:
 
         self._acc_shift('align_ref_taus', taus)
         self.align_ref_theta = theta
+        self.reapply_mirrors()
         print("\n  Alignment done.")
 
     def level_compensation(self, theta='ref', ref_azimuth=0):
