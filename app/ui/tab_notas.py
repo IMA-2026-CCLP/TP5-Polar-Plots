@@ -335,6 +335,15 @@ class TabNotas(QWidget):
 
     # ── Máscara save / load ───────────────────────────────────────────────
 
+    def clear_mask(self):
+        """Descarta los segmentos actuales (se empieza una segmentación nueva). La alineación ya aplicada se conserva."""
+        self._segs = None
+        self.table_segs.setRowCount(0)
+        self.btn_extract.setEnabled(False)
+        self.btn_apply_edits.setEnabled(False)
+        self.f0_editor.set_segments(None)
+        self.log.emit("[Notas] Máscara descartada: segmentación nueva.")
+
     def mask_data(self):
         """La máscara (segmentos + alineación) como dict serializable, o None si todavía no hay segmentos."""
         if self._segs is None or self._ma is None:

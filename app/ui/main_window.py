@@ -233,25 +233,47 @@ class MainWindow(QMainWindow):
             self.ribbon.mark_done('align_ref', "desde la máscara")
 
     def _ask_mask(self):
-        """Antes de abrir Segmentación por notas: si hay audio y todavía no hay segmentos, ofrece cargar una
-        máscara guardada (trae la alineación de los pasos 1 y 2 y los segmentos). Se pregunta una vez por audio."""
-        if self._ma is None or getattr(self, '_mask_asked', False) or self.view_notas._segs is not None:
+        """Antes de abrir Segmentación por notas pregunta qué máscara usar. Se pregunta una vez por audio cargado
+        (o sesión abierta):
+          - ya hay una máscara en esta sesión → usarla, cargar otra o empezar una nueva;
+          - la sesión traía una máscara y todavía no se aplicó → usar la de la sesión o cargar otra;
+          - ninguna → ofrece cargar una guardada."""
+        if self._ma is None or getattr(self, '_mask_asked', False):
             return
         self._mask_asked = True
         sess = getattr(self, '_session_mask', None)
+        has_current = self.view_notas._segs is not None
         box = QMessageBox(self)
         box.setWindowTitle("Segmentación por notas")
-        box.setText("¿Tenés una máscara guardada?")
-        box.setInformativeText("Si la cargás se reaplican la alineación entre tomas y el TDOA y se recuperan los "
-                               "segmentos, sin recalcular.")
-        b_sess = box.addButton("Usar la de la sesión", QMessageBox.ButtonRole.AcceptRole) if sess else None
-        b_load = box.addButton("Cargar máscara…", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("No, continuar", QMessageBox.ButtonRole.RejectRole)
+        b_use = b_sess = b_new = None
+        if has_current:
+            box.setText("Esta sesión ya tiene una máscara.")
+            box.setInformativeText("¿Querés seguir con ella, cargar otra o empezar una nueva?")
+            b_use = box.addButton("Usar la actual", QMessageBox.ButtonRole.AcceptRole)
+        elif sess:
+            box.setText("La sesión trae una máscara guardada.")
+            box.setInformativeText("¿Querés usarla o cargar otra? Se reaplican la alineación entre tomas y el TDOA "
+                                   "y se recuperan los segmentos, sin recalcular.")
+            b_sess = box.addButton("Usar la de la sesión", QMessageBox.ButtonRole.AcceptRole)
+        else:
+            box.setText("¿Tenés una máscara guardada?")
+            box.setInformativeText("Si la cargás se reaplican la alineación entre tomas y el TDOA y se recuperan los "
+                                   "segmentos, sin recalcular.")
+        b_load = box.addButton("Cargar otra…" if (has_current or sess) else "Cargar máscara…",
+                               QMessageBox.ButtonRole.AcceptRole)
+        if has_current or sess:
+            b_new = box.addButton("Empezar una nueva", QMessageBox.ButtonRole.DestructiveRole)
+        else:
+            box.addButton("No, continuar", QMessageBox.ButtonRole.RejectRole)
         box.exec()
-        if b_sess is not None and box.clickedButton() is b_sess:
+        clicked = box.clickedButton()
+        if clicked is b_sess:
             self.view_notas.load_mask_data(sess, "la sesión")
-        elif box.clickedButton() is b_load:
+        elif clicked is b_load:
             self._on_load_mask()
+        elif clicked is b_new:
+            self.view_notas.clear_mask()
+            self._session_mask = None
 
     def _show_notas_dialog(self):
         """Herramientas ▸ Segmentación por notas…: el flujo de Notas (alinear, escala, detección y editor F0)
@@ -335,6 +357,7 @@ class MainWindow(QMainWindow):
                 f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
             self._session_mask = view.get('mask')      # se ofrece al abrir Segmentación por notas
+            self._mask_asked = False
             self._append_log(f"[Sesión] Cargado desde {path}")
             self._append_log("[Sesión] La sesión no trae los audios: para reprocesar hay que cargar los WAV de nuevo "
                              "(Archivo ▸ Cargar audio…) y volver a procesarlos.")
