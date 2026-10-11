@@ -275,6 +275,12 @@ class _Radial(QWidget):
     def clear_overrides(self):
         self._overrides.clear(); self._clear_sel(); self._recalc()
 
+    def resizeEvent(self, ev):
+        # el centro se guardaba con el tamaño de la primera vez: al maximizar o restaurar la ventana el mallado
+        # quedaba corrido. Al cambiar el tamaño vuelve siempre al centro del área visible (el zoom se conserva).
+        self._cx = self._cy = None
+        super().resizeEvent(ev)
+
     def _geom(self):
         if self._cx is None:
             self._cx, self._cy = self.width() / 2, self.height() / 2 + 6
