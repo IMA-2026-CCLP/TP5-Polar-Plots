@@ -58,6 +58,15 @@ class TabPreprocesamiento(QWidget):
         self._stack.addWidget(self._editor)
         lay.addWidget(self._stack)
 
+    def set_sample_widget(self, w):
+        """Desplegable de Muestra (toda la muestra / cada nota): va a la derecha de Vista y se mueve con ella
+        (junto a Frecuencia en la matriz radial)."""
+        lab = QLabel("Muestra:")
+        lab.setStyleSheet("font-weight: bold;")
+        lay = self._vista_box.layout()
+        lay.addWidget(lab)
+        lay.addWidget(w)
+
     def set_view_choice(self, key):
         i = self._view_combo.findData(key)
         if i >= 0 and i != self._view_combo.currentIndex():

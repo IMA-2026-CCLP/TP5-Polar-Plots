@@ -158,6 +158,7 @@ class MainWindow(QMainWindow):
         self.loader.ma_ready.connect(self._on_ma_ready)
         self.loader.ma_ready.connect(lambda _ma: self.ribbon.clear_done())   # audio nuevo: pasos sin hacer
         self.loader.ma_ready.connect(lambda _ma: setattr(self, '_mask_asked', False))
+        self.view_prepro.set_sample_widget(self.ribbon._c_nota_proc)     # Muestra: toda / cada nota, junto a Vista y Frecuencia
         self.view_prepro.op_done.connect(self.ribbon.mark_done)
         self.view_dir.step_done.connect(self.ribbon.mark_done)
         self.loader.log.connect(self._append_log)
@@ -738,6 +739,10 @@ class MainWindow(QMainWindow):
     def _on_dir_display_changed(self):
         params = self.ribbon.get_dir_display_params()
         self.view_dir.apply_display_params(params)
+        nota = params.get('nota')
+        if nota != getattr(self, '_last_nota', nota):
+            self._refresh_matrix()                 # otra muestra: la matriz radial muestra esa nota
+        self._last_nota = nota
 
     def _on_intersect_cut3d(self):
         """"Intersectar" (barra izquierda, grupo "Corte (Superficie 3D)"): muestra el plano de

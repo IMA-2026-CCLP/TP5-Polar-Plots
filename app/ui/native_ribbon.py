@@ -662,9 +662,9 @@ class NativeRibbon(QWidget):
         th = dict(enc=lambda v: str(v), dec=lambda d: d)
         self._c_theta    = self._combo('theta', 78, "Elevación (micrófono) a visualizar", cb=plot, **th)
         self._c_az       = self._combo('az', 78, "Azimuth a visualizar, o 'Todos' para superponer las tomas", cb=plot, **th)
-        self._c_nota_proc = self._combo('nota', 190,
-            "Sobre qué se procesa y grafica: toda la toma, o una nota segmentada. Elegís libremente, no fuerza nada más.",
-            [("Todo el audio", "Todo el audio")], disp)
+        self._c_nota_proc = self._combo('nota', 170,
+            "Qué muestra se ve y procesa: toda la muestra o una nota segmentada.",
+            [("Toda la muestra", "Todo el audio")], self._note_changed)
         return self._panel([
             ("Señal", [
                 (None, self._row2(
@@ -678,7 +678,6 @@ class NativeRibbon(QWidget):
                     (None, self._tool('calibrar'))))]),
             ("Procesar", [
                 (None, self._row2(
-                    ("Nota", self._c_nota_proc),
                     (None, self._button("Filtrar 1/3 oct", "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Nivelar por toma.",
                                         lambda: b.filterBands(), 'filter_bands'))))]),
             ("Nivelación", [
@@ -827,7 +826,12 @@ class NativeRibbon(QWidget):
         self._dir_status = QLabel("Sin datos.")
         self._dir_status.setObjectName("rb_status")
         self._dir_status.setWordWrap(True)
+        self._c_nota_dir = self._combo('nota', 170,
+            "Qué muestra se grafica: toda la muestra o una nota segmentada.",
+            [("Toda la muestra", "Todo el audio")], self._note_changed)
         return self._panel([
+            ("Muestra", [
+                (None, self._c_nota_dir)]),
             ("Cálculo", [
                 ("Rango (Hz)", self._pair(self._num('hz_min', 52, "Frecuencia mínima a mostrar (Hz)", disp),
                                           self._num('hz_max', 56, "Frecuencia máxima a mostrar (Hz)", disp))),
@@ -908,9 +912,17 @@ class NativeRibbon(QWidget):
         self._b.state.update(d)
         self._sync()
 
+    def _note_changed(self):
+        """Los dos desplegables de Muestra (Procesamiento y Directividad) leen y escriben state['nota']:
+        al cambiar uno se actualiza el otro."""
+        for c in (self._c_nota_proc, self._c_nota_dir):
+            c._load()
+        self._b.dirDisplayChanged()
+
     def set_notes_loaded(self, notes: list):
-        items = [("Todo el audio", "Todo el audio")] + [(n, n) for n in notes]
+        items = [("Toda la muestra", "Todo el audio")] + [(n, n) for n in notes]
         self._fill(self._c_nota_proc, items, 'nota')
+        self._fill(self._c_nota_dir, items, 'nota')
 
     def set_dir_computed(self, thetas):
         self._fill(self._c_el, [("Auto (0°)", 0)] + [(f'{round(float(t))}°', i + 1) for i, t in enumerate(thetas)])
