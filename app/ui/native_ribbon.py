@@ -313,7 +313,7 @@ class NativeRibbon(QWidget):
         return le
 
     def _corr_row(self, b) -> QWidget:
-        """Nivelación: mic de referencia + toma base + 'Nivelar por toma' + 'Nivelar on axis',
+        """Nivelación: mic de referencia + toma base + 'Por toma' + 'On Axis',
         todo en una sola fila (tamaño de botón natural, igual que el resto — no se estira)."""
         w = QWidget()
         h = QHBoxLayout(w)
@@ -674,11 +674,10 @@ class NativeRibbon(QWidget):
                 (None, self._row2(
                     ("HPF (Hz)", self._num('hpf_hz', 52, "Frecuencia de corte del pasa-altos (Hz)")),
                     (None, self._button("Aplicar HPF", "Aplica el Butterworth pasa-altos al tensor (irreversible en memoria)",
-                                        lambda: b.applyHpf(), 'hpf', enabled=False)),
-                    (None, self._tool('calibrar'))))]),
-            ("Procesar", [
+                                        lambda: b.applyHpf(), 'hpf', enabled=False)))),
                 (None, self._row2(
-                    (None, self._button("Filtrar 1/3 oct", "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Nivelar por toma.",
+                    (None, self._tool('calibrar')),
+                    (None, self._button("Filtrar 1/3 oct", "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Por toma.",
                                         lambda: b.filterBands(), 'filter_bands'))))]),
             ("Nivelación", [
                 (None, self._corr_row(b)),
