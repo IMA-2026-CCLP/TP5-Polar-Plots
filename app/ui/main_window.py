@@ -758,11 +758,12 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetFeature.DockWidgetFloatable |
             QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
+        # A la izquierda, apilado debajo del dock de Parámetros (misma columna, mismo ancho).
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._log_dock)
+        self.splitDockWidget(self._params_dock, self._log_dock, Qt.Orientation.Vertical)
         self.ribbon.add_view_action(self._log_dock.toggleViewAction())
-        # altura inicial proporcional a la pantalla (150 px fijos se comían el gráfico en 768p)
-        self.resizeDocks([self._log_dock], [max(60, int(self.screen().availableGeometry().height() * 0.12))],
-                         Qt.Orientation.Vertical)
+        self._log_dock.visibilityChanged.connect(
+            lambda vis: vis and QTimer.singleShot(0, self._size_log_dock))
 
         # ajustar restricciones de tamaño según dónde está anclado
         self._log_dock.dockLocationChanged.connect(self._on_log_dock_location)
@@ -770,13 +771,21 @@ class MainWindow(QMainWindow):
 
         self._log_dock.hide()      # oculto por defecto; se abre desde Ver ▸ Log
 
+    def _size_log_dock(self):
+        """Al abrir el Log: ocupa ~22% del alto de la columna izquierda, debajo de Parámetros."""
+        if self._log_dock.isFloating() or self.dockWidgetArea(self._log_dock) != Qt.DockWidgetArea.LeftDockWidgetArea:
+            return
+        total = self._params_dock.height() + self._log_dock.height()
+        log_h = max(90, int(total * 0.22))
+        self.resizeDocks([self._params_dock, self._log_dock], [total - log_h, log_h], Qt.Orientation.Vertical)
+
     def _on_log_dock_location(self, area):
         _MAX = 16_777_215
         sides = (Qt.DockWidgetArea.LeftDockWidgetArea,
                  Qt.DockWidgetArea.RightDockWidgetArea)
         if area in sides:
             self._log_dock.setMaximumHeight(_MAX)
-            self._log_dock.setMaximumWidth(320)
+            self._log_dock.setMaximumWidth(_MAX)   # el ancho lo fija la columna de Parámetros
         else:
             self._log_dock.setMaximumHeight(300)
             self._log_dock.setMaximumWidth(_MAX)
