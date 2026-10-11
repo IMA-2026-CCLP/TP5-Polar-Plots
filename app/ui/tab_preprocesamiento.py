@@ -19,6 +19,7 @@ class TabPreprocesamiento(QWidget):
 
     ma_updated = pyqtSignal(object)
     log        = pyqtSignal(str)
+    op_done    = pyqtSignal(str, str)   # (botón, detalle): HPF / alinear tomas / alinear micrófonos terminadas
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,6 +101,7 @@ class TabPreprocesamiento(QWidget):
         if self._ma is None or self._busy():
             return
         self.log.emit(f"[Procesamiento] Aplicando HPF {hz:.0f} Hz…")
+        self._op = ('hpf', f"HPF {hz:.0f} Hz")
         self._worker = Worker(lambda: self._run_hpf(hz))
         self._worker.label = "Aplicando filtro pasa-altos…"
         self._worker.log.connect(self.log)
@@ -111,6 +113,7 @@ class TabPreprocesamiento(QWidget):
         if self._ma is None or self._busy():
             return
         self.log.emit(f"[Procesamiento] Alineando tomas (onset={onset}s, θ={theta}, ventana={window_ms:.0f}ms)…")
+        self._op = ('align_takes', f"onset {onset} s, umbral {thresh} dB")
         self._worker = Worker(lambda: self._run_align_takes(onset, thresh, theta, window_ms))
         self._worker.label = "Alineando tomas…"
         self._worker.log.connect(self.log)
@@ -123,6 +126,7 @@ class TabPreprocesamiento(QWidget):
             return
         thr_str = f"{gcc_thresh} dBFS" if gcc_thresh is not None else "sin umbral"
         self.log.emit(f"[Procesamiento] Alineando a referencia (GCC-PHAT, {thr_str})…")
+        self._op = ('align_ref', f"GCC-PHAT, {thr_str}")
         self._worker = Worker(lambda: self._run_align_ref(gcc_thresh))
         self._worker.label = "Alineando micrófonos…"
         self._worker.log.connect(self.log)
@@ -182,6 +186,9 @@ class TabPreprocesamiento(QWidget):
         self._ma = ma
         self.ma_updated.emit(ma)
         self.log.emit("[Procesamiento] Listo.")
+        op = getattr(self, '_op', None)
+        if op:
+            self.op_done.emit(*op)
 
     def _on_error(self, msg: str):
         self.log.emit(f"[ERROR]\n{msg}")

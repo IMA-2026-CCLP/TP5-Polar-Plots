@@ -840,6 +840,7 @@ class _ViewSection(QWidget):
 
 class TabDirectividad(QWidget):
     log      = pyqtSignal(str)
+    step_done = pyqtSignal(str, str)   # (botón, detalle) de Procesamiento terminado en este tab
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1310,6 +1311,7 @@ class TabDirectividad(QWidget):
         self.show_graphs()   # la matriz se redibuja con las bandas nuevas
         ma = targets[0]
         n = len(ma._leq_cache[2]) if getattr(ma, '_leq_cache', None) is not None else '?'
+        self.step_done.emit('filter_bands', f"{n} bandas de 1/3 de octava")
         extra = f" + {len(targets) - 1} nota(s)" if len(targets) > 1 else ""
         self.log.emit(f"[Filtrar] Leq por posición en {n} bandas de 1/3 de octava (todo el audio{extra}).")
 

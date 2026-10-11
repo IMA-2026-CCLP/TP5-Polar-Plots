@@ -231,6 +231,30 @@ class NativeRibbon(QWidget):
             self._btn[name] = b
         return b
 
+    _DONE_QSS = ("{T} { background:#d3e3f1; color:#37506a; border:1px solid #9db9d3; }"
+                 "{T}:hover { background:#c2d8ec; }")
+
+    def mark_done(self, name, detail=''):
+        """Marca un botón de Procesamiento como ya aplicado: color celeste grisáceo y, al pasar el mouse,
+        el tooltip avisa que se hizo (y con qué parámetros)."""
+        b = self._btn.get(name)
+        if b is None:
+            return
+        if b.property('tip0') is None:
+            b.setProperty('tip0', b.toolTip())
+        kind = 'QToolButton' if isinstance(b, QToolButton) else 'QPushButton'
+        b.setStyleSheet(self._DONE_QSS.replace('{T}', kind))
+        b.setToolTip(f"{b.property('tip0')}\n\n✔ Ya aplicado" + (f": {detail}" if detail else ""))
+
+    def clear_done(self):
+        """Vuelve todos los botones a su aspecto normal (p. ej. al cargar audio nuevo)."""
+        for b in self._btn.values():
+            tip0 = b.property('tip0')
+            if tip0 is not None:
+                b.setStyleSheet('')
+                b.setToolTip(tip0)
+                b.setProperty('tip0', None)
+
     @staticmethod
     def _green(btn):
         """Botón verde de acción principal."""
@@ -296,10 +320,10 @@ class NativeRibbon(QWidget):
         h.addWidget(self._combo('corr_base', 80, "Giro (HOR) contra el que se compara cada toma. Por defecto 0°",
                                 [(f'{a}°', str(a)) for a in range(0, 181, 10)]))
         h.addWidget(self._button("Nivelar por toma", "Recalcula sólo la corrección por toma con la referencia y toma base elegidas (matriz y dB vs tiempo)",
-                                 lambda: b.corrRecalc()))
+                                 lambda: b.corrRecalc(), 'corr'))
         h.addWidget(self._button("Nivelar on axis",
                                  "Paso 3: cada banda queda en 0 dB en la posición on-axis (giro 0°, θ 0°) sobre la grilla corregida.",
-                                 lambda: b.nivelarOnaxis()))
+                                 lambda: b.nivelarOnaxis(), 'onaxis'))
         h.addStretch(1)
         return w
 
@@ -310,6 +334,8 @@ class NativeRibbon(QWidget):
         if min_width:
             t.setMinimumWidth(min_width)
         t.setFixedHeight(22)    # misma altura que _button()/los combos (Qt los calcula distinto si no)
+        if name == 'calibrar':
+            self._btn[name] = t    # para marcarlo como hecho (mark_done)
         return t
 
     def _row(self, caption, items):
@@ -648,7 +674,7 @@ class NativeRibbon(QWidget):
                 (None, self._row2(
                     ("Nota", self._c_nota_proc),
                     (None, self._button("Filtrar 1/3 oct", "Calcula el Leq de cada grabación en bandas de 1/3 de octava (paso 1). Lo usa Nivelar por toma.",
-                                        lambda: b.filterBands()))))]),
+                                        lambda: b.filterBands(), 'filter_bands'))))]),
             ("Nivelación", [
                 (None, self._corr_row(b)),
             ]),

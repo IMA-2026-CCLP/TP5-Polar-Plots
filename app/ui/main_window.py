@@ -156,6 +156,9 @@ class MainWindow(QMainWindow):
 
         # ── Señales de retorno de las vistas
         self.loader.ma_ready.connect(self._on_ma_ready)
+        self.loader.ma_ready.connect(lambda _ma: self.ribbon.clear_done())   # audio nuevo: pasos sin hacer
+        self.view_prepro.op_done.connect(self.ribbon.mark_done)
+        self.view_dir.step_done.connect(self.ribbon.mark_done)
         self.loader.log.connect(self._append_log)
 
         self.view_prepro.ma_updated.connect(self._on_ma_ready)
@@ -429,6 +432,7 @@ class MainWindow(QMainWindow):
             self._append_log("[On-axis] Primero aplicá la corrección por toma (Aplicar).")
             return
         self._append_log("[On-axis] Grilla nivelada: 0 dB en giro 0°, θ 0° para cada banda.")
+        self.ribbon.mark_done('onaxis', "0 dB en giro 0°, θ 0° para cada banda")
 
     def _on_filter_bands(self):
         """Filtrar por bandas (1/3): calcula el Leq por posición y banda desde los audios cargados."""
@@ -450,6 +454,7 @@ class MainWindow(QMainWindow):
             self._append_log("[Corrección] No hay audio cargado para calcular la corrección.")
             return
         self._append_log(f"[Corrección] Mic {ref}, toma base {ref_az}°.")
+        self.ribbon.mark_done('corr', f"mic {ref}, toma base {ref_az}°")
         self._log_corr_diff(ma, before_lv, before_d)
         self.ribbon._b.emitPlotParams()   # redibuja dB vs tiempo con el nuevo desplazamiento
 
@@ -557,6 +562,7 @@ class MainWindow(QMainWindow):
             self._on_ma_ready(ma)
             dlg.accept()
             self._on_to_spl()
+            self.ribbon.mark_done('calibrar', "convertido a dB SPL")
 
         dlg.ma_updated.connect(applied)
         dlg.log.connect(self._append_log)
@@ -571,6 +577,8 @@ class MainWindow(QMainWindow):
         if "Detección completada" in msg or "Máscara cargada" in msg:
             self.view_notas.btn_extract.setEnabled(True)
             self.ribbon._act['save_mask'].setEnabled(True)
+            if "Detección completada" in msg:
+                self.ribbon.mark_done('detect', "notas detectadas")
 
     def _on_edit_scale(self):
         dlg = ScaleEditorDialog(self.view_notas.get_scale(), self.ribbon.current_scale_name(), self)
@@ -772,11 +780,11 @@ class MainWindow(QMainWindow):
         # visible por defecto, abajo a la izquierda; se puede ocultar desde Ver ▸ Log
 
     def _size_log_dock(self):
-        """Al abrir el Log: ocupa ~22% del alto de la columna izquierda, debajo de Parámetros."""
+        """Al abrir el Log: ocupa ~44% del alto de la columna izquierda, debajo de Parámetros (que se queda con el resto)."""
         if self._log_dock.isFloating() or self.dockWidgetArea(self._log_dock) != Qt.DockWidgetArea.LeftDockWidgetArea:
             return
         total = self._params_dock.height() + self._log_dock.height()
-        log_h = max(90, int(total * 0.22))
+        log_h = max(180, int(total * 0.44))
         self.resizeDocks([self._params_dock, self._log_dock], [total - log_h, log_h], Qt.Orientation.Vertical)
 
     def _on_log_dock_location(self, area):
