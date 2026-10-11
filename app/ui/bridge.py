@@ -63,7 +63,7 @@ class Bridge(QObject):
             'smooth':     20.0,   'ymin':       -60.0,  'ymax': 0.0,
             'hpf_hz':     200.0,
             'onset':      1.0,    'thresh':    -40.0,   'window_ms': 50.0,
-            'align_theta':'ref',  'gcc_thresh': None,
+            'align_theta':'ref',  'gcc_thresh': -55.0,
             'bands':      '1/3',  'hz_min':    315.0,   'hz_max': 10000.0,
             'ref_az':     0,      'ref_th':     0,
             'colorscale': 'RdBu v4','el_idx':    None,
