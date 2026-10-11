@@ -335,11 +335,10 @@ class TabNotas(QWidget):
 
     # ── Máscara save / load ───────────────────────────────────────────────
 
-    def save_mask(self, path: str):
-        """Guarda segments a JSON serializable."""
+    def mask_data(self):
+        """La máscara (segmentos + alineación) como dict serializable, o None si todavía no hay segmentos."""
         if self._segs is None or self._ma is None:
-            self.log.emit("[Notas] Sin segmentos para guardar.")
-            return
+            return None
         data = {
             "sr"      : int(self._ma.sr),
             "angles"  : [int(a) for a in self._ma.angles],
@@ -362,6 +361,14 @@ class TabNotas(QWidget):
                 "ref_taus"    : None if ma.align_ref_taus is None else [int(v) for v in ma.align_ref_taus],
                 "ref_theta"   : getattr(ma, 'align_ref_theta', 'ref'),
             }
+        return data
+
+    def save_mask(self, path: str):
+        """Guarda segments a JSON serializable."""
+        data = self.mask_data()
+        if data is None:
+            self.log.emit("[Notas] Sin segmentos para guardar.")
+            return
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         extra = " (con alineación)" if "alignment" in data else ""
@@ -371,7 +378,10 @@ class TabNotas(QWidget):
         """Carga segments desde JSON y actualiza tabla + editor F0."""
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        self.load_mask_data(data, path)
 
+    def load_mask_data(self, data: dict, path: str):
+        """Aplica una máscara ya leída (de un archivo .msk o de una sesión)."""
         # validación básica
         if self._ma is not None:
             if data.get("sr") != self._ma.sr:

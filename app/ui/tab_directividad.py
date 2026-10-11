@@ -1162,6 +1162,19 @@ class TabDirectividad(QWidget):
             ref_raw, ref_eq = self._raw_ref_spl, self._eq_ref_spl   # grilla abierta de archivo, sin audio
         return dict(levels=lv, azimuths=az, thetas=th, freqs=freqs, unit=unit, ref_raw=ref_raw, ref_eq=ref_eq)
 
+    def grid_snapshots_all(self):
+        """Grilla procesada de la muestra completa y de cada nota extraída, para guardar en la sesión."""
+        ma = self._ma
+        names = ["Todo el audio"] + (list(ma.notes.keys()) if ma is not None and ma.notes else [])
+        keep, out = self._nota, {}
+        try:
+            for n in names:
+                self._nota = n
+                out[n] = self.grid_snapshot()
+        finally:
+            self._nota = keep
+        return out if out.get("Todo el audio") is not None else None
+
     def load_grid_snapshot(self, d: dict):
         """Abre una grilla guardada (.gcclp) y la muestra en la matriz y en los gráficos."""
         self.source_file    = None

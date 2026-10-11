@@ -513,9 +513,6 @@ class NativeRibbon(QWidget):
         for n in ('load_session', 'save_session', 'save_session_as'):
             m.addAction(self._act[n])
         m.addSeparator()
-        for n in ('save_grid', 'load_grid'):
-            m.addAction(self._act[n])
-        m.addSeparator()
         m.addMenu("Exportar").addAction(self._act['export_all'])
         m.addSeparator()
         m.addAction("Salir", lambda: self.window().close())

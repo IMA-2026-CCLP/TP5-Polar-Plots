@@ -238,15 +238,19 @@ class MainWindow(QMainWindow):
         if self._ma is None or getattr(self, '_mask_asked', False) or self.view_notas._segs is not None:
             return
         self._mask_asked = True
+        sess = getattr(self, '_session_mask', None)
         box = QMessageBox(self)
         box.setWindowTitle("Segmentación por notas")
         box.setText("¿Tenés una máscara guardada?")
         box.setInformativeText("Si la cargás se reaplican la alineación entre tomas y el TDOA y se recuperan los "
                                "segmentos, sin recalcular.")
+        b_sess = box.addButton("Usar la de la sesión", QMessageBox.ButtonRole.AcceptRole) if sess else None
         b_load = box.addButton("Cargar máscara…", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("No, continuar", QMessageBox.ButtonRole.RejectRole)
         box.exec()
-        if box.clickedButton() is b_load:
+        if b_sess is not None and box.clickedButton() is b_sess:
+            self.view_notas.load_mask_data(sess, "la sesión")
+        elif box.clickedButton() is b_load:
             self._on_load_mask()
 
     def _show_notas_dialog(self):
@@ -294,10 +298,21 @@ class MainWindow(QMainWindow):
     # el estado COMPLETO de la interfaz (no sólo los controles de Directividad). Ver core/session.py.
 
     def _on_load_session(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Cargar sesión", "", "Sesión CCLP (*.cclp)")
-        if path:
-            self._load_polar_npz_file(path)
-            self._session_path = path
+        path, _ = QFileDialog.getOpenFileName(self, "Cargar sesión", "",
+                                              "Sesión CCLP (*.cclp);;Grilla procesada anterior (*.gcclp)")
+        if not path:
+            return
+        if path.lower().endswith('.gcclp'):          # formato anterior, solo la grilla
+            from core.grid_file import load_grid
+            d = load_grid(path)
+            self.ribbon._b.state.update({k: v for k, v in d['meta'].items() if k in ('corr_ref', 'corr_base')})
+            self.view_dir.load_grid_snapshot(d)
+            if d['meta'].get('view'):
+                self.view_dir.apply_view_config(d['meta']['view'])
+            self._append_log(f"[Sesión] Grilla anterior abierta: {Path(path).name}")
+            return
+        self._load_polar_npz_file(path)
+        self._session_path = path
 
     def _load_polar_npz_file(self, path: str):
         try:
@@ -319,9 +334,28 @@ class MainWindow(QMainWindow):
             self.ribbon.set_dir_status(
                 f"Cargado sin audios\n{data['dir_freqs'][0]:.0f}–{data['dir_freqs'][-1]:.0f} Hz"
             )
+            self._session_mask = view.get('mask')      # se ofrece al abrir Segmentación por notas
             self._append_log(f"[Sesión] Cargado desde {path}")
+            self._append_log("[Sesión] La sesión no trae los audios: para reprocesar hay que cargar los WAV de nuevo "
+                             "(Archivo ▸ Cargar audio…) y volver a procesarlos.")
         except Exception as e:
             self._append_log(f"[ERROR] Al cargar sesión: {e}")
+
+    def _warn_no_audio_in_session(self):
+        """Aviso al guardar: la sesión no incluye los audios. Se puede silenciar con la casilla."""
+        if self._settings.value("hide_no_audio_warning", False, type=bool):
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Sesión guardada")
+        box.setText("La sesión se guardó, pero no incluye los audios.")
+        box.setInformativeText("Guarda la grilla procesada, la máscara con su alineación, los gráficos y la configuración. "
+                               "Si más adelante querés reprocesar, tenés que cargar los audios de nuevo y procesarlos.")
+        chk = QCheckBox("No volver a mostrar este aviso")
+        box.setCheckBox(chk)
+        box.exec()
+        if chk.isChecked():
+            self._settings.setValue("hide_no_audio_warning", True)
 
     def _on_save_session(self):
         """Guardar: si ya se guardó/cargó un .cclp en esta sesión de trabajo, sobrescribe ese mismo
@@ -353,6 +387,8 @@ class MainWindow(QMainWindow):
         # guardado queda bloqueado o sin notas cuando sólo se computó por
         # nota (sin pasar nunca por "Todo el audio").
         ma = self.view_dir.get_ma()
+        if ma is not None and self.view_dir.grid_snapshot() is not None:
+            return ma                      # hay grilla procesada: se guarda aunque no se haya corrido Calcular
         has_global = ma is not None and ma.dir_levels is not None
         has_notes  = ma is not None and ma.notes and any(
             n.dir_levels is not None for n in ma.notes.values())
@@ -370,6 +406,9 @@ class MainWindow(QMainWindow):
                 'view_dir':   self.view_dir.get_view_config(),
                 'session_ui': st.copy(),    # todo el estado de la interfaz, no sólo Directividad
             }
+            mask = self.view_notas.mask_data()
+            if mask is not None:
+                view['mask'] = mask         # segmentos + alineación de los pasos 1 y 2
             save_results(
                 filepath       = path,
                 ma             = ma,
@@ -377,8 +416,10 @@ class MainWindow(QMainWindow):
                 ref_azimuth    = int(float(rb.le_ref_az.text() or 0)),
                 ref_theta_plot = int(float(rb.le_ref_th.text() or 0)),
                 view           = view,
+                grids          = self.view_dir.grid_snapshots_all(),
             )
             self._append_log(f"[Sesión] Guardado → {path}")
+            self._warn_no_audio_in_session()
         except Exception as e:
             self._append_log(f"[ERROR] Al guardar sesión: {e}")
 
