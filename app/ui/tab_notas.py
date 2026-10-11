@@ -88,7 +88,10 @@ class TabNotas(QWidget):
 
     def set_notas_controls(self, widget):
         """Recibe el panel armado por NativeRibbon.build_notas_panel() y lo embebe arriba de todo."""
-        widget.setMaximumHeight(300)   # compacto: el resto del alto es para el editor F0
+        # Alto fijo = el que pide el contenido (+ lugar para una barra horizontal si la ventana es angosta):
+        # sin scroll vertical, el resto del alto es para el editor F0.
+        widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        widget.setFixedHeight(widget.widget().sizeHint().height() + 22)
         self._controls_slot.addWidget(widget)
 
     def _build_table_panel(self) -> QWidget:

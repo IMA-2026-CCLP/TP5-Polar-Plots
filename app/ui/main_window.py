@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
             lay = QVBoxLayout(dlg)
             lay.setContentsMargins(6, 6, 6, 6)
             lay.addWidget(self.view_notas)
-            dlg.resize(1150, 720)
+            dlg.resize(1280, 720)
             self._notas_dlg = dlg
         if not dlg.isVisible():
             dlg.exec()
