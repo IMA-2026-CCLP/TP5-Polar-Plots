@@ -1245,6 +1245,10 @@ class MicArray:
         delta        = spl_levels[i_base, i_ref, :] - spl_levels[:, i_ref, :]
         delta_global = spl_global[i_base, i_ref] - spl_global[:, i_ref]
         self.leq_corr        = spl_levels + delta[:, np.newaxis, :]
+        # Posiciones reemplazadas por espejo: el dato vino de otra toma, así que se corrige con la
+        # diferencia de esa toma (no la del giro destino).
+        for (i_d, j_d), i_s in (getattr(self, '_mirror_src', None) or {}).items():
+            self.leq_corr[i_d, j_d, :] = spl_levels[i_d, j_d, :] + delta[i_s, :]
         self.leq_onaxis      = None
         self.dir_delta       = delta
         self.dir_delta_global = delta_global
@@ -1284,6 +1288,8 @@ class MicArray:
         i_base = self._az_to_row(ref_azimuth)
         self.dir_delta_global = spl[i_base, i_ref] - spl[:, i_ref]
         self.dir_leq_corr_global = spl + self.dir_delta_global[:, np.newaxis]
+        for (i_d, j_d), i_s in (getattr(self, '_mirror_src', None) or {}).items():
+            self.dir_leq_corr_global[i_d, j_d] = spl[i_d, j_d] + self.dir_delta_global[i_s]
         return self.dir_delta_global
 
     def apply_take_correction(self, ref_theta='ref', ref_azimuth=0, ref_theta_plot=0, correct=True):

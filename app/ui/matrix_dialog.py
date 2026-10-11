@@ -515,13 +515,12 @@ class _PlayerBar(QWidget):
 
 class MatrixPanel(QWidget):
     def __init__(self, levels3d, azimuths, thetas, freqs, source=None, on_click=None, apply_cb=None,
-                 compare_cb=None, undo_cb=None, unit='dB', corr=None, onaxis=None, parent=None):
+                 undo_cb=None, unit='dB', corr=None, onaxis=None, parent=None):
         super().__init__(parent)
         self._undo_cb = undo_cb
         self._onaxis = None if onaxis is None else np.asarray(onaxis, dtype=float)
         self._corr = None if corr is None else np.asarray(corr, dtype=float)
         self._apply_cb = apply_cb
-        self._compare_cb = compare_cb
         self._unit = unit
         self._levels3d = np.asarray(levels3d, dtype=float)
         self._az, self._th, self._freqs, self._source = azimuths, thetas, freqs, source
@@ -557,16 +556,6 @@ class MatrixPanel(QWidget):
         self._b_rep.setToolTip("Ctrl + clic en las celdas a reemplazar (en orden). Luego: Reemplazar.")
         self._b_rep.clicked.connect(self._on_replace_btn)
         bar.addWidget(self._b_rep)
-        b_cmp = QPushButton("Comparar selección")
-        b_cmp.setToolTip("Abre la comparación de las mediciones de las celdas seleccionadas.")
-        def _cmp():
-            pairs = self._radial.selected_pairs()
-            if not pairs:
-                self._status.setText("Seleccioná celdas (Ctrl + clic) para comparar."); return
-            if self._compare_cb is not None:
-                self._compare_cb(pairs)
-        b_cmp.clicked.connect(_cmp)
-        bar.addWidget(b_cmp)
         bar.addStretch(1)
         lay.addLayout(bar)
         self._pick_dest = None        # modo "Elegir tomas": celdas a reemplazar (en orden)

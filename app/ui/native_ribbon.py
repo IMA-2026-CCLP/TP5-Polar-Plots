@@ -359,8 +359,8 @@ class NativeRibbon(QWidget):
         act('load_mask',   "Cargar máscara…", "Carga una segmentación de notas guardada", b.loadMask)
         act('export_all',  "Imágenes de directividad…", "Exporta las imágenes de los gráficos que elijas, para todas las bandas del rango", b.exportAllImages, False)
         act('edit_scale',  "Editar escala…",  "Crear o modificar una escala musical", b.editScale)
-        act('compare',     "Comparar mediciones…", "Superpone las señales de los micrófonos elegidos (por distancia al cénit) para comparar",
-            lambda: self.sig_open_options.emit('compare'))
+        act('seg_notas',   "Segmentación por notas…", "Alinear, elegir escala, detectar y extraer las notas de cada toma",
+            lambda: self.sig_open_options.emit('notas'))
         act('smoothing',   "Suavizado…",      "Suavizado e interpolación — se aplica por igual a Polar 2D, Superficie 3D y Esfera",
             lambda: self.sig_open_options.emit('smoothing'))
 
@@ -468,7 +468,7 @@ class NativeRibbon(QWidget):
         self._act_dark.triggered.connect(lambda _=False: self.sig_theme_toggled.emit())
 
         m = mb.addMenu("&Herramientas")
-        for n in ('edit_scale', 'smoothing', 'compare', 'save_mask', 'load_mask'):
+        for n in ('seg_notas', 'save_mask', 'load_mask'):
             m.addAction(self._act[n])
 
         m = mb.addMenu("&Opciones")
@@ -506,14 +506,9 @@ class NativeRibbon(QWidget):
         """El menú Ver cambia según la pestaña: Procesamiento (vista de la señal) o Directividad."""
         m = self._menu_ver
         m.clear()
-        if tab == 0:
-            m.addMenu(self._ver_vista)
-            m.addAction(self._act['smooth'])
-        else:
+        if tab != 0:
             m.addAction(self._act['info'])
-        m.addSeparator()
-        m.addAction(self._act_dark)
-        m.addSeparator()
+            m.addSeparator()
         for a in self._ver_extra:
             m.addAction(a)
 

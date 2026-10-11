@@ -71,36 +71,32 @@ class TabNotas(QWidget):
             "QPushButton:disabled { background:#9e9e9e; color:#e0e0e0; }"
         )
 
-        self.btn_view_table = QPushButton("Ver tabla")
-        self.btn_view_table.setCheckable(True)
-        self.btn_view_table.setToolTip("Muestra/oculta la tabla de segmentos detectados, en una ventana aparte")
-        self.btn_view_table.toggled.connect(self._on_toggle_table)
-
         btn_row.addWidget(self.btn_apply_edits)
         btn_row.addWidget(self.btn_extract)
-        btn_row.addWidget(self.btn_view_table)
         btn_row.addStretch(1)
         root.addLayout(btn_row)
 
-        # Editor F0 interactivo — ocupa todo el resto del alto disponible.
+        # Editor F0 interactivo (ocupa el resto del alto) y, al costado, la tabla de segmentos.
         self.f0_editor = F0EditorWidget()
         self.f0_editor.log.connect(self.log)
         self.f0_editor.segments_changed.connect(self._on_f0_segments_changed)
-        root.addWidget(self.f0_editor, 1)
-
-        self._build_table_window()
+        body = QHBoxLayout()
+        body.setSpacing(6)
+        body.addWidget(self.f0_editor, 1)
+        body.addWidget(self._build_table_panel())
+        root.addLayout(body, 1)
 
     def set_notas_controls(self, widget):
         """Recibe el panel armado por NativeRibbon.build_notas_panel() y lo embebe arriba de todo."""
         widget.setMaximumHeight(300)   # compacto: el resto del alto es para el editor F0
         self._controls_slot.addWidget(widget)
 
-    def _build_table_window(self):
-        """Tabla de segmentos: ventana aparte, angosta, no modal — se abre/cierra con 'Ver tabla'."""
-        self._table_win = QDialog(self)
-        self._table_win.setWindowTitle("Segmentos detectados")
-        self._table_win.resize(380, 420)
-        lay = QVBoxLayout(self._table_win)
+    def _build_table_panel(self) -> QWidget:
+        """Tabla de segmentos detectados, siempre visible al costado del gráfico temporal."""
+        panel = QWidget()
+        panel.setFixedWidth(360)
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(0, 0, 0, 0)
 
         hint = QLabel(
             "Doble clic en Start/End para editar. "
@@ -117,16 +113,7 @@ class TabNotas(QWidget):
         self.table_segs.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_segs.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         lay.addWidget(self.table_segs)
-
-        self._table_win.finished.connect(lambda _=0: self.btn_view_table.setChecked(False))
-
-    def _on_toggle_table(self, checked: bool):
-        if checked:
-            self._table_win.show()
-            self._table_win.raise_()
-            self._table_win.activateWindow()
-        else:
-            self._table_win.hide()
+        return panel
 
     # ── Escala API ────────────────────────────────────────────────────────
 

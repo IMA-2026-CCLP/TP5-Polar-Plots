@@ -218,20 +218,27 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(idx)
         self._params_stack.setCurrentIndex(idx)
 
+    def _show_notas_dialog(self):
+        """Herramientas ▸ Segmentación por notas…: el flujo de Notas (alinear, escala, detección y editor F0)
+        en un modal. El widget se arma una sola vez y se reutiliza."""
+        dlg = getattr(self, '_notas_dlg', None)
+        if dlg is None:
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Segmentación por notas")
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(6, 6, 6, 6)
+            lay.addWidget(self.view_notas)
+            dlg.resize(1150, 720)
+            self._notas_dlg = dlg
+        if not dlg.isVisible():
+            dlg.exec()
+
     def _open_graph_options(self, kind: str):
         """Opciones ▸ Gráficos ▸ …: el mismo modal de Propiedades del gráfico (o el de Imágenes).
         'smoothing' (Herramientas ▸ Suavizado…) es aparte: una sola configuración común a Polar 2D,
         Superficie 3D y Esfera, no un modal de Propiedades de un gráfico en particular."""
-        if kind == "compare":
-            from ui.compare_dialog import CompareDialog
-            def _vp():
-                st = self.ribbon._b.state
-                ymin, ymax = st.get('ymin'), st.get('ymax')
-                return {'env': bool(st.get('envelope', True)), 'db': bool(st.get('db', False)),
-                        'smooth': float(st.get('smooth', 20.0)),
-                        'yrange': [float(ymin), float(ymax)] if ymin is not None and ymax is not None else None}
-            self._compare_win = CompareDialog(lambda: self.view_dir._get_current_ma(), view_params=_vp, parent=self)
-            self._compare_win.show()
+        if kind == "notas":
+            self._show_notas_dialog()
             return
         if kind == "images":
             from ui.options_dialogs import ImageOptionsDialog
@@ -341,19 +348,6 @@ class MainWindow(QMainWindow):
             self._append_log(f"[ERROR] Al guardar sesión: {e}")
 
     # ── Slots de Procesamiento ────────────────────────────────────────────────
-
-    def _compare_pairs(self, pairs):
-        """Comparar selección (desde la matriz radial): superpone las mediciones elegidas."""
-        from ui.compare_dialog import CompareDialog
-        def _vp():
-            st = self.ribbon._b.state
-            ymin, ymax = st.get('ymin'), st.get('ymax')
-            return {'env': bool(st.get('envelope', True)), 'db': bool(st.get('db', False)),
-                    'smooth': float(st.get('smooth', 20.0)),
-                    'yrange': [float(ymin), float(ymax)] if ymin is not None and ymax is not None else None}
-        self._compare_win = CompareDialog(lambda: self.view_dir._get_current_ma(), view_params=_vp,
-                                          pairs=pairs, parent=self)
-        self._compare_win.show()
 
     def _apply_mirror_replacements(self, pairs):
         """Aplica los reemplazos de la matriz al audio y vuelve a dibujar la señal en el tiempo."""
@@ -482,17 +476,13 @@ class MainWindow(QMainWindow):
     def _on_view_choice(self, key):
         """Desplegable de Procesamiento (arriba a la derecha): cambia la misma vista que el menú Vista."""
         st = self.ribbon._b.state
-        st.update(matrix=key == 'matrix', db=key == 'db', envelope=key in ('db', 'envelope'), detect=key == 'detect')
+        st.update(matrix=key == 'matrix', db=key == 'db', envelope=key in ('db', 'envelope'), detect=False)
         self.ribbon._b.emitPlotParams()
 
     def _on_plot_params(self, theta, azimuth, env, db, yrange, smoothing):
         st = self.ribbon._b.state
-        key = ('detect' if st.get('detect') else 'matrix' if st.get('matrix')
-               else 'db' if db else 'envelope' if env else 'amp')
+        key = ('matrix' if st.get('matrix') else 'db' if db else 'envelope' if env else 'amp')
         self.view_prepro.set_view_choice(key)
-        if st.get('detect'):                                 # Vista ▸ Detección: f0/segmentos de Notas
-            self.view_prepro.show_detect(self.view_notas)
-            return
         if st.get('matrix'):              # Vista ▸ Matriz radial (por defecto)
             panel = self._ensure_matrix_panel()
             if panel is not None:
@@ -515,7 +505,7 @@ class MainWindow(QMainWindow):
         levels, az, th, freqs, src, unit = m
         if self._matrix_win is None:
             self._matrix_win = MatrixPanel(levels, az, th, freqs, source=src, on_click=self.view_dir.play_cell,
-                                           apply_cb=self._apply_mirror_replacements, compare_cb=self._compare_pairs,
+                                           apply_cb=self._apply_mirror_replacements,
                                            undo_cb=self._undo_replacement, unit=unit,
                                            corr=self.view_dir.corr_delta_2d(), onaxis=self.view_dir.onaxis_ref_1d())
             self.view_dir.on_data_changed = self._refresh_matrix
@@ -575,14 +565,12 @@ class MainWindow(QMainWindow):
     # ── Slots de Notas ────────────────────────────────────────────────────────
 
     def _on_detect_notes(self, tol, purity, start_s, grad, ref_theta):
-        self._on_view_choice('detect')   # mostrar el panel ya al hacer click, no recién cuando termine
         self.view_notas.detect_notes(tol, purity, start_s, grad, ref_theta)
 
     def _on_notas_log(self, msg: str):
         if "Detección completada" in msg or "Máscara cargada" in msg:
             self.view_notas.btn_extract.setEnabled(True)
             self.ribbon._act['save_mask'].setEnabled(True)
-            self._on_view_choice('detect')   # resultado listo: lo mostramos, sin que haga falta ir a buscarlo
 
     def _on_edit_scale(self):
         dlg = ScaleEditorDialog(self.view_notas.get_scale(), self.ribbon.current_scale_name(), self)

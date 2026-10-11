@@ -901,6 +901,7 @@ class TabDirectividad(QWidget):
             return "No hay audio cargado en memoria (sesión .cclp): cargá los WAV para aplicar."
         n = 0
         snap = []
+        prev_src = dict(getattr(ma, '_mirror_src', None) or {})
         for t_d, g_d, t_s, g_s in pairs:
             i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
             i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
@@ -908,16 +909,24 @@ class TabDirectividad(QWidget):
                 continue
             snap.append((i_d, j_d, tensor[i_d, j_d, :].copy()))
             tensor[i_d, j_d, :] = tensor[i_s, j_s, :]
+            self._set_mirror_src(i_d, j_d, i_s, j_s)
             n += 1
         if snap:
-            self._undo_stack = getattr(self, '_undo_stack', []) + [('tensor', snap)]
+            self._undo_stack = getattr(self, '_undo_stack', []) + [('tensor', snap, prev_src)]
         return f"Aplicados {n} reemplazos al audio."
+
+    def _set_mirror_src(self, i_d, j_d, i_s, j_s):
+        """Anota de qué toma (giro) vino el dato de una posición reemplazada, para que la corrección
+        por toma use la de esa toma y no la del giro destino. Si la fuente ya era un reemplazo, sigue la cadena."""
+        src = self._ma.__dict__.setdefault('_mirror_src', {})
+        src[(i_d, j_d)] = src.get((i_s, j_s), i_s)
 
     def _mirror_on_leq(self, pairs):
         ma = self._ma
         spl = ma._leq_cache[0]
         glob = getattr(ma, '_leq_global_cache', None)
         snap, n = [], 0
+        prev_src = dict(getattr(ma, '_mirror_src', None) or {})
         for t_d, g_d, t_s, g_s in pairs:
             i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
             i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
@@ -927,10 +936,11 @@ class TabDirectividad(QWidget):
             spl[i_d, j_d, :] = spl[i_s, j_s, :]           # todas las bandas de tercio a la vez
             if glob is not None:
                 glob[i_d, j_d] = glob[i_s, j_s]
+            self._set_mirror_src(i_d, j_d, i_s, j_s)
             n += 1
         if not n:
             return "No hay reemplazos válidos."
-        self._undo_stack = getattr(self, '_undo_stack', []) + [('leq', snap)]
+        self._undo_stack = getattr(self, '_undo_stack', []) + [('leq', snap, prev_src)]
         self._rebuild_after_leq()
         return f"Aplicados {n} reemplazos en todas las bandas."
 
@@ -952,7 +962,8 @@ class TabDirectividad(QWidget):
         stack = getattr(self, '_undo_stack', [])
         if not stack or self._ma is None:
             return "Nada para deshacer."
-        kind, snap = stack.pop()
+        kind, snap, prev_src = stack.pop()
+        self._ma._mirror_src = prev_src
         if kind == 'tensor':
             for i_d, j_d, old in snap:
                 self._ma.tensor[i_d, j_d, :] = old
@@ -1320,7 +1331,9 @@ class TabDirectividad(QWidget):
         targets = self._all_targets()
         if not targets:
             return False
+        mirror_src = getattr(self._ma, '_mirror_src', None) or {}
         for t in targets:
+            t._mirror_src = mirror_src      # las notas comparten la grilla: mismos reemplazos
             if t._leq_cache is None:
                 t.compute_leq_bands('1/3')
             t.apply_take_correction_bands(ref_theta=self.corr_ref_th, ref_azimuth=ref_az)
