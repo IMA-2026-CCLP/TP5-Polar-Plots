@@ -30,6 +30,8 @@ class TabNotas(QWidget):
     """
     ma_updated = pyqtSignal(object)
     log        = pyqtSignal(str)
+    log_loaded_mask  = pyqtSignal()               # una máscara quedó cargada (para mostrar la solapa de segmentación)
+    alignment_loaded = pyqtSignal(bool, bool)     # (tomas, TDOA): alineación reaplicada desde una máscara
     onset_dragged = pyqtSignal(int, float)   # onset marcado a mano en la señal dB (az_idx, segundos)
 
     def __init__(self, parent=None):
@@ -353,9 +355,17 @@ class TabNotas(QWidget):
                 for segs in self._segs
             ],
         }
+        ma = self._ma
+        if getattr(ma, 'align_takes_shifts', None) is not None or getattr(ma, 'align_ref_taus', None) is not None:
+            data["alignment"] = {       # pasos 1 (tomas) y 2 (TDOA): se reaplican al cargar, sin recalcular
+                "takes_shifts": None if ma.align_takes_shifts is None else [int(v) for v in ma.align_takes_shifts],
+                "ref_taus"    : None if ma.align_ref_taus is None else [int(v) for v in ma.align_ref_taus],
+                "ref_theta"   : getattr(ma, 'align_ref_theta', 'ref'),
+            }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        self.log.emit(f"[Notas] Máscara guardada → {path}")
+        extra = " (con alineación)" if "alignment" in data else ""
+        self.log.emit(f"[Notas] Máscara guardada{extra} → {path}")
 
     def load_mask(self, path: str):
         """Carga segments desde JSON y actualiza tabla + editor F0."""
@@ -369,6 +379,32 @@ class TabNotas(QWidget):
             if data.get("angles") != [int(a) for a in self._ma.angles]:
                 self.log.emit("[WARN] ángulos de la máscara no coinciden con el MicArray actual.")
 
+        # Alineación guardada: se reaplica al audio (si esta sesión todavía no alineó nada). Eso dispara
+        # ma_updated → set_ma(), que borra los segmentos; por eso se cargan recién cuando vuelve set_ma().
+        al = data.get("alignment")
+        ma = self._ma
+        ya = ma is not None and (getattr(ma, 'align_takes_shifts', None) is not None
+                                 or getattr(ma, 'align_ref_taus', None) is not None)
+        if al and ma is not None:
+            ts, rt = al.get("takes_shifts"), al.get("ref_taus")
+            if ya:
+                self.log.emit("[Notas] Esta sesión ya tiene alineación: se mantiene, no se reaplica la de la máscara.")
+            elif data.get("angles") != [int(a) for a in ma.angles]:
+                self.log.emit("[WARN] No se reaplicó la alineación: los ángulos no coinciden.")
+            else:
+                ma.apply_alignment(takes_shifts=ts, ref_taus=rt, theta=al.get("ref_theta", 'ref'))
+                self._pending_mask = (data, path)
+                self.log.emit("[Notas] Alineación de la máscara reaplicada (tomas y TDOA), sin recalcular.")
+                self.alignment_loaded.emit(ts is not None, rt is not None)
+                self.ma_updated.emit(ma)
+                return
+        elif ma is not None and not ya:
+            self.log.emit("[WARN] Esta máscara no trae alineación (es de una versión anterior) y esta sesión todavía no alineó "
+                          "nada: los segmentos solo valen si alineás las tomas igual que cuando la creaste (pasos 1 y 2). "
+                          "Volvé a guardarla una vez alineado para que la incluya.")
+        self._apply_mask_data(data, path)
+
+    def _apply_mask_data(self, data, path):
         self._segs = [
             {
                 note: {
@@ -385,6 +421,7 @@ class TabNotas(QWidget):
         self.btn_apply_edits.setEnabled(True)
         self.btn_extract.setEnabled(True)
         self.log.emit(f"[Notas] Máscara cargada ← {path}")
+        self.log_loaded_mask.emit()
 
     # ── API pública ───────────────────────────────────────────────────────
 
@@ -408,6 +445,10 @@ class TabNotas(QWidget):
         self._mics_az.blockSignals(False)
         self._render_signal()
         self._render_mics()
+        pend = getattr(self, '_pending_mask', None)
+        if pend:                      # máscara con alineación: ahora sí cargamos sus segmentos
+            self._pending_mask = None
+            self._apply_mask_data(*pend)
 
     def set_signal_view(self, yrange, smoothing_ms):
         """Rango Y y suavizado de la señal dB (los mismos que usa Procesamiento)."""

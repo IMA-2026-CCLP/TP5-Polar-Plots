@@ -157,6 +157,7 @@ class MainWindow(QMainWindow):
         # ── Señales de retorno de las vistas
         self.loader.ma_ready.connect(self._on_ma_ready)
         self.loader.ma_ready.connect(lambda _ma: self.ribbon.clear_done())   # audio nuevo: pasos sin hacer
+        self.loader.ma_ready.connect(lambda _ma: setattr(self, '_mask_asked', False))
         self.view_prepro.op_done.connect(self.ribbon.mark_done)
         self.view_dir.step_done.connect(self.ribbon.mark_done)
         self.loader.log.connect(self._append_log)
@@ -176,6 +177,8 @@ class MainWindow(QMainWindow):
         self.view_dir.on_data_changed = self._refresh_matrix     # datos nuevos → matriz (si es la vista activa)
 
         self.view_notas.ma_updated.connect(self._on_ma_ready)
+        self.view_notas.log_loaded_mask.connect(self.view_notas.show_f0)
+        self.view_notas.alignment_loaded.connect(self._on_alignment_loaded)
         self.view_notas.onset_dragged.connect(self.view_prepro._on_onset_dragged)   # onset manual en la ventana de notas
         self.view_notas.log.connect(self._append_log)
         self.view_notas.log.connect(self._on_notas_log)
@@ -222,9 +225,34 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(idx)
         self._params_stack.setCurrentIndex(idx)
 
+    def _on_alignment_loaded(self, takes, tdoa):
+        if takes:
+            self.ribbon.mark_done('align_takes', "desde la máscara")
+        if tdoa:
+            self.ribbon.mark_done('align_ref', "desde la máscara")
+
+    def _ask_mask(self):
+        """Antes de abrir Segmentación por notas: si hay audio y todavía no hay segmentos, ofrece cargar una
+        máscara guardada (trae la alineación de los pasos 1 y 2 y los segmentos). Se pregunta una vez por audio."""
+        if self._ma is None or getattr(self, '_mask_asked', False) or self.view_notas._segs is not None:
+            return
+        self._mask_asked = True
+        box = QMessageBox(self)
+        box.setWindowTitle("Segmentación por notas")
+        box.setText("¿Tenés una máscara guardada?")
+        box.setInformativeText("Si la cargás se reaplican la alineación entre tomas y el TDOA y se recuperan los "
+                               "segmentos, sin recalcular.")
+        b_load = box.addButton("Cargar máscara…", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("No, continuar", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is b_load:
+            self._on_load_mask()
+
     def _show_notas_dialog(self):
         """Herramientas ▸ Segmentación por notas…: el flujo de Notas (alinear, escala, detección y editor F0)
         en una ventana no modal. El widget se arma una sola vez y se reutiliza."""
+        if not (getattr(self, '_notas_dlg', None) is not None and self._notas_dlg.isVisible()):
+            self._ask_mask()
         dlg = getattr(self, '_notas_dlg', None)
         if dlg is None:
             dlg = QDialog(self)

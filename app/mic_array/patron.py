@@ -69,6 +69,11 @@ class MicArray:
         self.spl_levels = None
         self.spl_global = None
         self._leq_cache = None   # (spl_levels, spl_global, freqs, bands) para apply_take_correction
+        # Desplazamientos acumulados (muestras, uno por giro) de la alineación, para guardarlos en la máscara
+        # y reaplicarlos sin recalcular: tomas por onset (todos los canales) y TDOA por GCC-PHAT (sólo los no-ref).
+        self.align_takes_shifts = None
+        self.align_ref_taus     = None
+        self.align_ref_theta    = 'ref'   # micrófono de referencia usado en el TDOA
         self._leq_global_cache = None   # (n_angles, n_thetas) dB banda ancha, para Aplicar
 
         # Directivity results (relative to ref mic per take), None until compute_directivity()
@@ -513,6 +518,41 @@ class MicArray:
     # Alignment / Processing methods
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _acc_shift(self, attr, values):
+        """Acumula desplazamientos (uno por giro) en self.<attr>."""
+        v = np.asarray(values, dtype=int)
+        cur = getattr(self, attr, None)
+        setattr(self, attr, v if cur is None else np.asarray(cur, dtype=int) + v)
+
+    def apply_alignment(self, takes_shifts=None, ref_taus=None, theta='ref'):
+        """Reaplica desplazamientos ya calculados (de una máscara guardada), sin detectar nada:
+        primero el de tomas (todos los canales de cada giro), después el TDOA (todos menos el ref)."""
+        if not self.tensor.flags['WRITEABLE']:
+            self.tensor = np.array(self.tensor, dtype=np.float32)
+        n = self.n_samples
+
+        def shift_rows(i_az, rows, k):
+            if k == 0:
+                return
+            tmp = np.zeros((len(rows), n), dtype=np.float32)
+            if k > 0:
+                tmp[:, k:] = self.tensor[i_az][rows, :n - k]
+            else:
+                tmp[:, :n + k] = self.tensor[i_az][rows, -k:]
+            self.tensor[i_az][rows] = tmp
+
+        all_ix   = list(range(self.n_thetas))
+        i_ref    = self._th_to_col(theta)
+        other_ix = [i for i in all_ix if i != i_ref]
+        if takes_shifts is not None:
+            for i_az, k in enumerate(takes_shifts):
+                shift_rows(i_az, all_ix, int(k))
+            self._acc_shift('align_takes_shifts', takes_shifts)
+        if ref_taus is not None:
+            for i_az, k in enumerate(ref_taus):
+                shift_rows(i_az, other_ix, int(k))
+            self._acc_shift('align_ref_taus', ref_taus)
+
     def align_takes(self, target_onset=1.0, theta='ref', threshold_dB=-40, window_ms=50):
         """
         Aligns all azimuth takes so their onset lands at target_onset seconds.
@@ -543,11 +583,13 @@ class MicArray:
         print(f"  Ref theta: {th_label}  |  threshold = {threshold_dB} dBFS"
               f"  |  window = {window_ms:.0f} ms\n")
 
+        shifts = [0] * self.n_angles
         for i_az in range(self.n_angles):
             _progress(i_az, self.n_angles)
             signal = self.tensor[i_az, i_th, :].astype(np.float64)
             onset  = _detect_onset(signal, self.sr, window_ms=window_ms, threshold_dB=threshold_dB)
             shift  = target_samples - onset  # >0 → retrasa  |  <0 → adelanta
+            shifts[i_az] = int(shift)
 
             if shift != 0:
                 tmp = np.zeros((self.n_thetas, self.n_samples), dtype=np.float32)
@@ -561,6 +603,7 @@ class MicArray:
                   f"  ({onset / self.sr * 1000:.0f} ms)"
                   f"  shift = {shift:+d} smp  ({shift / self.sr * 1000:+.0f} ms)")
 
+        self._acc_shift('align_takes_shifts', shifts)
         print("\n  Take alignment done.")
 
     def align_to_ref(self, theta='ref', energy_threshold_dB=None):
@@ -590,6 +633,7 @@ class MicArray:
         thr_str = f"{energy_threshold_dB} dBFS" if energy_threshold_dB is not None else "desactivado"
         print(f"  Aligning {len(other_ix)} thetas to '{theta}'  |  umbral energía GCC: {thr_str}\n")
 
+        taus = [0] * self.n_angles
         for i_az in range(self.n_angles):
             _progress(i_az, self.n_angles)
             ref_sig = self.tensor[i_az, i_ref, :].astype(np.float64)
@@ -599,6 +643,7 @@ class MicArray:
                      for i_e in other_ix]
 
             tau = int(np.round(np.mean(tdoas)))
+            taus[i_az] = tau
 
             # shift all thetas by the same tau — ref stays untouched
             tmp = np.zeros((len(other_ix), self.n_samples), dtype=np.float32)
@@ -614,6 +659,8 @@ class MicArray:
                   f"  ({tau / self.sr * 1000:+.2f} ms)"
                   f"  std = {np.std(tdoas):.1f} smp")
 
+        self._acc_shift('align_ref_taus', taus)
+        self.align_ref_theta = theta
         print("\n  Alignment done.")
 
     def level_compensation(self, theta='ref', ref_azimuth=0):

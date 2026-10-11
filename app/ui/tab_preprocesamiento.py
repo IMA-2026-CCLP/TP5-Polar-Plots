@@ -161,6 +161,9 @@ class TabPreprocesamiento(QWidget):
         else:
             tmp[:, :n + shift] = ma.tensor[az_idx, :, -shift:]
         ma.tensor[az_idx] = tmp
+        one = [0] * ma.n_angles
+        one[az_idx] = int(shift)
+        ma._acc_shift('align_takes_shifts', one)     # el ajuste manual también viaja en la máscara
 
         self.log.emit(
             f"[Procesamiento] Toma {ma.angles[az_idx]}° desplazada "
