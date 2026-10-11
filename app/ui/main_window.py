@@ -769,7 +769,7 @@ class MainWindow(QMainWindow):
         self._log_dock.dockLocationChanged.connect(self._on_log_dock_location)
         self._log_dock.topLevelChanged.connect(self._on_log_floating)
 
-        self._log_dock.hide()      # oculto por defecto; se abre desde Ver ▸ Log
+        # visible por defecto, abajo a la izquierda; se puede ocultar desde Ver ▸ Log
 
     def _size_log_dock(self):
         """Al abrir el Log: ocupa ~22% del alto de la columna izquierda, debajo de Parámetros."""
