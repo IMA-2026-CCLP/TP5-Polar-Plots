@@ -429,13 +429,18 @@ class _Radial(QWidget):
             p.setPen(QPen(QColor('#666'), 0.5))
             p.setBrush(QBrush(self._color(v_mid)))
             p.drawRect(QRectF(x, top + i * hstep, w, hstep))
-        # valor de cada paso en su centro, sin decimales
+        # valor en cada frontera entre colores (el máximo arriba y el mínimo abajo incluidos), con su marca
+        bounds = [vmax - i * (vmax - vmin) / N for i in range(N + 1)]
+        fmt = "{:.0f}" if all(abs(v - round(v)) < 1e-6 for v in bounds) else "{:.1f}"
+        p.setPen(QPen(QColor('#444'), 1))
+        for i in range(N + 1):
+            y = top + i * hstep
+            p.drawLine(QPointF(x + w, y), QPointF(x + w + 4, y))
         p.setFont(QFont('Segoe UI', 8)); p.setPen(QColor('#111'))
-        for i in range(N):
-            v_mid = vmax - (i + 0.5) * (vmax - vmin) / N
-            y = top + (i + 0.5) * hstep
+        for i, v in enumerate(bounds):
+            y = top + i * hstep
             p.drawText(QRectF(x + w + 6, y - 8, 40, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                       f"{v_mid:.0f}")
+                       fmt.format(v))
 
     def mouseMoveEvent(self, ev):
         if self._drag is not None:                        # arrastre con botón derecho: mover el mallado

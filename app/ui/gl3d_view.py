@@ -775,7 +775,7 @@ class GL3DView(QWidget):
         fs = font_px * s
         bar_w = int(16 * s)
         bar_h = int(bar_h if bar_h is not None else 300 * s)
-        pad = int(8 * s)
+        pad = max(int(8 * s), int(fs * 0.75))     # lugar para la mitad del primer y último valor (están en los bordes)
         tick_len = int(5 * s)
         label_w = int(fs * 3.4)
         title_w = int(fs * 1.6)
@@ -818,11 +818,18 @@ class GL3DView(QWidget):
         font.setPixelSize(max(1, round(fs)))
         p.setFont(font)
         p.setPen(QColor("#1a1a1a"))
-        # valor en el centro de cada bloque, sin decimales (como la escala radial)
-        for i, v_mid, _ in blocks:
-            y = pad + (i + 0.5) * bar_h / nb
+        # valor en cada frontera entre colores (incluidos el máximo arriba y el mínimo abajo), con su marca
+        bounds = [cmax - i * span / nb for i in range(nb + 1)]
+        fmt = "{:.0f}" if all(abs(v - round(v)) < 1e-6 for v in bounds) else "{:.1f}"
+        p.setPen(QPen(QColor("#444444"), max(1.0, 1.0 * s)))
+        for i, v in enumerate(bounds):
+            y = pad + i * bar_h / nb
+            p.drawLine(x0 + bar_w, int(y), x0 + bar_w + tick_len, int(y))
+        p.setPen(QColor("#1a1a1a"))
+        for i, v in enumerate(bounds):
+            y = pad + i * bar_h / nb
             p.drawText(x0 + bar_w + tick_len + gap, int(y - fs * 0.6), label_w, int(fs * 1.2),
-                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, f"{v_mid:.0f}")
+                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, fmt.format(v))
         # "dB" horizontal, a la izquierda de la barra, arriba (pegado a la barra)
         p.drawText(0, pad, x0 - gap, int(fs * 1.2),
                    _Qt.AlignmentFlag.AlignRight | _Qt.AlignmentFlag.AlignVCenter, "dB")
