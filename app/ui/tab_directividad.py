@@ -1420,6 +1420,47 @@ class TabDirectividad(QWidget):
         w.start()
         return True
 
+    def prepare_notes(self, only=None) -> bool:
+        """Notas extraídas sin niveles por banda: los calcula solos (1/3 de octava) y les aplica la misma corrección
+        por toma y nivelación que ya tenga el audio completo, así la matriz radial deja elegir nota y frecuencia
+        apenas se extraen (sin tener que volver a Filtrar). `only`: nombre de una sola nota. False si no hay nada."""
+        ma = self._ma
+        if ma is None or not ma.notes or (getattr(self, '_notes_worker', None) is not None
+                                          and self._notes_worker.isRunning()):
+            return False
+        notes = [t for k, t in ma.notes.items()
+                 if (only is None or k == only) and getattr(t, 'tensor', None) is not None
+                 and getattr(t, '_leq_cache', None) is None]
+        if not notes:
+            return False
+
+        def run():
+            for t in notes:
+                t.compute_leq_bands('1/3')
+
+        def done(_):
+            last = getattr(ma, '_last_corr', None)
+            mirror = getattr(ma, '_mirror_src', None) or {}
+            for t in notes:
+                t._mirror_src = mirror
+                if last is not None:
+                    t.apply_take_correction_bands(ref_theta=last[0], ref_azimuth=last[1])
+                    t._last_corr = last
+                    if getattr(ma, 'leq_onaxis', None) is not None:
+                        t.normalize_onaxis()
+            self.show_graphs()
+            self.log.emit(f"[Notas] {len(notes)} nota(s) filtradas por bandas de 1/3 de octava: ya se pueden elegir "
+                          "nota y frecuencia en la matriz.")
+
+        w = Worker(run)
+        w.label = "Filtrando las notas por bandas 1/3…"
+        w.log.connect(self.log)
+        w.finished.connect(done)
+        w.error.connect(lambda e: self.log.emit(e))
+        self._notes_worker = w
+        w.start()
+        return True
+
     def _on_filter_done(self, targets):
         self.show_graphs()   # la matriz se redibuja con las bandas nuevas
         ma = targets[0]

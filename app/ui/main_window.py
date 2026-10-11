@@ -769,6 +769,8 @@ class MainWindow(QMainWindow):
         self.view_dir.apply_display_params(params)
         nota = params.get('nota')
         if nota != getattr(self, '_last_nota', nota):
+            if nota != "Todo el audio":
+                self.view_dir.prepare_notes(only=nota)   # si esa nota no tiene bandas todavía, las calcula
             self._refresh_matrix()                 # otra muestra: la matriz radial muestra esa nota
         self._last_nota = nota
 
@@ -814,6 +816,7 @@ class MainWindow(QMainWindow):
         self.ribbon.set_ma_loaded(ma)
         if ma.notes:
             self.ribbon.set_notes_loaded(list(ma.notes.keys()))
+            self.view_dir.prepare_notes()          # notas recién extraídas: niveles por banda listos para la matriz
         if ma.dir_levels is not None:
             self.ribbon.set_dir_computed(ma.dir_freqs)
             self.ribbon.set_dir_status("Sesión cargada")

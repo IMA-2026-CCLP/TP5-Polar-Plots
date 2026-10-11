@@ -785,7 +785,10 @@ _COMPARE_BY_HZ = {
 def default_compare_style(hz, band_index):
     """Estilo por defecto de una banda comparada: por frecuencia si está en _COMPARE_BY_HZ,
     si no, por su índice de banda (no por su posición en la selección)."""
-    st = dict(_COMPARE_BY_HZ.get(int(round(float(hz))), {}))
+    try:
+        st = dict(_COMPARE_BY_HZ.get(int(round(float(hz))), {}))
+    except (TypeError, ValueError, OverflowError):      # banda sin frecuencia (RMS total / NaN): estilo por índice
+        st = {}
     st.setdefault('color', _COMPARE_COLORS[int(band_index) % len(_COMPARE_COLORS)])
     st.setdefault('dash', 'solid')
     return st
