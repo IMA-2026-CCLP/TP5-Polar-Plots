@@ -300,6 +300,13 @@ class NativeRibbon(QWidget):
         self._flow_layouts = getattr(self, '_flow_layouts', []) + [lay]
         return w
 
+    def set_signal_group_visible(self, visible: bool):
+        """El grupo "Señal" (micrófono y azimut a graficar) solo sirve con las vistas de señal (dB, Envolvente,
+        Amplitud); con la matriz radial no se usa."""
+        for g in self.proc_panel.findChildren(QGroupBox):
+            if g.title() == "Señal":
+                g.setVisible(visible)
+
     def flow_width_hint(self) -> int:
         """Ancho del panel para que cada fila 'flow' entre en una sola línea (+ márgenes del grupo y del scroll)."""
         return max((l.preferred_width() for l in getattr(self, '_flow_layouts', [])), default=0) + 64

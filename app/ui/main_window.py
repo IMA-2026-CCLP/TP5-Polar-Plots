@@ -547,6 +547,7 @@ class MainWindow(QMainWindow):
         st = self.ribbon._b.state
         key = ('matrix' if st.get('matrix') else 'db' if db else 'envelope' if env else 'amp')
         self.view_prepro.set_view_choice(key)
+        self.ribbon.set_signal_group_visible(key != 'matrix')     # "Señal" solo con dB / Envolvente / Amplitud
         self.view_notas.set_signal_view(yrange, smoothing)     # señal dB de Segmentación por notas
         if st.get('matrix'):              # Vista ▸ Matriz radial (por defecto)
             panel = self._ensure_matrix_panel()
