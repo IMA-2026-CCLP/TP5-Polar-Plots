@@ -25,7 +25,7 @@ _TABS = [
     ("Procesamiento", "Visualizar señales, aplicar filtros y alinear tomas"),
     ("Directividad",  "Calcular y visualizar el patrón de directividad acústica"),
 ]
-_GCC_HELP = '<b>¿Para qué sirve?</b><br>Al alinear los micrófonos se estima el retardo entre cada uno y el de referencia con GCC-PHAT (correlación cruzada). Este umbral pone en cero, antes de correlacionar, los tramos de la señal de referencia que están por debajo de ese nivel, para que el ruido de fondo y el silencio no falseen la estimación.<br><br><b>¿Cómo se usa?</b><br>&bull; <b>Vacío</b>: no filtra nada.<br>&bull; <b>Con valor</b> (dBFS): ponelo un poco por encima del ruido de fondo, por ejemplo entre &minus;55 y &minus;40 dBFS, cerca del umbral que usaste para el onset. Por defecto: &minus;55 dBFS.<br>&bull; Si es demasiado alto se descartan partes útiles del canto y la alineación empeora.<br><br>Sólo afecta a <i>Alinear micrófonos</i>. <i>Alinear tomas</i> usa el Umbral del onset.'
+_GCC_HELP = '<b>¿Para qué sirve?</b><br>Al alinear los micrófonos se estima el retardo entre cada uno y el de referencia con GCC-PHAT (correlación cruzada). Este umbral (en la escala del gráfico: dB SPL si el audio está calibrado, dBFS si no) pone en cero, antes de correlacionar, los tramos de la señal de referencia que están por debajo de ese nivel, para que el ruido de fondo y el silencio no falseen la estimación.<br><br><b>¿Cómo se usa?</b><br>&bull; <b>Vacío</b>: no filtra nada.<br>&bull; <b>Con valor</b> (dBFS): ponelo un poco por encima del ruido de fondo, por ejemplo entre &minus;55 y &minus;40 dBFS, cerca del umbral que usaste para el onset. Por defecto: &minus;55 dBFS.<br>&bull; Si es demasiado alto se descartan partes útiles del canto y la alineación empeora.<br><br>Sólo afecta a <i>Alinear micrófonos</i>. <i>Alinear tomas</i> usa el Umbral del onset.'
 _CAP_W = 78   # ancho de la columna de títulos de fila (Cálculo, Vista…)
 
 
@@ -765,7 +765,7 @@ class NativeRibbon(QWidget):
         g_tomas = self._group("Alinear entre tomas", [
             (None, self._row2(
                 ("Onset", self._num('onset', 36, "Tiempo objetivo del onset tras alinear (s)", b.emitAlignPreview)),
-                ("Umbral", self._num('thresh', 36, "Nivel mínimo para detectar el onset (dBFS)", b.emitAlignPreview)))),
+                ("Umbral", self._num('thresh', 36, "Nivel mínimo para detectar el onset, en la misma escala del gráfico: dB SPL si el audio está calibrado, dBFS si no", b.emitAlignPreview)))),
             (None, self._button("Alinear", "Alinea las tomas por onset según el umbral",
                                 lambda: b.alignTakes(), 'align_takes', enabled=False, min_width=0))])
         g_mics = self._group("Alinear entre micrófonos", [

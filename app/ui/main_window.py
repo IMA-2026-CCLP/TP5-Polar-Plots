@@ -861,6 +861,24 @@ class MainWindow(QMainWindow):
             self.ribbon._b.state['ymin'], self.ribbon._b.state['ymax'] = (40.0, 100.0) if cal else (-60.0, 0.0)
             for load in self.ribbon._loaders:
                 load()
+        # Al pasar a dB SPL los umbrales de onset y TDOA cambian de escala: se corren lo mismo que la calibración del
+        # micrófono de referencia para que sigan en el mismo punto del gráfico (después se ajustan a ojo).
+        spl = bool(getattr(ma, '_is_spl', False))
+        if getattr(self, '_last_spl', None) is False and spl:
+            try:
+                k = float(np.asarray(ma.calibration, dtype=float).ravel()[ma._th_to_col('ref')])
+                st = self.ribbon._b.state
+                if st.get('thresh') is not None:
+                    st['thresh'] = round(float(st['thresh']) + k, 1)
+                if st.get('gcc_thresh') is not None:
+                    st['gcc_thresh'] = round(float(st['gcc_thresh']) + k, 1)
+                for load in self.ribbon._loaders:
+                    load()
+                self._append_log(f"[Umbrales] El audio pasó a dB SPL: los umbrales de onset y TDOA se corrieron {k:+.1f} dB "
+                                 "para quedar en el mismo punto. Ajustalos mirando el gráfico.")
+            except Exception:
+                pass
+        self._last_spl = spl
         shape = ma.tensor.shape
         self.statusBar().showMessage(
             f"Tensor {shape}  ·  sr {ma.sr} Hz  ·  "

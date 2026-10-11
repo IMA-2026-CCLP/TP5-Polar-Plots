@@ -337,7 +337,8 @@ class WaveformEditorWidget(QWidget):
             return
 
         sig      = self._ma.tensor[i_az, i_th, :].astype(np.float64)
-        onset_s  = _detect_onset(sig, self._ma.sr, threshold_dB=self._threshold_dB) / self._ma.sr
+        onset_s  = _detect_onset(sig, self._ma.sr,
+                                 threshold_dB=self._threshold_dB + self._ma._thr_offset_db()) / self._ma.sr
 
         self._onset_line = pg.InfiniteLine(
             pos=onset_s, angle=90, movable=True,

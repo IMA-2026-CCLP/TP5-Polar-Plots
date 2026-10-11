@@ -521,6 +521,12 @@ class MicArray:
     # Alignment / Processing methods
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _thr_offset_db(self) -> float:
+        """Los umbrales de onset y de TDOA se escriben en la misma escala que se ve en pantalla: dB SPL si el audio ya
+        está calibrado (señal en Pa) o dBFS si no. Internamente se comparan contra la señal tal como está (referencia 1),
+        así que con audio en Pa hay que restar la referencia de 20 µPa (≈ −94 dB)."""
+        return 20.0 * np.log10(20e-6) if getattr(self, '_is_spl', False) else 0.0
+
     def _acc_shift(self, attr, values):
         """Acumula desplazamientos (uno por giro) en self.<attr>."""
         v = np.asarray(values, dtype=int)
@@ -602,7 +608,7 @@ class MicArray:
         for i_az in range(self.n_angles):
             _progress(i_az, self.n_angles)
             signal = self.tensor[i_az, i_th, :].astype(np.float64)
-            onset  = _detect_onset(signal, self.sr, window_ms=window_ms, threshold_dB=threshold_dB)
+            onset  = _detect_onset(signal, self.sr, window_ms=window_ms, threshold_dB=threshold_dB + self._thr_offset_db())
             shift  = target_samples - onset  # >0 → retrasa  |  <0 → adelanta
             shifts[i_az] = int(shift)
 
@@ -656,8 +662,9 @@ class MicArray:
 
             # los canales reemplazados por su simétrico no sirven para estimar este retardo (son de otra toma)
             valid_ix = [i_e for i_e in other_ix if (i_az, i_e) not in self._mirror_cells] or other_ix
+            thr_eff = None if energy_threshold_dB is None else energy_threshold_dB + self._thr_offset_db()
             tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_e, :].astype(np.float64),
-                               energy_threshold_dB=energy_threshold_dB)
+                               energy_threshold_dB=thr_eff)
                      for i_e in valid_ix]
 
             tau = int(np.round(np.mean(tdoas)))

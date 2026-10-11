@@ -133,7 +133,8 @@ class TabPreprocesamiento(QWidget):
     def align_ref(self, gcc_thresh=None):
         if self._ma is None or self._busy():
             return
-        thr_str = f"{gcc_thresh} dBFS" if gcc_thresh is not None else "sin umbral"
+        unit = "dB SPL" if getattr(self._ma, '_is_spl', False) else "dBFS"
+        thr_str = f"{gcc_thresh} {unit}" if gcc_thresh is not None else "sin umbral"
         self.log.emit(f"[Procesamiento] Alineando a referencia (GCC-PHAT, {thr_str})…")
         self._op = ('align_ref', f"GCC-PHAT, {thr_str}")
         self._worker = Worker(lambda: self._run_align_ref(gcc_thresh))
