@@ -325,9 +325,9 @@ class NativeRibbon(QWidget):
         h.addWidget(QLabel("Base"))
         h.addWidget(self._combo('corr_base', 80, "Giro (HOR) contra el que se compara cada toma. Por defecto 0°",
                                 [(f'{a}°', str(a)) for a in range(0, 181, 10)]))
-        h.addWidget(self._button("Nivelar por toma", "Recalcula sólo la corrección por toma con la referencia y toma base elegidas (matriz y dB vs tiempo)",
+        h.addWidget(self._button("Por toma", "Recalcula sólo la corrección por toma con la referencia y toma base elegidas (matriz y dB vs tiempo)",
                                  lambda: b.corrRecalc(), 'corr'))
-        h.addWidget(self._button("Nivelar on axis",
+        h.addWidget(self._button("On Axis",
                                  "Paso 3: cada banda queda en 0 dB en la posición on-axis (giro 0°, θ 0°) sobre la grilla corregida.",
                                  lambda: b.nivelarOnaxis(), 'onaxis'))
         h.addStretch(1)
