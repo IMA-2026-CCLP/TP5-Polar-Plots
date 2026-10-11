@@ -51,11 +51,11 @@ class TabNotas(QWidget):
         root.setContentsMargins(8, 6, 8, 6)
         root.setSpacing(6)
 
-        # Arriba: panel de trabajo de notas (alinear tomas/mics, escala, detectar), armado por
-        # NativeRibbon y embebido acá — ver set_notas_controls(). Placeholder hasta entonces.
-        self._controls_slot = QVBoxLayout()
-        self._controls_slot.setContentsMargins(0, 0, 0, 0)
-        root.addLayout(self._controls_slot)
+        # Cada paso (solapa de arriba) tiene su tira de controles, armada por NativeRibbon y embebida
+        # en set_notas_controls(), y debajo su gráfico.
+        self._slots = [QVBoxLayout() for _ in range(3)]
+        for sl in self._slots:
+            sl.setContentsMargins(0, 0, 0, 0)
 
         btn_row = QHBoxLayout()
         self.btn_apply_edits = QPushButton("Aplicar ediciones")
@@ -76,7 +76,6 @@ class TabNotas(QWidget):
         btn_row.addWidget(self.btn_apply_edits)
         btn_row.addWidget(self.btn_extract)
         btn_row.addStretch(1)
-        root.addLayout(btn_row)
 
         # Dos vistas en pestañas. Por defecto la señal en dB del micrófono de referencia con todas las tomas
         # (ahí se alinea y se marca el onset a mano); la otra es el editor F0 con la tabla de segmentos.
@@ -88,8 +87,7 @@ class TabNotas(QWidget):
         self.f0_editor = F0EditorWidget()
         self.f0_editor.log.connect(self.log)
         self.f0_editor.segments_changed.connect(self._on_f0_segments_changed)
-        f0_page = QWidget()
-        body = QHBoxLayout(f0_page)
+        body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(6)
         body.addWidget(self.f0_editor, 1)
@@ -101,9 +99,8 @@ class TabNotas(QWidget):
         self._mics_az = QComboBox()
         self._mics_az.setToolTip("Giro (azimut) de la toma a mostrar")
         self._mics_az.currentIndexChanged.connect(lambda _=None: self._render_mics())
-        mics_page = QWidget()
-        mv = QVBoxLayout(mics_page)
-        mv.setContentsMargins(0, 4, 0, 0)
+        mv = QVBoxLayout()
+        mv.setContentsMargins(0, 0, 0, 0)
         mrow = QHBoxLayout()
         mlabel = QLabel("Giro:")
         mlabel.setStyleSheet("font-weight: bold;")
@@ -113,19 +110,32 @@ class TabNotas(QWidget):
         mv.addLayout(mrow)
         mv.addWidget(self.mics_editor, 1)
 
+        def page(slot, content_layout=None, content_widget=None, extra_row=None):
+            w = QWidget()
+            v = QVBoxLayout(w)
+            v.setContentsMargins(0, 6, 0, 0)
+            v.setSpacing(6)
+            v.addLayout(slot)
+            if extra_row is not None:
+                v.addLayout(extra_row)
+            if content_widget is not None:
+                v.addWidget(content_widget, 1)
+            else:
+                v.addLayout(content_layout, 1)
+            return w
+
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.sig_editor, "Señal (dB) · onset")
-        self.tabs.addTab(mics_page, "Ref vs micrófonos")
-        self.tabs.addTab(f0_page, "Detección F0")
+        self.tabs.addTab(page(self._slots[0], content_widget=self.sig_editor), "1 - Alineación entre tomas")
+        self.tabs.addTab(page(self._slots[1], content_layout=mv), "2 - TDOA")
+        self.tabs.addTab(page(self._slots[2], content_layout=body, extra_row=btn_row), "3 - Segmentación")
         root.addWidget(self.tabs, 1)
 
-    def set_notas_controls(self, widget):
-        """Recibe el panel armado por NativeRibbon.build_notas_panel() y lo embebe arriba de todo."""
-        # Alto fijo = el que pide el contenido (+ lugar para una barra horizontal si la ventana es angosta):
-        # sin scroll vertical, el resto del alto es para el editor F0.
-        widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        widget.setFixedHeight(widget.widget().sizeHint().height() + 22)
-        self._controls_slot.addWidget(widget)
+    def set_notas_controls(self, strips):
+        """Recibe las tres tiras de NativeRibbon.build_notas_panel() (tomas, TDOA, escala+detección),
+        una por solapa, arriba de cada gráfico."""
+        for slot, w in zip(self._slots, strips):
+            w.setFixedHeight(w.sizeHint().height())     # alto justo: el resto es para el gráfico
+            slot.addWidget(w)
 
     def _build_table_panel(self) -> QWidget:
         """Tabla de segmentos detectados, siempre visible al costado del gráfico temporal."""
@@ -424,7 +434,7 @@ class TabNotas(QWidget):
         self.sig_editor.set_align_params(onset, thresh, theta)
 
     def show_f0(self):
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentIndex(2)           # solapa 3 - Segmentación (editor F0 + tabla)
 
     def detect_notes(self, tol: float, purity: float, start_s: float,
                      grad: float, ref_theta):

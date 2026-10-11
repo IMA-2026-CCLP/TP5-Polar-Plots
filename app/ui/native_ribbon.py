@@ -717,7 +717,7 @@ class NativeRibbon(QWidget):
 
     # ── Panel de trabajo de notas: todo el flujo (alinear, escala, detectar) en la vista Notas,
     # no en Procesamiento — TabNotas lo embebe arriba de la tabla/editor F0.
-    def build_notas_panel(self) -> QScrollArea:
+    def build_notas_panel(self) -> tuple:
         b = self._b
         th = dict(enc=lambda v: str(v), dec=lambda d: d)
         self._c_preset = QComboBox()
@@ -779,28 +779,25 @@ class NativeRibbon(QWidget):
         # Fila 1: las 3 cajas chicas una al lado de la otra. Fila 2: Detectar notas, ancho completo.
         for g in (g_tomas, g_mics, g_scale, g_detect):
             g.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        inner = QWidget()
-        grid = QGridLayout(inner)
-        grid.setContentsMargins(6, 4, 6, 6)
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(6)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(2, 1)
-        grid.addWidget(g_tomas,  0, 0)
-        grid.addWidget(g_mics,   0, 1)
-        grid.addWidget(g_scale,  0, 2)
-        grid.addWidget(g_detect, 1, 0, 1, 3)
-        grid.setRowStretch(2, 1)
-
-        sc = QScrollArea()
-        sc.setWidgetResizable(True)
-        sc.setFrameShape(QFrame.Shape.NoFrame)
-        # A diferencia del dock de Parámetros (angosto, scroll horizontal prohibido), esta vista
-        # vive en el área central: casi siempre entra entero, pero si la ventana se achica mucho
-        # un scroll horizontal es preferible a recortar contenido sin forma de verlo.
-        sc.setWidget(inner)
-        return sc
+        def strip(*groups):
+            w = QWidget()
+            h = QHBoxLayout(w)
+            h.setContentsMargins(6, 4, 6, 4)
+            h.setSpacing(6)
+            for g in groups:
+                h.addWidget(g)
+            h.addStretch(1)
+            return w
+        # una tira por paso de Segmentación por notas: 1 tomas · 2 TDOA · 3 escala + detección
+        def stack(*rows):          # filas una debajo de la otra (la tira 3 no entra en una sola fila)
+            w = QWidget()
+            v = QVBoxLayout(w)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(0)
+            for r in rows:
+                v.addWidget(r)
+            return w
+        return (strip(g_tomas), strip(g_mics), stack(strip(g_scale), strip(g_detect)))
 
     # ── Ventana de Notas (filas horizontales) ─────────────────────────────
     def _panel_dir(self):
