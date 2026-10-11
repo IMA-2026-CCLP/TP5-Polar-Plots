@@ -240,6 +240,9 @@ class NativeRibbon(QWidget):
         b = self._btn.get(name)
         if b is None:
             return
+        if name == 'align_takes':
+            self._takes_aligned = True
+            self._btn['align_ref'].setEnabled(True)
         if b.property('tip0') is None:
             b.setProperty('tip0', b.toolTip())
         kind = 'QToolButton' if isinstance(b, QToolButton) else 'QPushButton'
@@ -248,6 +251,9 @@ class NativeRibbon(QWidget):
 
     def clear_done(self):
         """Vuelve todos los botones a su aspecto normal (p. ej. al cargar audio nuevo)."""
+        self._takes_aligned = False
+        if 'align_ref' in self._btn:
+            self._btn['align_ref'].setEnabled(False)
         for b in self._btn.values():
             tip0 = b.property('tip0')
             if tip0 is not None:
@@ -741,7 +747,7 @@ class NativeRibbon(QWidget):
                 ("Mic", self._c_align_th),
                 ("Umbral", self._num('gcc_thresh', 36, "Umbral GCC: nivel mínimo de la toma para GCC-PHAT. Vacío = sin filtro",
                                      nullable=True, placeholder="—")))),
-            (None, self._button("Alinear", "Alinea los micrófonos al de referencia con GCC-PHAT",
+            (None, self._button("Alinear", "Alinea los micrófonos al de referencia con GCC-PHAT. Se habilita después de Alinear entre tomas.",
                                 lambda: b.alignRef(), 'align_ref', enabled=False, min_width=0))])
         edit_scale_btn = self._tool('edit_scale', min_width=0)
         edit_scale_btn.setText("Editar")
@@ -872,8 +878,10 @@ class NativeRibbon(QWidget):
         self._fill(self._c_az, [("Todos", "Todos")] + az_items, 'az')
 
         is_spl = bool(getattr(ma, '_is_spl', False))
-        for n in ('hpf', 'align_takes', 'align_ref', 'detect'):
+        for n in ('hpf', 'align_takes', 'detect'):
             self._btn[n].setEnabled(True)
+        # GCC-PHAT sólo después de alinear las tomas por onset (si no, el desfase entre tomas lo falsea)
+        self._btn['align_ref'].setEnabled(bool(getattr(self, '_takes_aligned', False)))
         self._act['calibrar'].setEnabled(True)
 
         sr = getattr(ma, 'sr', 0) // 1000
