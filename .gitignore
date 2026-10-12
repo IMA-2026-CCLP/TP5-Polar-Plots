@@ -21,3 +21,6 @@ data/
 
 # Instalador generado (Inno Setup) — no subir al repo
 installer_output/
+
+# Instalador generado
+installer_output/
