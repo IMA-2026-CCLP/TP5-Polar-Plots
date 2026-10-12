@@ -875,13 +875,16 @@ class NativeRibbon(QWidget):
                 ("Rango (Hz)", self._pair(self._num('hz_min', 52, "Frecuencia mínima a mostrar (Hz)", disp),
                                           self._num('hz_max', 56, "Frecuencia máxima a mostrar (Hz)", disp))),
                 (None, self._dir_status)]),
+            ("Simetría", [                       # vale para todos los gráficos, no solo para Polar 2D
+                (None, self._combo('symmetry', 180,
+                                   "Espeja los datos medidos para completar el patrón. Se aplica a Polar 2D, Superficie 3D, "
+                                   "Esfera y Espectro.",
+                                   [("Ninguna", "none"), ("XZ (izq↔der)", "azimuth"),
+                                    ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp))]),
             ("Polar 2D", [
                 (None, self._row2(
                     ("Plano", self._c_plane),
-                    ("Elev.", self._c_el))),
-                ("Simet.", self._combo('symmetry', 140, "Simetría: espeja los datos medidos para completar el patrón",
-                                       [("Ninguna", "none"), ("XZ (izq↔der)", "azimuth"),
-                                        ("XY (sup↔inf)", "elevation"), ("XZ + XY", "both")], disp))]),
+                    ("Elev.", self._c_el)))]),
             ("Corte (Superficie 3D)", [
                 (None, self._row2(
                     ("Elevación (°)", self._num('cut3d_elevation', 52,
