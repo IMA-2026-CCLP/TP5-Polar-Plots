@@ -25,7 +25,11 @@ if not exist ".venv\Scripts\python.exe" (
 ".venv\Scripts\python.exe" -m pip install pyinstaller pyinstaller-hooks-contrib --quiet
 if errorlevel 1 goto :error
 
-for /f "delims=" %%v in ('".venv\Scripts\python.exe" -c "import sys; sys.path.insert(0,'app'); import version; print(version.__version__)"') do set APPVER=%%v
+for /f "delims=" %%v in ('.venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'app'); import version; print(version.__version__)"') do set APPVER=%%v
+if "%APPVER%"=="" (
+    echo No se pudo leer la version de appersion.py
+    goto :error
+)
 echo Version de la app: %APPVER%
 
 echo.
