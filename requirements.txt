@@ -1,6 +1,5 @@
 # Dependencias (pip install -r requirements.txt). Para compilar el .exe ademas: pip install pyinstaller
 PyQt6>=6.6
-PyQt6-WebEngine>=6.6
 numpy>=1.26
 scipy>=1.11
 pandas>=2.0

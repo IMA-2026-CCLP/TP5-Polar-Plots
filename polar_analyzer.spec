@@ -38,7 +38,16 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # Lo que la app no usa y pesaría de más en el instalador. WebEngine (navegador interno, ~320 MB) ya no se usa: los
+    # 4 gráficos son nativos. pandas / IPython / matplotlib / tkinter solo aparecen en métodos de cuaderno (Jupyter) de
+    # mic_array/patron.py que la interfaz nunca llama.
+    excludes=[
+        'PyQt6.QtWebEngineWidgets', 'PyQt6.QtWebEngineCore', 'PyQt6.QtWebEngineQuick', 'PyQt6.QtWebChannel',
+        'PyQt6.QtQuick', 'PyQt6.QtQuickWidgets', 'PyQt6.QtQml', 'PyQt6.QtPdf', 'PyQt6.QtPdfWidgets',
+        'PyQt6.QtBluetooth', 'PyQt6.QtNfc', 'PyQt6.QtSensors',
+        'PyQt6.QtSerialPort', 'PyQt6.QtDesigner', 'PyQt6.QtHelp', 'PyQt6.QtTest', 'PyQt6.QtSql',
+        'pandas', 'IPython', 'matplotlib', 'tkinter',
+    ],
     noarchive=False,
     cipher=block_cipher,
 )
