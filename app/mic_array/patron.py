@@ -68,6 +68,16 @@ class MicArray:
         self.spl_freqs  = None
         self.spl_levels = None
         self.spl_global = None
+        self._leq_cache = None   # (spl_levels, spl_global, freqs, bands) para apply_take_correction
+        # Desplazamientos acumulados (muestras, uno por giro) de la alineación, para guardarlos en la máscara
+        # y reaplicarlos sin recalcular: tomas por onset (todos los canales) y TDOA por GCC-PHAT (sólo los no-ref).
+        self.align_takes_shifts = None
+        self.align_ref_taus     = None
+        self.align_ref_theta    = 'ref'   # micrófono de referencia usado en el TDOA
+        # Canales reemplazados por su simétrico: {(giro_destino, mic_destino): (giro_fuente, mic_fuente)}.
+        # El TDOA no los usa para estimar el retardo y, tras alinear, se vuelven a copiar de su fuente ya alineada.
+        self._mirror_cells = {}
+        self._leq_global_cache = None   # (n_angles, n_thetas) dB banda ancha, para Aplicar
 
         # Directivity results (relative to ref mic per take), None until compute_directivity()
         self.dir_freqs  = None
@@ -199,6 +209,7 @@ class MicArray:
         data = np.zeros((len(azimuths), len(thetas), max_len), dtype=np.float32)
 
         print(f"\n  Building tensor {data.shape} ...")
+        file_map = {}   # (índice azimut, índice theta) -> ruta del WAV de esa toma (para la matriz de datos)
         wavs = sorted(path.glob("*.wav"))
         for k, f in enumerate(wavs):
             _progress(k, len(wavs))
@@ -210,6 +221,7 @@ class MicArray:
                 i_th = thetas.index(el)
                 sig, _ = sf.read(f)
                 data[i_az, i_th, :len(sig)] = sig
+                file_map[(i_az, i_th)] = str(f)
                 continue
             if ref_regex:
                 m = ref_regex.search(f.name)
@@ -218,13 +230,17 @@ class MicArray:
                     i_th = thetas.index('ref')
                     sig, _ = sf.read(f)
                     data[i_az, i_th, :len(sig)] = sig
+                    file_map[(i_az, i_th)] = str(f)
 
         for az in azimuths:
             print(f"    {az:>4}° → OK")
 
         print(f"\n  Done. Shape: {data.shape}  ({data.nbytes/1024/1024:.1f} MB)")
 
-        return cls(data, sr, angles=azimuths, thetas=thetas)
+        ma = cls(data, sr, angles=azimuths, thetas=thetas)
+        ma.source_dir = str(path)
+        ma.source_files = file_map
+        return ma
 
     @classmethod
     def from_export(cls, path, pattern='mic_{H}_{V}.wav'):
@@ -505,6 +521,59 @@ class MicArray:
     # Alignment / Processing methods
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _thr_offset_db(self) -> float:
+        """Los umbrales de onset y de TDOA se escriben en la misma escala que se ve en pantalla: dB SPL si el audio ya
+        está calibrado (señal en Pa) o dBFS si no. Internamente se comparan contra la señal tal como está (referencia 1),
+        así que con audio en Pa hay que restar la referencia de 20 µPa (≈ −94 dB)."""
+        return 20.0 * np.log10(20e-6) if getattr(self, '_is_spl', False) else 0.0
+
+    def _acc_shift(self, attr, values):
+        """Acumula desplazamientos (uno por giro) en self.<attr>."""
+        v = np.asarray(values, dtype=int)
+        cur = getattr(self, attr, None)
+        setattr(self, attr, v if cur is None else np.asarray(cur, dtype=int) + v)
+
+    def register_mirror(self, i_d, j_d, i_s, j_s):
+        """Anota que el canal (i_d, j_d) es copia del (i_s, j_s). Si la fuente ya era un reemplazo, sigue la cadena."""
+        src = self._mirror_cells.get((i_s, j_s), (i_s, j_s))
+        self._mirror_cells[(i_d, j_d)] = src
+        return src
+
+    def reapply_mirrors(self):
+        """Vuelve a copiar cada canal reemplazado desde su fuente (ya alineada)."""
+        for (i_d, j_d), (i_s, j_s) in self._mirror_cells.items():
+            self.tensor[i_d, j_d, :] = self.tensor[i_s, j_s, :]
+
+    def apply_alignment(self, takes_shifts=None, ref_taus=None, theta='ref'):
+        """Reaplica desplazamientos ya calculados (de una máscara guardada), sin detectar nada:
+        primero el de tomas (todos los canales de cada giro), después el TDOA (todos menos el ref)."""
+        if not self.tensor.flags['WRITEABLE']:
+            self.tensor = np.array(self.tensor, dtype=np.float32)
+        n = self.n_samples
+
+        def shift_rows(i_az, rows, k):
+            if k == 0:
+                return
+            tmp = np.zeros((len(rows), n), dtype=np.float32)
+            if k > 0:
+                tmp[:, k:] = self.tensor[i_az][rows, :n - k]
+            else:
+                tmp[:, :n + k] = self.tensor[i_az][rows, -k:]
+            self.tensor[i_az][rows] = tmp
+
+        all_ix   = list(range(self.n_thetas))
+        i_ref    = self._th_to_col(theta)
+        other_ix = [i for i in all_ix if i != i_ref]
+        if takes_shifts is not None:
+            for i_az, k in enumerate(takes_shifts):
+                shift_rows(i_az, all_ix, int(k))
+            self._acc_shift('align_takes_shifts', takes_shifts)
+        if ref_taus is not None:
+            for i_az, k in enumerate(ref_taus):
+                shift_rows(i_az, other_ix, int(k))
+            self._acc_shift('align_ref_taus', ref_taus)
+        self.reapply_mirrors()
+
     def align_takes(self, target_onset=1.0, theta='ref', threshold_dB=-40, window_ms=50):
         """
         Aligns all azimuth takes so their onset lands at target_onset seconds.
@@ -535,11 +604,13 @@ class MicArray:
         print(f"  Ref theta: {th_label}  |  threshold = {threshold_dB} dBFS"
               f"  |  window = {window_ms:.0f} ms\n")
 
+        shifts = [0] * self.n_angles
         for i_az in range(self.n_angles):
             _progress(i_az, self.n_angles)
             signal = self.tensor[i_az, i_th, :].astype(np.float64)
-            onset  = _detect_onset(signal, self.sr, window_ms=window_ms, threshold_dB=threshold_dB)
+            onset  = _detect_onset(signal, self.sr, window_ms=window_ms, threshold_dB=threshold_dB + self._thr_offset_db())
             shift  = target_samples - onset  # >0 → retrasa  |  <0 → adelanta
+            shifts[i_az] = int(shift)
 
             if shift != 0:
                 tmp = np.zeros((self.n_thetas, self.n_samples), dtype=np.float32)
@@ -553,6 +624,8 @@ class MicArray:
                   f"  ({onset / self.sr * 1000:.0f} ms)"
                   f"  shift = {shift:+d} smp  ({shift / self.sr * 1000:+.0f} ms)")
 
+        self._acc_shift('align_takes_shifts', shifts)
+        self.reapply_mirrors()
         print("\n  Take alignment done.")
 
     def align_to_ref(self, theta='ref', energy_threshold_dB=None):
@@ -582,15 +655,20 @@ class MicArray:
         thr_str = f"{energy_threshold_dB} dBFS" if energy_threshold_dB is not None else "desactivado"
         print(f"  Aligning {len(other_ix)} thetas to '{theta}'  |  umbral energía GCC: {thr_str}\n")
 
+        taus = [0] * self.n_angles
         for i_az in range(self.n_angles):
             _progress(i_az, self.n_angles)
             ref_sig = self.tensor[i_az, i_ref, :].astype(np.float64)
 
+            # los canales reemplazados por su simétrico no sirven para estimar este retardo (son de otra toma)
+            valid_ix = [i_e for i_e in other_ix if (i_az, i_e) not in self._mirror_cells] or other_ix
+            thr_eff = None if energy_threshold_dB is None else energy_threshold_dB + self._thr_offset_db()
             tdoas = [_gcc_phat(ref_sig, self.tensor[i_az, i_e, :].astype(np.float64),
-                               energy_threshold_dB=energy_threshold_dB)
-                     for i_e in other_ix]
+                               energy_threshold_dB=thr_eff)
+                     for i_e in valid_ix]
 
             tau = int(np.round(np.mean(tdoas)))
+            taus[i_az] = tau
 
             # shift all thetas by the same tau — ref stays untouched
             tmp = np.zeros((len(other_ix), self.n_samples), dtype=np.float32)
@@ -606,6 +684,9 @@ class MicArray:
                   f"  ({tau / self.sr * 1000:+.2f} ms)"
                   f"  std = {np.std(tdoas):.1f} smp")
 
+        self._acc_shift('align_ref_taus', taus)
+        self.align_ref_theta = theta
+        self.reapply_mirrors()
         print("\n  Alignment done.")
 
     def level_compensation(self, theta='ref', ref_azimuth=0):
@@ -652,6 +733,8 @@ class MicArray:
         self._is_normalized  = False
         self.leq_freqs  = self.leq_levels = self.leq_bands = self.leq_global = None
         self.spl_freqs  = self.spl_levels = self.spl_global = None
+        self._leq_cache = None
+        self._leq_global_cache = None
         print("\n  level_compensation done.")
 
     def hpf(self, cutoff_hz):
@@ -818,54 +901,6 @@ class MicArray:
 
             segmentos.append(segs)
 
-        # ── Build styled DataFrame ────────────────────────────────────────────
-        import pandas as pd
-        from IPython.display import display
-
-        az_labels = [f"{a}°" for a in self.angles]
-        dur_data  = {}
-        pur_data  = {}
-        for note in note_names:
-            dur_col = []
-            pur_col = []
-            for i_az, segs in enumerate(segmentos):
-                if note in segs:
-                    dur = (segs[note]['end'] - segs[note]['start']) / self.sr
-                    pur = segs[note]['purity']
-                    dur_col.append(f"{dur:.2f}s")
-                    pur_col.append(pur)
-                else:
-                    dur_col.append("--")
-                    pur_col.append(None)
-            dur_data[note] = dur_col
-            pur_data[note] = pur_col
-
-        df_dur = pd.DataFrame(dur_data, index=az_labels)
-        df_pur = pd.DataFrame(pur_data, index=az_labels)
-
-        def _color(val, pur):
-            if pur is None:
-                return 'background-color: #e0e0e0; color: #888'
-            if pur >= 0.9:
-                return 'background-color: #c6efce; color: #276221'
-            if pur >= min_purity:
-                return 'background-color: #ffeb9c; color: #9c5700'
-            return 'background-color: #ffc7ce; color: #9c0006'
-
-        def _style(row):
-            note = row.name if hasattr(row, 'name') else None
-            return [_color(row[n], df_pur.loc[row.name, n])
-                    if hasattr(row, 'name') else '' for n in note_names]
-
-        styled = df_dur.style.apply(
-            lambda row: [_color(row[n], df_pur.loc[row.name, n]) for n in note_names],
-            axis=1
-        ).set_caption(
-            f"Detección de notas  |  tolerance={tolerance_cents}¢  "
-            f"min_purity={min_purity*100:.0f}%  "
-            f"(🟢 ≥90%  🟡 ≥{min_purity*100:.0f}%  ⬜ rechazado)"
-        )
-        display(styled)
         return segmentos
 
     def edit_segment(self, segments, azimuth, note, start_s, end_s):
@@ -1192,8 +1227,42 @@ class MicArray:
 
         print(f"\n  compute_spl done — {bands} octava  |  shape {levels.shape}")
 
+    def compute_leq_bands(self, bands='1/3'):
+        """Paso 1: Leq por posición y banda (tercios u octavas). Guarda self._leq_cache =
+        (spl_levels, spl_global, freqs, bands). Lo usa apply_take_correction."""
+        from filterbank import FilterBank
+
+        P_REF   = 20e-6 if self._is_spl else 1.0
+        fb      = FilterBank(sr=self.sr, bands=bands)
+        n_bands = len(fb.center_freqs_nominal)
+
+        spl_levels = np.zeros((self.n_angles, self.n_thetas, n_bands), dtype=np.float32)
+        spl_global = np.zeros((self.n_angles, self.n_thetas),          dtype=np.float32)
+
+        total = self.n_angles * self.n_thetas
+        done  = 0
+
+        # Step 1 — compute SPL for all positions
+        for i_az in range(self.n_angles):
+            for i_th in range(self.n_thetas):
+                signal = self.tensor[i_az, i_th, :].astype(np.float64)
+
+                if len(signal) >= 2:
+                    rms = np.sqrt(np.mean(signal ** 2))
+                    spl_global[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
+                    _, band_levels = fb.leq(signal, p_ref=P_REF, method='fft')
+                    spl_levels[i_az, i_th, :] = band_levels
+
+                done += 1
+                _progress(done, total)
+                print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
+                      f"  el={self.thetas[i_th]}", end='')
+
+        # Step 2–3 — corrección por toma y normalización (ver apply_take_correction)
+        self._leq_cache = (spl_levels, spl_global, np.array(fb.center_freqs_nominal, dtype=float), bands)
+
     def compute_directivity(self, bands='1/3',
-                            ref_theta='ref', ref_azimuth=0, ref_theta_plot=0):
+                            ref_theta='ref', ref_azimuth=0, ref_theta_plot=0, take_correction=True):
         """
         Computes the directivity pattern in 1/3-octave bands.
 
@@ -1231,32 +1300,80 @@ class MicArray:
         # Sin calibrar (tensor en unidades de fondo de escala) se calcula igual, con niveles en dBFS
         # (P_REF = 1). El patrón es relativo, pero no corrige las diferencias de sensibilidad
         # entre micrófonos: la GUI avisa al usuario (ver MainWindow._confirm_uncalibrated).
-        from filterbank import FilterBank
+        self.compute_leq_bands(bands)
+        spl_levels, spl_global, freqs, bands = self._leq_cache
+        self.apply_take_correction(ref_theta=ref_theta, ref_azimuth=ref_azimuth, ref_theta_plot=ref_theta_plot,
+                                   correct=take_correction)
 
-        P_REF   = 20e-6 if self._is_spl else 1.0
-        fb      = FilterBank(sr=self.sr, bands=bands)
-        n_bands = len(fb.center_freqs_nominal)
+    def apply_take_correction_bands(self, ref_theta='ref', ref_azimuth=0):
+        """Corrección por toma banda por banda (Aplicar):
+        Delta[giro, f] = Leq(base, ref, f) − Leq(giro, ref, f); Leq_corr = Leq + Delta.
+        Guarda self.leq_corr (n_angles, n_thetas, n_bands) dB SPL, self.dir_delta (n_angles, n_bands)
+        y dir_delta_global (banda ancha, para dB vs tiempo). No normaliza."""
+        if self._leq_cache is None:
+            self.compute_leq_bands('1/3')
+        spl_levels, spl_global, freqs, bands = self._leq_cache
+        i_ref  = self._th_to_col(ref_theta)
+        i_base = self._az_to_row(ref_azimuth)
+        delta        = spl_levels[i_base, i_ref, :] - spl_levels[:, i_ref, :]
+        delta_global = spl_global[i_base, i_ref] - spl_global[:, i_ref]
+        self.leq_corr        = spl_levels + delta[:, np.newaxis, :]
+        # Posiciones reemplazadas por espejo: el dato vino de otra toma, así que se corrige con la
+        # diferencia de esa toma (no la del giro destino).
+        for (i_d, j_d), i_s in (getattr(self, '_mirror_src', None) or {}).items():
+            self.leq_corr[i_d, j_d, :] = spl_levels[i_d, j_d, :] + delta[i_s, :]
+        self.leq_onaxis      = None
+        self.dir_delta       = delta
+        self.dir_delta_global = delta_global
+        self.dir_freqs       = np.array(freqs, dtype=float)
+        return self.leq_corr
 
-        spl_levels = np.zeros((self.n_angles, self.n_thetas, n_bands), dtype=np.float32)
-        spl_global = np.zeros((self.n_angles, self.n_thetas),          dtype=np.float32)
-
-        total = self.n_angles * self.n_thetas
-        done  = 0
-
-        # Step 1 — compute SPL for all positions
+    def compute_leq_broadband(self):
+        """Leq de banda ancha de cada grabación (energía de toda la toma, sin bandas ni filtros).
+        Guarda self._leq_global_cache = (n_angles, n_thetas) dB. Lo usa Aplicar (corrección por toma)."""
+        P_REF = 20e-6 if self._is_spl else 1.0
+        spl = np.full((self.n_angles, self.n_thetas), np.nan, dtype=np.float64)
         for i_az in range(self.n_angles):
             for i_th in range(self.n_thetas):
-                signal = self.tensor[i_az, i_th, :].astype(np.float64)
+                x = self.tensor[i_az, i_th, :].astype(np.float64)
+                if len(x) >= 2:
+                    spl[i_az, i_th] = 20 * np.log10(np.sqrt(np.mean(x ** 2)) / P_REF + 1e-12)
+        self._leq_global_cache = spl
+        return spl
 
-                if len(signal) >= 2:
-                    rms = np.sqrt(np.mean(signal ** 2))
-                    spl_global[i_az, i_th] = 20 * np.log10(rms / P_REF + 1e-12)
-                    _, band_levels = fb.leq(signal, p_ref=P_REF, method='fft')
-                    spl_levels[i_az, i_th, :] = band_levels
+    def normalize_onaxis(self):
+        """Paso 3: nivela cada banda al on-axis (giro 0°, θ 0°) sobre la grilla corregida por toma.
+        dir[giro, θ, f] = leq_corr[giro, θ, f] − leq_corr[0°, 0°, f]. Guarda self.leq_onaxis (dB rel.)."""
+        if getattr(self, 'leq_corr', None) is None:
+            raise RuntimeError("Primero Aplicar la corrección por toma")
+        i_on_az = self._az_to_row(0)
+        i_on_th = self._th_to_col(0)
+        self.leq_onaxis = self.leq_corr - self.leq_corr[i_on_az, i_on_th, :][np.newaxis, np.newaxis, :]
+        return self.leq_onaxis
 
-                done += 1
-                print(f"\r  {done}/{total}  az={self.angles[i_az]}°"
-                      f"  el={self.thetas[i_th]}", end='')
+    def apply_take_correction_broadband(self, ref_theta='ref', ref_azimuth=0):
+        """Corrección por toma en banda ancha: Delta_az = Leq(base, ref) − Leq(az, ref).
+        Guarda dir_delta_global (n_angles,) dB. No normaliza ni toca la matriz por banda."""
+        if getattr(self, '_leq_global_cache', None) is None:
+            self.compute_leq_broadband()
+        spl = self._leq_global_cache
+        i_ref = self._th_to_col(ref_theta)
+        i_base = self._az_to_row(ref_azimuth)
+        self.dir_delta_global = spl[i_base, i_ref] - spl[:, i_ref]
+        self.dir_leq_corr_global = spl + self.dir_delta_global[:, np.newaxis]
+        for (i_d, j_d), i_s in (getattr(self, '_mirror_src', None) or {}).items():
+            self.dir_leq_corr_global[i_d, j_d] = spl[i_d, j_d] + self.dir_delta_global[i_s]
+        return self.dir_delta_global
+
+    def apply_take_correction(self, ref_theta='ref', ref_azimuth=0, ref_theta_plot=0, correct=True):
+        """
+        Corrección por toma (paso 2) y normalización (paso 3) sobre el Leq ya calculado por
+        compute_directivity(). No relee los audios: sirve para cambiar el micrófono de
+        referencia o la toma base y ver el resultado al instante (botón Aplicar).
+        """
+        if self._leq_cache is None:
+            raise RuntimeError("Primero compute_directivity()")
+        spl_levels, spl_global, freqs, bands = self._leq_cache
 
         # Step 2 — per-take emission correction
         # delta[az, f] = SPL(az=0, ref, f) - SPL(az, ref, f)
@@ -1265,6 +1382,9 @@ class MicArray:
 
         delta        = spl_levels[i_ref_az, i_ref, :] - spl_levels[:, i_ref, :]  # (n_angles, n_bands)
         delta_global = spl_global[i_ref_az, i_ref]    - spl_global[:, i_ref]     # (n_angles,)
+        if not correct:   # Calcular: sin corrección por toma (la aplica Aplicar, sobre la matriz)
+            delta        = np.zeros_like(delta)
+            delta_global = np.zeros_like(delta_global)
 
         spl_corr        = spl_levels + delta[:, np.newaxis, :]      # (n_angles, n_thetas, n_bands)
         spl_corr_global = spl_global + delta_global[:, np.newaxis]  # (n_angles, n_thetas)
@@ -1277,14 +1397,15 @@ class MicArray:
         dir_levels = spl_corr        - spl_corr[i_ref_az, i_ref_th, :]
         dir_global = spl_corr_global - float(spl_corr_global[i_ref_az, i_ref_th])
 
-        self.dir_freqs  = np.array(fb.center_freqs_nominal, dtype=float)
+        self.dir_freqs  = np.array(freqs, dtype=float)
         self.dir_levels = dir_levels
         self.dir_global = dir_global
         self.dir_delta  = delta
+        self.dir_delta_global = delta_global   # (n_angles,) dB, broadband: para dB vs tiempo
         self._is_normalized = True
 
         th_plot_label = 'ref' if ref_theta_plot == 'ref' else f'{ref_theta_plot}°'
-        print(f"\n  compute_directivity done — {bands} octava  |  shape {dir_levels.shape}"
+        print(f"\n  corrección por toma — {bands} octava  |  shape {dir_levels.shape}"
               f"  |  ref_mic='{ref_theta}'  |  ref_plot=({ref_azimuth}°, {th_plot_label})")
 
     def plot_leq_global(self, theta='ref', yrange=None, title=None):

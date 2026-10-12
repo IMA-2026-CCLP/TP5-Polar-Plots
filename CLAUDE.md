@@ -4,76 +4,73 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A PyQt6 desktop app ("Polar Pattern CCLP" / Polar Pattern Analyzer) for measuring and visualizing the polar directivity pattern of a singing voice, recorded with a 19-microphone semicircular array in an anechoic chamber (see `PIPELINE.md` for the full experimental methodology and signal-processing rationale).
+A PyQt6 desktop app ("Polar Pattern CCLP") for measuring and visualizing the polar directivity pattern of a singing voice, recorded with a 19-microphone semicircular array in an anechoic chamber (see `PIPELINE.md` and `PROCESAMIENTO_Y_FISICA.md` for the experimental methodology and signal-processing rationale). The meaning of "CCLP" is deliberately left unexplained — do not invent one.
 
 ## Commands
 
-Run the app (from repo root or from `app/`, both work):
 ```bash
-python app/main.py
-# or
-cd app && python main.py
+python app/main.py                 # run (from repo root or from app/)
+pip install -r requirements.txt    # dependencies
+construir_instalador.bat           # builds the .exe (PyInstaller) AND the Windows installer (Inno Setup, installed via winget if missing)
+build_installer.bat                # only the installer, from an existing dist\PolarPatternAnalyzer\
 ```
 
-Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+Output of the full build: `installer_output/PolarPatternCCLP-Setup-<version>.exe` (per-user install, no admin, Start-menu entry, uninstaller). The version comes from `app/version.py` (single source: window title, About box, installer). Keep `.bat` files ASCII with CRLF line endings, otherwise `cmd` misparses them. `build/` and `dist/` are generated (and git-ignored); never delete them while a build may be running.
 
-Build the Windows `.exe`:
-```bash
-build_exe.bat
-```
-This wraps `pyinstaller polar_analyzer.spec --noconfirm`. `build_exe.bat` manually `rmdir /s /q build dist` before invoking PyInstaller. If a build fails with a file-in-use error on `build/`, just delete `build/` and `dist/` and rerun.
-
-Build the Windows installer (after `build_exe.bat`; needs Inno Setup 6, `winget install JRSoftware.InnoSetup`):
-```bash
-build_installer.bat
-```
-This compiles `installer.iss` into `installer_output/PolarPatternCCLP-Setup-<version>.exe` (per-user install by default, Start-menu entry, uninstaller in Windows Apps). The version comes from `app/version.py`. Keep `.bat` files ASCII with CRLF line endings, otherwise `cmd` misparses them.
-
-There is no test suite, linter, or type checker configured in this repo.
+There is no test suite, linter, or type checker. Verify UI work by building the real `MainWindow` with `QT_QPA_PLATFORM=offscreen` and a synthetic `MicArray`, and measure geometries instead of guessing.
 
 ## Architecture
 
 ### Entry point and import layout
 
-`app/main.py` inserts `app/` itself onto `sys.path`, so all internal imports are rooted at `app/` (e.g. `from ui.main_window import MainWindow`, `from mic_array.patron import MicArray`), not `from app...`. `polar_analyzer.spec` mirrors this with `pathex=['app']`. Keep this in mind when adding new modules — imports inside `app/` are always relative to `app/`, never to the repo root.
+`app/main.py` puts `app/` on `sys.path`, so all internal imports are rooted at `app/` (`from ui.main_window import MainWindow`, `from mic_array.patron import MicArray`), never `from app...`. `polar_analyzer.spec` mirrors this with `pathex=['app']`. Qt WebEngine is **no longer used anywhere**: all four plots are native (`ui/balloon_view.py` and the Plotly HTML builders in `plot/balloon.py` are dead code). Do not reintroduce it — it added >300 MB to the installer. `main.py` still sets `AA_ShareOpenGLContexts` before creating the `QApplication` (needed by the pyqtgraph.opengl views).
 
-`QWebEngineView` **must** be imported before the `QApplication` is constructed (see the comment in `main.py`) — this is a hard Qt requirement, not a style choice.
+### UI shell
 
-### UI shell: native menu + tabs + parameter rows (VituixCAD-style)
+Two tabs (`Procesamiento`, `Directividad`) under one global top bar, `NativeRibbon` (`ui/native_ribbon.py`: a `QMenuBar` + a `QTabBar`). `MainWindow` (`ui/main_window.py`) hosts a `QStackedWidget` with `TabPreprocesamiento` and `TabDirectividad`, a movable left dock "Parámetros" (a stacked page per tab) with the **Log** dock stacked below it (visible by default), and the status bar (one busy/progress indicator fed by `core.worker.activity`).
 
-`MainWindow` hosts a `QStackedWidget` of four tab views (Preprocesamiento → Directividad, in `ui/tab_*.py`; Preprocesamiento is the home tab. Notas is not a tab: `TabNotas` plus the ribbon's `notas_page` (Escala/Detección rows) live in a non-modal `_NotasWindow` opened from Herramientas ▸ Detección de notas… Loading audio/sessions lives in the Archivo menu via `ui/file_loader.py`, not a tab; file-name patterns are set in a modal and kept in `QSettings`) under a single global top bar, `NativeRibbon` (`ui/native_ribbon.py`, installed with `setMenuWidget`): a `QMenuBar` and a `QTabBar`. Each tab's parameters live in a scrollable side panel (`proc_panel` / `dir_panel`, grouped by what is edited) hosted in one movable `QDockWidget` ("Parámetros", left by default) whose stacked page follows the active tab; all plain Qt widgets styled sober/flat by `ui/styles.py` + `ui/theme.py`. (It replaced an HTML/JS ribbon in a `QWebEngineView`; `QWebEngineView` is still needed for the Plotly `BalloonView`s.) `Bridge` (`ui/bridge.py`) is no longer a WebChannel object — it just holds `state` (a plain dict with the current value of every control) and the slots that build each signal's arguments from it. Widgets write `Bridge.state` directly and call those slots; `NativeRibbon` re-exposes the resulting signals for `MainWindow` to connect. Menu items and toolbar buttons share `QAction`s so enabled state stays in sync. Long operations run in `core.worker.Worker` threads; set `worker.label` before `start()` and the status bar shows a busy `QProgressBar` with that text (via `core.worker.activity`). The Directividad tab shows its 4 plots in a fixed 2×2 grid (never hidden); right-click ▸ "Ver en grande" (`toggle_zoom`) expands one to the whole area. The Ver menu is rebuilt per tab (`NativeRibbon._rebuild_ver`).
+Menus: **Archivo** (Cargar audio…, Patrones de archivos…, Cargar / Guardar / Guardar como sesión, Exportar), **Ver**, **Herramientas** (Segmentación por notas…, Guardar/Cargar máscara), **Opciones** (graphs, images, palette), **Ayuda**.
 
-When changing default UI state (e.g. which panels are visible by default), the value lives in `Bridge.state`'s initial dict (widgets read their initial value from it via `_loaders`), plus any fallback default read via `.get(key, default)` downstream. `Bridge.state`'s initial value is overridden once a `.cclp` session is loaded, since `MainWindow._load_polar_npz_file(full_ui=True)` does `self.ribbon.apply_ui_state(view['session_ui'])`, which updates `Bridge.state` and re-syncs every widget from it.
+`Bridge` (`ui/bridge.py`) only holds `state`, a plain dict with the value of every control, plus the slots that turn it into signals. Widgets write `Bridge.state` directly. Default UI values live in `Bridge.state`'s initial dict (controls read them through `_loaders`). `Bridge.state` is overridden when a session is loaded (`apply_ui_state`).
+
+Long operations run in `core.worker.Worker` threads (set `worker.label` before `start()`). `mic_array` functions report progress through `patron.progress_callback`; when several things are computed in a row use `tab_directividad.compute_bands_all()` so there is ONE 0–100 % bar for the whole job.
+
+**Procesamiento**: the center shows a view selector — **Matriz radial** (default; `ui/matrix_dialog.py`, ring × sector grid with cell replacement by mirror, **Corregir ganancia**, color scale), dB, Envolvente or Amplitud (`WaveformEditorWidget`). With the matrix, the "Vista" selector moves into the matrix row next to "Muestra" and "Frecuencia". **Muestra** (Toda la muestra / each extracted note) is mirrored in the Directividad panel through `state['nota']`. The left panel has: Señal (θ/azimut, only for signal views), Filtro y calibración (HPF, Calibración, Filtrar 1/3 oct in a wrapping `FlowLayout`), Nivelación (**Por toma**, **On Axis**), Interpolación, Suavizado. Buttons that finished are tinted light blue and their tooltip says "Ya aplicado" (`NativeRibbon.mark_done` / `clear_done`, cleared when new audio is loaded).
+
+**Segmentación por notas** (Herramientas ▸ Segmentación por notas…): a non-modal dialog (`TabNotas`) with three steps as tabs — *1 - Alineación entre tomas* (onset; dB view of the reference mic, all takes, draggable cursor), *2 - TDOA* (GCC-PHAT between the reference and the array; one azimuth at a time; replaced channels drawn dashed), *3 - Segmentación* (scale, detection, F0 editor + segments table, Extraer notas). The GCC-PHAT button stays disabled until the takes were aligned. Before opening it asks about a saved mask (`MainWindow._ask_mask`). Extracting notes computes the 1/3-octave bands of every note and the full sample in the same worker (one progress bar) and the notes inherit the full sample's Por toma / On Axis (`TabDirectividad.inherit_note_corrections`).
 
 ### Domain model: `MicArray`
 
-`mic_array/patron.py` defines `MicArray`, the single class the whole pipeline revolves around. It wraps a `(n_azimuth, n_theta, n_samples)` tensor plus metadata (sample rate, angles, calibration) and carries the *entire* processing pipeline as instance methods: `from_audio`/`from_tensor` (load), `hpf`, `align_takes`, `align_to_ref` (temporal alignment via onset detection + GCC-PHAT), `calibrate`/`to_spl` (SPL calibration), `detect_notes`/`extract_all_notes` (pYIN-based note segmentation, producing `self.notes: dict[str, MicArray]`), `compute_leq`/`compute_directivity` (1/3-octave analysis via `filterbank/filterbank.py`). It also carries a large set of legacy `plot_*`/`plot_*_html` methods (matplotlib/plotly-string based) from the original notebook-driven workflow — the GUI's directivity tab does **not** call these; it re-renders from the raw arrays instead (see below).
+`mic_array/patron.py`: wraps a `(n_azimuth, n_theta, n_samples)` tensor plus metadata and carries the whole pipeline (`from_audio`, `hpf`, `align_takes`, `align_to_ref`, `calibrate`/`to_spl`, `detect_notes`/`extract_all_notes`, `compute_leq_bands`, `apply_take_correction_bands`, `normalize_onaxis`). Many legacy `plot_*` methods remain for notebooks; the GUI never calls them. Things to remember:
 
-Tabs pass a shared `MicArray` instance up the chain via `ma_ready`/`ma_updated` signals; `MainWindow._on_ma_ready` is the hub that re-propagates it to every other tab via `set_ma()`. Each tab that mutates `ma` (preprocessing, calibration, note extraction) is expected to emit the (possibly same, possibly copied) instance back out.
+- **Thresholds are in the scale shown on screen**: dB SPL when the audio is calibrated (tensor in Pa), dBFS otherwise (`_thr_offset_db`). When the audio becomes SPL the UI shifts the onset/TDOA thresholds by the reference mic's calibration.
+- **Alignment is recorded** (`align_takes_shifts`, `align_ref_taus`, `align_ref_theta`, accumulated per azimuth) so a mask can replay it without recomputing (`apply_alignment`).
+- **Mirror replacements** (matrix) are registered in `_mirror_cells` {(az, mic): (src_az, src_mic)} and `_mirror_src`. They are applied to the leq grid *and* to the audio, the per-take correction uses the source take's delta, GCC-PHAT excludes replaced channels from its average, and `reapply_mirrors()` re-copies them from the (already aligned) source after every alignment. Ctrl+Z undoes them.
+- **Corregir ganancia** rewrites the WAVs in the audio folder after copying the originals to `Originales_respaldo/` (only if not already there), applies the same gain to memory and to the computed levels, and is undoable with Ctrl+Z (the undo stack stores the previous file bytes).
 
-### Directivity visualization (the most actively developed part)
+### Directivity visualization
 
-`ui/tab_directividad.py` + `ui/balloon_view.py` + `plot/balloon.py` implement four simultaneous, independently-configurable Plotly views — Superficie 3D, Esfera, Polar 2D, Espectro — each a `BalloonView` (`QWebEngineView`) docked in a nested `QMainWindow` grid inside `TabDirectividad`. Key points:
+`ui/tab_directividad.py` has four views in a fixed 2×2 grid, each a `_ViewSection`: Superficie 3D and Esfera (`ui/gl3d_view.py`, pyqtgraph.opengl, `GL3DView`), Polar 2D (`ui/polar2d_view.py`), Espectro (`ui/spectrum_view.py`). All share the same API subset so they are polymorphic (`_VIEW_CLASS_BY_MODE`). Notes:
 
-- plotly.js 2.32.0 is vendored in `app/plot/vendor/` and loaded by relative `<script src>` with that folder as the `setHtml` base URL (`PLOTLY_DIR`), so the 3D/Esfera views work **offline** (it used to come from the CDN). `polar_analyzer.spec` bundles the folder. Don't swap it for the pip `plotly` bundle without checking: that one ships plotly.js 3.x, which drops some attributes this code uses (e.g. `titlefont`).
-- `plot/balloon.py` has one `build_*_html()` function per view type; each takes the raw `levels`/`azimuths`/`elevations`/`bands` arrays plus a free-form `style: dict` (colors, font sizes, smoothing, interpolation — whatever the "Propiedades" panel exposes) and returns either a full HTML document or a JS snippet.
-- Re-renders after the first load use `Plotly.react()` in place (`update_only=True` in `_wrap_html`) rather than reloading the page, so camera angle/zoom/pan survive band changes, style edits, etc. `uirevision` in each layout must stay stable across renders for this to work.
-- Per-panel "Propiedades" (right-click ▸ Propiedades…) is a modal `QDialog` built on demand by `TabDirectividad._show_properties_panel` from `_ViewSection.build_properties_widget()`. Edits apply live (debounced 400 ms, no Apply button), the dialog has "Restaurar por defecto" (`_ViewSection.restore_defaults`, using `_DEFAULT_*` in `tab_directividad.py`), and Ctrl+Z undoes the last editing session. Font sizes are literal pixel values (`FONT_SIZE` in `plot/balloon.py`) with **no** automatic rescaling on panel resize — an earlier attempt at proportional auto-scaling was removed because it made exported images diverge from what was on screen.
-- Image export (all four views, `export_image`) re-renders each plot — never a screenshot — at a FIXED PHYSICAL SIZE in cm (default 16×10 cm; Opciones ▸ Gráficos ▸ Imágenes, stored in `QSettings` via `ui/export_utils.py`): pixels = cm/2.54 × DPI, so changing the DPI only changes quality, not size. The DPI is written into the PNG metadata. Plotly views (3D/Esfera) call `Plotly.toImage()` with explicit `width`/`height` (the logical canvas at 96 dpi; without them Plotly falls back to 700×450) and `scale = DPI/96`, raise `plotGlPixelRatio` so the WebGL mesh is sharp, and retry once before falling back to `QWebEngineView.grab()`; the result is read back over a chunked `console.log` relay (`EXPORTIMG:<id>:<i>:<n>:<chunk>`) captured by `_SilentPage.javaScriptConsoleMessage`, because `runJavaScript()` does not reliably resolve a Promise here. The pyqtgraph views (Polar 2D/Espectro) are cloned off-screen at the canvas size (`export_pg_view`) and exported with `ImageExporter`; SVG is only offered for Polar 2D (own `QSvgGenerator` writer — pyqtgraph's `SVGExporter` crashes on this Qt, and the Espectro SVG doesn't clip its bars).
-- Right-click context menus on the 3D/Sphere WebGL canvases can't rely on Qt's native `customContextMenuRequested` (Plotly's orbit-camera controls swallow the browser's own `contextmenu` event) — they're relayed through the same console-log channel (`CONTEXTMENU:x,y`).
+- **Symmetry** (`core/symmetry_utils.apply_symmetry`, panel group "Simetría") applies to every view: left↔right maps cell (θ, giro) to (180°−θ, 180°−giro) keeping the θ ≤ 90° side; up↔down adds negative elevations as the mirror of the positive ones (only visible in the vertical-plane Polar 2D, the 3D views show the upper hemisphere only).
+- **Color scales** (matrix, Superficie 3D, Esfera) label the *borders* between color steps, always without decimals. Propiedades ▸ Escala has "Escala automática" (color and balloon range follow the band's min/max; 3D starts automatic, Esfera with −16…4) and "Paso de la escala (dB)" (default 1). 3D starts without the hemisphere grid.
+- Image export re-renders at a fixed physical size in cm (Opciones ▸ Gráficos ▸ Imágenes), never a screenshot. Right-click uses a plain Qt `eventFilter`.
+- `plot/balloon.py` still holds the shared math (`_build_hemisphere_grid`, `compute_polar2d_ring`, palettes); `plotly` is only used for its color scales.
 
-### Musical scales
+### Persistence
 
-`core/scales.py` holds the scale library: built-in scales generated in equal temperament (Mayores, Menores naturales/armónicas, Pentatónicas, Cromática) plus a per-user JSON base (`%APPDATA%/PolarPatternCCLP/scales.json`) with its own categories. Scale names are unique across both. `ui/scale_dialog.py` (`ScaleEditorDialog`, opened from the Notas window) picks a scale, edits its notes and saves/deletes/imports/exports user scales; `fill_scale_combo` builds the category-grouped combo also used by the ribbon's preset selector.
+One session format, **`.cclp`** (`core/session.py` → `core/data_store.py`): an NPZ with the processed grid (full sample and each note, `_save_from_grids`), the reference spectra for the Espectro view, the mask (segments + alignment) in `metadata['view']['mask']`, the plot config and the whole `Bridge.state`. It always saves *what is on screen* (not stale results of an old Calcular). It does **not** save audio: the user is warned on save and on load, and to reprocess must load the WAVs again. Old `.gcclp` (grid) and `.msk` (mask) files can still be opened (Cargar session / Cargar máscara). Guardar/Guardar como are enabled as soon as audio is loaded. `save_results()` opens the file handle itself so numpy does not append `.npz`.
 
-### Persistence formats
-
-Two distinct on-disk formats, both NPZ under the hood:
-There is only one persistence format exposed in the GUI menu: **`.cclp`** (`core/session.py`, thin wrapper over `core/data_store.py`'s `save_results`/`load_results`, whose NPZ schema is documented at the top of that file). It's a lightweight session — computed directivity (global and per note), plot config, and `metadata['view']['session_ui']` (the *entire* `Bridge.state`, not just the Directividad controls, so reopening one restores every tab's controls exactly as they were) — with **no audio**. Since there's no raw tensor, a loaded `.cclp` cannot be reprocessed (no re-align/calibrate/re-detect-notes/recompute-with-other-bands); it's read-only for the 4 plots (`MainWindow._load_polar_npz_file`/`_save_polar_npz_file` repopulate the four plots, the note selector and the controls **without audio or a `MicArray`** — `TabDirectividad._npz` serves per-note data). To reprocess, reload the original WAV files. There is no "save raw audio tensor" feature in the GUI (deliberately removed). `save_results()` will use the first computed note as the "global" section if the user never computed directivity on "Todo el audio", so the file is always loadable even when only per-note directivity exists. `save_results()` opens the file handle itself before calling `np.savez_compressed` — passing a bare path string makes numpy silently force a `.npz` suffix (so a `.cclp` would get written as `foo.cclp.npz`). Note segmentation masks are separate: `.msk` JSON files via `TabNotas.save_mask`/`load_mask` (Herramientas ▸ Guardar/Cargar máscara…).
+`core/scales.py` holds the musical scale library (built-in + per-user JSON in `%APPDATA%/PolarPatternCCLP/scales.json`); `ui/scale_dialog.py` edits it.
 
 ### Packaging
 
-`polar_analyzer.spec` bundles `librosa`, `pyqtgraph`, `numba`, and `soundfile` via `collect_all()` in a try/except loop (these have import-time dynamic behavior PyInstaller's static analysis misses on its own). Icons and fonts are added as explicit `datas`. Output is a onedir build (`dist/PolarPatternAnalyzer/`, `_internal/` subfolder + `.exe`) — when sharing the built app, the whole folder must be zipped, not just the `.exe` (it will fail with a missing-DLL error otherwise since the internal Qt/Python DLLs live in `_internal/`).
+`polar_analyzer.spec` bundles librosa, pyqtgraph, numba and soundfile with `collect_all()` and explicitly **excludes** WebEngine/Quick/Qml/Pdf and pandas/IPython/matplotlib/tkinter (only notebook-only methods use them). `QtMultimedia` is needed (take playback) — do not exclude it. Output is a onedir build; the installer compresses `dist/PolarPatternAnalyzer/`.
+
+## UI rules learned the hard way
+
+- **Never use `QSpinBox`/`QDoubleSpinBox`** (explicit user instruction): use `_NumEdit` (plain text) or a `QComboBox`.
+- Never assume a layout width: measure `minimumSizeHint()` and the real `geometry()` offscreen. `QComboBox.minimumSizeHint()` ignores `setFixedWidth()`. A `QGridLayout` does not wrap rows by itself — use `ui.widgets.FlowLayout` when controls must wrap.
+- The left dock must never get a horizontal scrollbar; make the dock wider instead (`setMinimumWidth` survives, `resizeDocks` alone does not).
+- Do not stretch action buttons to the full row width unless asked.
+- Reply to the user in plain Spanish, without code, and ask before doing anything expensive.

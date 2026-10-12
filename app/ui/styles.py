@@ -192,27 +192,29 @@ QProgressBar::chunk {{
 /* ══════ SCROLL ══════ */
 QScrollBar:vertical {{
     background: {p['bg_dark']};
-    width: 8px;
-    border-radius: 4px;
+    width: 12px;
+    border-radius: 6px;
 }}
 QScrollBar::handle:vertical {{
-    background: {p['border']};
-    border-radius: 4px;
+    background: {p['scroll_handle']};
+    border-radius: 5px;
     min-height: 30px;
 }}
-QScrollBar::handle:vertical:hover {{ background: {p['border2']}; }}
+QScrollBar::handle:vertical:hover {{ background: {p['scroll_handle_hover']}; }}
+QScrollBar::handle:vertical:pressed {{ background: {p['accent']}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar:horizontal {{
     background: {p['bg_dark']};
-    height: 8px;
-    border-radius: 4px;
+    height: 12px;
+    border-radius: 6px;
 }}
 QScrollBar::handle:horizontal {{
-    background: {p['border']};
-    border-radius: 4px;
+    background: {p['scroll_handle']};
+    border-radius: 5px;
     min-width: 30px;
 }}
-QScrollBar::handle:horizontal:hover {{ background: {p['border2']}; }}
+QScrollBar::handle:horizontal:hover {{ background: {p['scroll_handle_hover']}; }}
+QScrollBar::handle:horizontal:pressed {{ background: {p['accent']}; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 
 /* ══════ TEXT EDIT (LOG) ══════ */

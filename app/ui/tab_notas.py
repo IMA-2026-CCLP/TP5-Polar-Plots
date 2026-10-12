@@ -4,17 +4,18 @@ ui/tab_notas.py — Tab 3: Detección y edición de segmentos de notas.
 import json
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QSplitter,
-    QDialog, QDialogButtonBox,
+    QAbstractItemView,
+    QDialog, QTabWidget, QComboBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex
 from PyQt6.QtGui import QColor
 
 from core.worker import Worker
 from ui.f0_editor import F0EditorWidget
+from ui.waveform_editor import WaveformEditorWidget
 
 from ui.scale_dialog import ScaleEditorDialog   # noqa: F401  (MainWindow lo importa desde acá)
 from core import scales as _scales
@@ -29,6 +30,9 @@ class TabNotas(QWidget):
     """
     ma_updated = pyqtSignal(object)
     log        = pyqtSignal(str)
+    log_loaded_mask  = pyqtSignal()               # una máscara quedó cargada (para mostrar la solapa de segmentación)
+    alignment_loaded = pyqtSignal(bool, bool)     # (tomas, TDOA): alineación reaplicada desde una máscara
+    onset_dragged = pyqtSignal(int, float)   # onset marcado a mano en la señal dB (az_idx, segundos)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -46,39 +50,108 @@ class TabNotas(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(8, 6, 8, 6)
+        root.setSpacing(6)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setHandleWidth(6)
+        # Cada paso (solapa de arriba) tiene su tira de controles, armada por NativeRibbon y embebida
+        # en set_notas_controls(), y debajo su gráfico.
+        self._slots = [QVBoxLayout() for _ in range(3)]
+        for sl in self._slots:
+            sl.setContentsMargins(0, 0, 0, 0)
 
-        # Mitad superior — tabla de segmentos
-        top = QWidget()
-        top_lay = QVBoxLayout(top)
-        top_lay.setContentsMargins(12, 8, 12, 4)
-        top_lay.setSpacing(4)
-        top_lay.addWidget(self._make_group_segmentos())
-        splitter.addWidget(top)
+        btn_row = QHBoxLayout()
+        self.btn_apply_edits = QPushButton("Aplicar ediciones")
+        self.btn_apply_edits.setEnabled(False)
+        self.btn_apply_edits.clicked.connect(self._on_apply_edits)
 
-        # Mitad inferior — editor F0 interactivo
+        # Verde formal: distingue el paso que hay que apretar para que las notas detectadas
+        # pasen a existir como MicArray (ma.notes) — sin esto, "A procesar" no tiene nada.
+        self.btn_extract = QPushButton("Extraer notas")
+        self.btn_extract.setEnabled(False)
+        self.btn_extract.clicked.connect(self._on_extract)
+        self.btn_extract.setStyleSheet(
+            "QPushButton { background:#2e7d32; color:white; font-weight:bold; }"
+            "QPushButton:hover:!disabled { background:#36913a; }"
+            "QPushButton:disabled { background:#9e9e9e; color:#e0e0e0; }"
+        )
+
+        btn_row.addWidget(self.btn_apply_edits)
+        btn_row.addWidget(self.btn_extract)
+        btn_row.addStretch(1)
+
+        # Dos vistas en pestañas. Por defecto la señal en dB del micrófono de referencia con todas las tomas
+        # (ahí se alinea y se marca el onset a mano); la otra es el editor F0 con la tabla de segmentos.
+        self.sig_editor = WaveformEditorWidget()
+        self.sig_editor.log.connect(self.log)
+        self.sig_editor.onset_dragged.connect(self.onset_dragged)
+        self._sig_view = (None, 20.0)          # (yrange, suavizado ms) que fija la ventana principal
+
         self.f0_editor = F0EditorWidget()
         self.f0_editor.log.connect(self.log)
         self.f0_editor.segments_changed.connect(self._on_f0_segments_changed)
-        splitter.addWidget(self.f0_editor)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(6)
+        body.addWidget(self.f0_editor, 1)
+        body.addWidget(self._build_table_panel())
 
-        splitter.setSizes([260, 400])
-        root.addWidget(splitter)
+        # Un solo giro: el micrófono de referencia contra el resto de los micrófonos del array.
+        self.mics_editor = WaveformEditorWidget()
+        self.mics_editor.log.connect(self.log)
+        self._mics_az = QComboBox()
+        self._mics_az.setToolTip("Giro (azimut) de la toma a mostrar")
+        self._mics_az.currentIndexChanged.connect(lambda _=None: self._render_mics())
+        mv = QVBoxLayout()
+        mv.setContentsMargins(0, 0, 0, 0)
+        mrow = QHBoxLayout()
+        mlabel = QLabel("Giro:")
+        mlabel.setStyleSheet("font-weight: bold;")
+        mrow.addWidget(mlabel)
+        mrow.addWidget(self._mics_az)
+        mrow.addStretch(1)
+        mv.addLayout(mrow)
+        mv.addWidget(self.mics_editor, 1)
 
-    def _make_group_segmentos(self) -> QGroupBox:
-        g = QGroupBox("SEGMENTOS DETECTADOS")
-        lay = QVBoxLayout(g)
-        lay.setSpacing(6)
+        def page(slot, content_layout=None, content_widget=None, extra_row=None):
+            w = QWidget()
+            v = QVBoxLayout(w)
+            v.setContentsMargins(0, 6, 0, 0)
+            v.setSpacing(6)
+            v.addLayout(slot)
+            if extra_row is not None:
+                v.addLayout(extra_row)
+            if content_widget is not None:
+                v.addWidget(content_widget, 1)
+            else:
+                v.addLayout(content_layout, 1)
+            return w
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(page(self._slots[0], content_widget=self.sig_editor), "1 - Alineación entre tomas")
+        self.tabs.addTab(page(self._slots[1], content_layout=mv), "2 - TDOA")
+        self.tabs.addTab(page(self._slots[2], content_layout=body, extra_row=btn_row), "3 - Segmentación")
+        root.addWidget(self.tabs, 1)
+
+    def set_notas_controls(self, strips):
+        """Recibe las tres tiras de NativeRibbon.build_notas_panel() (tomas, TDOA, escala+detección),
+        una por solapa, arriba de cada gráfico."""
+        for slot, w in zip(self._slots, strips):
+            w.setFixedHeight(w.sizeHint().height())     # alto justo: el resto es para el gráfico
+            slot.addWidget(w)
+
+    def _build_table_panel(self) -> QWidget:
+        """Tabla de segmentos detectados, siempre visible al costado del gráfico temporal."""
+        panel = QWidget()
+        panel.setFixedWidth(360)
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(0, 0, 0, 0)
 
         hint = QLabel(
             "Doble clic en Start/End para editar. "
             "Arrastrá los cursores en el plot F0 para ajuste visual."
         )
         hint.setObjectName("label_hint")
+        hint.setWordWrap(True)
         lay.addWidget(hint)
 
         self.table_segs = QTableWidget(0, 5)
@@ -87,25 +160,8 @@ class TabNotas(QWidget):
         )
         self.table_segs.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_segs.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
-        self.table_segs.setMinimumHeight(120)
         lay.addWidget(self.table_segs)
-
-        btn_row = QHBoxLayout()
-        self.btn_apply_edits = QPushButton("Aplicar ediciones")
-        self.btn_apply_edits.setEnabled(False)
-        self.btn_apply_edits.clicked.connect(self._on_apply_edits)
-
-        self.btn_extract = QPushButton("Extraer todas las notas")
-        self.btn_extract.setObjectName("btn_primary")
-        self.btn_extract.setEnabled(False)
-        self.btn_extract.clicked.connect(self._on_extract)
-
-        btn_row.addWidget(self.btn_apply_edits)
-        btn_row.addWidget(self.btn_extract)
-        btn_row.addStretch()
-        lay.addLayout(btn_row)
-
-        return g
+        return panel
 
     # ── Escala API ────────────────────────────────────────────────────────
 
@@ -265,6 +321,12 @@ class TabNotas(QWidget):
 
     def _run_extract(self):
         self._ma.extract_all_notes(self._segs)
+        # Los niveles por banda de la muestra completa (si faltan) y de todas las notas se calculan acá mismo, con una
+        # sola barra de 0 a 100 % bajo "Extrayendo notas…" (antes aparecía una tanda por nota y otra por la muestra).
+        from ui.tab_directividad import compute_bands_all
+        todo = [t for t in [self._ma] + list((self._ma.notes or {}).values())
+                if getattr(t, 'tensor', None) is not None and getattr(t, '_leq_cache', None) is None]
+        compute_bands_all(todo)
         return self._ma
 
     def _on_extract_done(self, ma):
@@ -279,11 +341,19 @@ class TabNotas(QWidget):
 
     # ── Máscara save / load ───────────────────────────────────────────────
 
-    def save_mask(self, path: str):
-        """Guarda segments a JSON serializable."""
+    def clear_mask(self):
+        """Descarta los segmentos actuales (se empieza una segmentación nueva). La alineación ya aplicada se conserva."""
+        self._segs = None
+        self.table_segs.setRowCount(0)
+        self.btn_extract.setEnabled(False)
+        self.btn_apply_edits.setEnabled(False)
+        self.f0_editor.set_segments(None)
+        self.log.emit("[Notas] Máscara descartada: segmentación nueva.")
+
+    def mask_data(self):
+        """La máscara (segmentos + alineación) como dict serializable, o None si todavía no hay segmentos."""
         if self._segs is None or self._ma is None:
-            self.log.emit("[Notas] Sin segmentos para guardar.")
-            return
+            return None
         data = {
             "sr"      : int(self._ma.sr),
             "angles"  : [int(a) for a in self._ma.angles],
@@ -299,15 +369,34 @@ class TabNotas(QWidget):
                 for segs in self._segs
             ],
         }
+        ma = self._ma
+        if getattr(ma, 'align_takes_shifts', None) is not None or getattr(ma, 'align_ref_taus', None) is not None:
+            data["alignment"] = {       # pasos 1 (tomas) y 2 (TDOA): se reaplican al cargar, sin recalcular
+                "takes_shifts": None if ma.align_takes_shifts is None else [int(v) for v in ma.align_takes_shifts],
+                "ref_taus"    : None if ma.align_ref_taus is None else [int(v) for v in ma.align_ref_taus],
+                "ref_theta"   : getattr(ma, 'align_ref_theta', 'ref'),
+            }
+        return data
+
+    def save_mask(self, path: str):
+        """Guarda segments a JSON serializable."""
+        data = self.mask_data()
+        if data is None:
+            self.log.emit("[Notas] Sin segmentos para guardar.")
+            return
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        self.log.emit(f"[Notas] Máscara guardada → {path}")
+        extra = " (con alineación)" if "alignment" in data else ""
+        self.log.emit(f"[Notas] Máscara guardada{extra} → {path}")
 
     def load_mask(self, path: str):
         """Carga segments desde JSON y actualiza tabla + editor F0."""
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        self.load_mask_data(data, path)
 
+    def load_mask_data(self, data: dict, path: str):
+        """Aplica una máscara ya leída (de un archivo .msk o de una sesión)."""
         # validación básica
         if self._ma is not None:
             if data.get("sr") != self._ma.sr:
@@ -315,6 +404,32 @@ class TabNotas(QWidget):
             if data.get("angles") != [int(a) for a in self._ma.angles]:
                 self.log.emit("[WARN] ángulos de la máscara no coinciden con el MicArray actual.")
 
+        # Alineación guardada: se reaplica al audio (si esta sesión todavía no alineó nada). Eso dispara
+        # ma_updated → set_ma(), que borra los segmentos; por eso se cargan recién cuando vuelve set_ma().
+        al = data.get("alignment")
+        ma = self._ma
+        ya = ma is not None and (getattr(ma, 'align_takes_shifts', None) is not None
+                                 or getattr(ma, 'align_ref_taus', None) is not None)
+        if al and ma is not None:
+            ts, rt = al.get("takes_shifts"), al.get("ref_taus")
+            if ya:
+                self.log.emit("[Notas] Esta sesión ya tiene alineación: se mantiene, no se reaplica la de la máscara.")
+            elif data.get("angles") != [int(a) for a in ma.angles]:
+                self.log.emit("[WARN] No se reaplicó la alineación: los ángulos no coinciden.")
+            else:
+                ma.apply_alignment(takes_shifts=ts, ref_taus=rt, theta=al.get("ref_theta", 'ref'))
+                self._pending_mask = (data, path)
+                self.log.emit("[Notas] Alineación de la máscara reaplicada (tomas y TDOA), sin recalcular.")
+                self.alignment_loaded.emit(ts is not None, rt is not None)
+                self.ma_updated.emit(ma)
+                return
+        elif ma is not None and not ya:
+            self.log.emit("[WARN] Esta máscara no trae alineación (es de una versión anterior) y esta sesión todavía no alineó "
+                          "nada: los segmentos solo valen si alineás las tomas igual que cuando la creaste (pasos 1 y 2). "
+                          "Volvé a guardarla una vez alineado para que la incluya.")
+        self._apply_mask_data(data, path)
+
+    def _apply_mask_data(self, data, path):
         self._segs = [
             {
                 note: {
@@ -331,6 +446,7 @@ class TabNotas(QWidget):
         self.btn_apply_edits.setEnabled(True)
         self.btn_extract.setEnabled(True)
         self.log.emit(f"[Notas] Máscara cargada ← {path}")
+        self.log_loaded_mask.emit()
 
     # ── API pública ───────────────────────────────────────────────────────
 
@@ -342,6 +458,49 @@ class TabNotas(QWidget):
         self.table_segs.setRowCount(0)
         ma.scale = self._current_scale
         self.f0_editor.set_ma(ma)
+        self.sig_editor.set_ma(ma)
+        self.mics_editor.set_ma(ma)
+        keep = self._mics_az.currentData()
+        self._mics_az.blockSignals(True)
+        self._mics_az.clear()
+        for a in ma.angles:
+            self._mics_az.addItem(f"{a}°", a)
+        i = self._mics_az.findData(keep) if keep is not None else -1
+        self._mics_az.setCurrentIndex(i if i >= 0 else 0)
+        self._mics_az.blockSignals(False)
+        self._render_signal()
+        self._render_mics()
+        pend = getattr(self, '_pending_mask', None)
+        if pend:                      # máscara con alineación: ahora sí cargamos sus segmentos
+            self._pending_mask = None
+            self._apply_mask_data(*pend)
+
+    def set_signal_view(self, yrange, smoothing_ms):
+        """Rango Y y suavizado de la señal dB (los mismos que usa Procesamiento)."""
+        self._sig_view = (yrange, float(smoothing_ms))
+        self._render_signal()
+        self._render_mics()
+
+    def _render_signal(self):
+        if self._ma is None:
+            return
+        yrange, smooth = self._sig_view
+        # micrófono de referencia, todas las tomas superpuestas, en dB (envolvente)
+        self.sig_editor.render('ref', None, True, True, yrange, smooth)
+
+    def _render_mics(self):
+        az = self._mics_az.currentData()
+        if self._ma is None or az is None:
+            return
+        yrange, smooth = self._sig_view
+        # theta=None + azimut fijo → todos los micrófonos de esa toma superpuestos (con leyenda por mic)
+        self.mics_editor.render(None, az, True, True, yrange, smooth)
+
+    def set_align_params(self, onset, thresh, theta):
+        self.sig_editor.set_align_params(onset, thresh, theta)
+
+    def show_f0(self):
+        self.tabs.setCurrentIndex(2)           # solapa 3 - Segmentación (editor F0 + tabla)
 
     def detect_notes(self, tol: float, purity: float, start_s: float,
                      grad: float, ref_theta):
@@ -353,3 +512,5 @@ class TabNotas(QWidget):
 
     def apply_theme(self, palette: dict):
         self.f0_editor.apply_theme(palette)
+        self.sig_editor.apply_theme(palette)
+        self.mics_editor.apply_theme(palette)

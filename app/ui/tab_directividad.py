@@ -18,22 +18,25 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
-from ui.balloon_view import BalloonView
+from ui.gl3d_view import GL3DView
 from ui.polar2d_view import Polar2DView
 from ui.spectrum_view import SpectrumView
 from ui.band_selector import BandSelectorWidget
 from ui.widgets import NumEdit as _NumEdit
-from plot.balloon import (COLORSCALES, _COMPARE_COLORS, FONT_SIZE, DEFAULT_SMOOTH_METHOD, DEFAULT_SMOOTH_WINDOW,
+from plot.balloon import (COLORSCALES, default_compare_style, FONT_SIZE, DEFAULT_SMOOTH_METHOD, DEFAULT_SMOOTH_WINDOW,
                           DEFAULT_INTERP_KIND, DEFAULT_INTERP_DEG)
 from core.data_store import freq_label
 from core.worker import Worker, begin as _begin, end as _end, report as _report
 
-# polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView);
-# superficie_3d y esfera siguen en Plotly/QWebEngineView (BalloonView) hasta
-# que se migren a pyqtgraph.opengl en una pasada aparte.
+# polar2d y spectrum ya migraron a pyqtgraph nativo (Polar2DView/SpectrumView); 3d y esfera
+# migraron a pyqtgraph.opengl (GL3DView, ver ui/gl3d_view.py) — es la MISMA clase para las dos:
+# "radio constante = 1, sólo color" (antes Plotly build_sphere_html) resultó ser un caso
+# particular más del mismo geometry_mode que ya tenía Superficie 3D, así que Esfera es sólo
+# una instancia de GL3DView con geometry_mode='sphere' de entrada (ver _DEFAULT_STYLE_BY_MODE).
+# BalloonView (Plotly/QWebEngineView) queda sin usar en toda la app a partir de este cambio.
 _VIEW_CLASS_BY_MODE = {
-    "3d":       BalloonView,
-    "sphere":   BalloonView,
+    "3d":       GL3DView,
+    "sphere":   GL3DView,
     "polar2d":  Polar2DView,
     "spectrum": SpectrumView,
 }
@@ -53,18 +56,24 @@ _DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
 # fondo blanco si la app está en tema oscuro.
 _DEFAULT_STYLE_BY_MODE = {
     "3d":       {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
-                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
+                 "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
+                 "show_ref_plane": True, "show_hemisphere_grid": False, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
+                 "colorbar_pt": 12.0, "colorbar_step": 1.0, "scale_auto": True},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
-                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG},
+                 "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
+                 "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
+                 "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
+                 "colorbar_pt": 12.0, "colorbar_step": 1.0, "scale_auto": False},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
         "ring_color":       "#000000",
         "ring_font_size":   FONT_SIZE,
-        "ring_step":        5.0,
-        "ring_label_angle": 45.0,
+        "ring_step":        4.0,
+        "ring_label_angle": 15.0,
         "legend_font_size": FONT_SIZE,
-        "line_width":       2.5,
+        "line_width":       2,
         "smoothing_method": DEFAULT_SMOOTH_METHOD,
         "smoothing_window": DEFAULT_SMOOTH_WINDOW,
         "interp_kind":      DEFAULT_INTERP_KIND,
@@ -72,78 +81,39 @@ _DEFAULT_STYLE_BY_MODE = {
     },
     "spectrum": {"bg_color": "#ffffff", "text_color": "#000000", "bar_color": "#146B64"},
 }
-_DEFAULT_MIN_DB_BY_MODE = {"polar2d": -20.0}
-_DEFAULT_MAX_DB_BY_MODE = {"polar2d": 10.0}
+# Superficie 3D sin límites fijos: la escala de color se ajusta al mínimo y máximo de cada banda
+_DEFAULT_MIN_DB_BY_MODE = {"polar2d": -16.0, "sphere": -16.0}
+_DEFAULT_MAX_DB_BY_MODE = {"polar2d": 4.0, "sphere": 4.0}
+
+
+def compute_bands_all(targets):
+    """Niveles por banda de 1/3 de varios MicArray (la muestra completa y/o cada nota) con UNA sola barra de progreso
+    de 0 a 100 % para todo el conjunto, y no una por cada nota."""
+    import mic_array.patron as _patron
+    targets = list(targets)
+    if not targets:
+        return
+    sizes = [int(t.n_angles) * int(t.n_thetas) for t in targets]
+    grand = max(1, sum(sizes))
+    rep = getattr(_patron, 'progress_callback', None)
+    off = {'v': 0}
+
+    def scaled(done, total):
+        if rep:
+            rep(off['v'] + int(done), grand)
+
+    _patron.progress_callback = scaled
+    try:
+        for t, n in zip(targets, sizes):
+            t.compute_leq_bands('1/3')
+            off['v'] += n
+    finally:
+        _patron.progress_callback = rep
 
 
 # ── Worker para cómputo batch (todo el audio + todas las notas) ───────────────
 
 _PROGRESS_RE = re.compile(r'(\d+)/(\d+)\s+az=')
-
-
-class _ComputeAllWorker(QThread):
-    log               = pyqtSignal(str)
-    progress          = pyqtSignal(int, int, str)   # actual, total, etiqueta (por item)
-    overall_progress  = pyqtSignal(float)           # 0.0–1.0, combina item + posición interna
-    all_done          = pyqtSignal()
-    error             = pyqtSignal(str)
-
-    def __init__(self, ma, bands, ref_az, ref_th, parent=None):
-        super().__init__(parent)
-        self._ma     = ma
-        self._bands  = bands
-        self._ref_az = ref_az
-        self._ref_th = ref_th
-        self._item_index = 0
-        self._item_total = 1
-
-    def run(self):
-        worker = self
-
-        class _Cap(io.TextIOBase):
-            def __init__(self, sig):
-                super().__init__(); self._s = sig
-            def write(self, t):
-                if t.strip():
-                    self._s.emit(t.rstrip())
-                    m = _PROGRESS_RE.search(t)
-                    if m:
-                        sub_done, sub_total = int(m.group(1)), int(m.group(2))
-                        frac_item = sub_done / sub_total if sub_total else 0.0
-                        overall = (worker._item_index + frac_item) / worker._item_total
-                        worker.overall_progress.emit(min(overall, 1.0))
-                        _report(int(min(overall, 1.0) * 1000), 1000)      # barra de la barra de estado
-                return len(t)
-            def flush(self): pass
-
-        old_out = sys.stdout
-        sys.stdout = _Cap(self.log)
-        _begin("Calculando directividad…")
-        try:
-            tasks = [("Todo el audio", self._ma)]
-            if self._ma.notes:
-                tasks += list(self._ma.notes.items())
-
-            total = len(tasks)
-            self._item_total = total
-            for i, (label, ma) in enumerate(tasks):
-                self._item_index = i
-                self.progress.emit(i, total, label)
-                ma.compute_directivity(
-                    bands          = self._bands,
-                    ref_azimuth    = self._ref_az,
-                    ref_theta_plot = self._ref_th,
-                )
-                self.log.emit(f"[Directividad] {label} — OK")
-
-            self.progress.emit(total, total, "")
-            self.overall_progress.emit(1.0)
-            self.all_done.emit()
-        except Exception:
-            self.error.emit(traceback.format_exc())
-        finally:
-            sys.stdout = old_out
-            _end("Calculando directividad…")
 
 
 class _CompareEditor(QGroupBox):
@@ -170,15 +140,15 @@ class _CompareEditor(QGroupBox):
         self._rows = {}                        # banda -> (check, color, grosor, tipo)
         per_col = (n + 1) // 2
         for i in range(n):
-            st = styles.get(i, {})
+            st = {**default_compare_style(float(bands[i]), i), **styles.get(i, {})}
             cb = QCheckBox(f"{freq_label(float(bands[i]))} Hz")
             cb.setMinimumWidth(78)
             cb.setChecked(i in sel)
-            btn = sec._make_color_button(dlg, st.get('color', _COMPARE_COLORS[i % len(_COMPARE_COLORS)]))
+            btn = sec._make_color_button(dlg, st['color'])
             w = _NumEdit()
             w.setFixedWidth(44)
             w.setRange(0.5, 10.0)
-            w.setValue(st.get('width', 2.5))
+            w.setValue(st.get('width', 2))
             w.setToolTip("Grosor de la línea")
             dash = QComboBox()
             dash.addItems(_DASH_STYLES)
@@ -323,7 +293,8 @@ class _ViewSection(QWidget):
 
         act_properties = menu.addAction("Propiedades…")
         act_auto = menu.addAction("Autoescala")
-        act_auto.setEnabled(self._min_db is not None or self._max_db is not None)
+        act_auto.setEnabled(self._min_db is not None or self._max_db is not None
+                            or (self._mode in ("3d", "sphere") and not self._style.get('scale_auto', False)))
         menu.addSeparator()
         act_save = menu.addAction("Guardar imagen…")
 
@@ -437,9 +408,74 @@ class _ViewSection(QWidget):
             le_max.setFixedWidth(70)
             le_max.setPlaceholderText("auto")
             le_max.setToolTip("Límite superior del rango de dB mostrado. Vacío = automático (recomendado para empezar).\nEjemplo: 0")
+            if self._mode in ("3d", "sphere"):
+                chk_auto = QCheckBox("Escala automática (mínimo y máximo de la banda)")
+                chk_auto.setChecked(bool(self._style.get('scale_auto', self._min_db is None and self._max_db is None)))
+                chk_auto.setToolTip("Tildada, la escala de color y el rango del balloon se ajustan solos a los valores de la banda "
+                                    "que estás viendo. Destildada, se usan los límites de abajo.")
+                form.addRow(chk_auto)
+                fields['scale_auto'] = chk_auto
             form.addRow("Min (dB):", le_min)
             form.addRow("Max (dB):", le_max)
             fields['min_db'], fields['max_db'] = le_min, le_max
+            if self._mode in ("3d", "sphere"):
+                combo_dist = QComboBox()
+                combo_dist.addItem("Lineal", "linear")
+                combo_dist.addItem("Ecualizada (percentil)", "equalized")
+                combo_dist.setCurrentIndex(max(0, combo_dist.findData(self._style.get('color_distribution', 'linear'))))
+                combo_dist.setToolTip(
+                    "Cómo se reparte el color de la malla entre el mínimo y el máximo.\n"
+                    "Lineal: proporcional al dB (dos valores a la misma distancia en dB quedan al\n"
+                    "  mismo 'salto' de color). Recomendado para comparar valores a simple vista.\n"
+                    "Ecualizada: reparte el color según cómo se distribuyen los valores medidos\n"
+                    "  (más contraste donde se agrupa la mayoría de la superficie), en vez de\n"
+                    "  proporcional al dB. La barra de color sigue mostrando la paleta lineal;\n"
+                    "  sólo cambia el color que le toca a cada punto de la malla."
+                )
+                form.addRow("Distribución de color:", combo_dist)
+                fields['color_distribution'] = combo_dist
+                spin_cb = _NumEdit()
+                spin_cb.setRange(6, 40)
+                spin_cb.setDecimals(1)
+                spin_cb.setValue(self._style.get('colorbar_pt', 12.0))
+                spin_cb.setToolTip("Tamaño (pt) de los valores de la escala de colores, en pantalla y en las imágenes exportadas.")
+                form.addRow("Tamaño de texto de la escala (pt):", spin_cb)
+                fields['colorbar_pt'] = spin_cb
+                spin_step = _NumEdit()
+                spin_step.setRange(0.5, 20)
+                spin_step.setDecimals(1)
+                spin_step.setValue(self._style.get('colorbar_step', 1.0))
+                spin_step.setToolTip("Cada cuántos dB hay una marca (y un tramo de color) en la escala de colores.")
+                form.addRow("Paso de la escala (dB):", spin_step)
+                fields['colorbar_step'] = spin_step
+                spin_min = _NumEdit()
+                spin_min.setRange(-80, 0)
+                spin_min.setDecimals(1)
+                spin_min.setValue(self._style.get('balloon_min_db', -16.0))
+                spin_min.setToolTip("dB que quedan en el centro de la esfera (p. ej. -12). Relativo al valor del borde.")
+                form.addRow("Rango del balloon: mínimo (dB):", spin_min)
+                fields['balloon_min_db'] = spin_min
+                spin_max = _NumEdit()
+                spin_max.setRange(-60, 40)
+                spin_max.setDecimals(1)
+                spin_max.setValue(self._style.get("balloon_max_db", 4.0))
+                spin_max.setToolTip("dB que quedan en el borde de la esfera (p. ej. 0 o 6). Relativo al valor del borde.")
+                form.addRow("Rango del balloon: máximo (dB):", spin_max)
+                fields['balloon_max_db'] = spin_max
+                combo_anchor = QComboBox()
+                combo_anchor.addItem("On-axis (0°/0°)", "onaxis")
+                combo_anchor.addItem("Máximo de cualquier ángulo", "max")
+                combo_anchor.setCurrentIndex(max(0, combo_anchor.findData(self._style.get('balloon_anchor', 'onaxis'))))
+                combo_anchor.setToolTip("Qué valor queda en el borde de la esfera: el on-axis (eje de referencia) "
+                                        "o el máximo de cualquier ángulo (el pico toca el borde).")
+                form.addRow("Valor en el borde de la esfera:", combo_anchor)
+                fields['balloon_anchor'] = combo_anchor
+
+                def _auto_toggled(on, _w=(le_min, le_max, spin_min, spin_max)):
+                    for x in _w:
+                        x.setEnabled(not on)          # con escala automática los límites a mano no se usan
+                chk_auto.toggled.connect(_auto_toggled)
+                _auto_toggled(chk_auto.isChecked())
             outer.addWidget(box)
 
         if self._mode in ("3d", "sphere"):
@@ -463,65 +499,54 @@ class _ViewSection(QWidget):
             spin_axis_w.setValue(self._style.get('axis_line_width', 3))
             spin_axis_w.setToolTip("Grosor de las líneas de los ejes X/Y/Z. Valor típico: 2 a 4. Por defecto: 3.")
             form_ax.addRow("Grosor líneas X/Y/Z:", spin_axis_w)
+            if self._mode == "3d":   # el corte/"Intersectar" (barra izquierda) sólo existe para Superficie 3D
+                chk_plane = QCheckBox("Mostrar plano translúcido de referencia")
+                chk_plane.setChecked(bool(self._style.get('show_ref_plane', True)))
+                chk_plane.setToolTip(
+                    "El plano chato que marca la altura de la elevación elegida en el grupo "
+                    "'Corte (Superficie 3D)' de la barra izquierda. Sólo se ve si ahí se activó "
+                    "'Intersectar'; esto lo saca sin desactivar la curva de corte."
+                )
+                form_ax.addRow(chk_plane)
+                fields['show_ref_plane'] = chk_plane
+            if self._mode in ("3d", "sphere"):
+                chk_grid = QCheckBox("Mostrar grilla hemisférica")
+                chk_grid.setChecked(bool(self._style.get('show_hemisphere_grid', True)))
+                chk_grid.setToolTip("Los círculos de latitud/longitud de referencia alrededor de la superficie.")
+                form_ax.addRow(chk_grid)
+                fields['show_hemisphere_grid'] = chk_grid
+                chk_box = QCheckBox("Mostrar planos de fondo con grilla")
+                chk_box.setChecked(bool(self._style.get('show_box_grid', True)))
+                chk_box.setToolTip("Piso y paredes con grilla detrás de la superficie (casi infinitos).")
+                form_ax.addRow(chk_box)
+                fields['show_box_grid'] = chk_box
+
             fields['grid_color']     = btn_grid
             fields['grid_width']     = spin_grid_w
             fields['axis_label_size'] = spin_label
             fields['axis_line_width'] = spin_axis_w
             outer.addWidget(box_ax)
 
-            box_interp = QGroupBox("Suavizado")
-            form_interp = QFormLayout(box_interp)
-            spin_interp_deg = _NumEdit()
-            spin_interp_deg.setRange(0.5, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
-            spin_interp_deg.setToolTip(
-                "Qué tan fina se dibuja la superficie entre los puntos medidos.\n"
-                "No cambia los datos, sólo el dibujo.\n"
-                "Recomendado: dejar en 2 (por defecto). Bajalo a 1 sólo si vas a\n"
-                "exportar una imagen grande y querés más detalle (más lento)."
+        if self._mode in ("3d", "sphere"):
+            box_calc = QGroupBox("Método de cálculo")
+            form_calc = QFormLayout(box_calc)
+            combo_geom = QComboBox()
+            combo_geom.addItem("Radial al origen", "origin")
+            combo_geom.addItem("Radial al eje Z", "zaxis")
+            combo_geom.addItem("Esfera (radio 1, sólo color)", "sphere")
+            default_geom = "sphere" if self._mode == "sphere" else "origin"
+            combo_geom.setCurrentIndex(max(0, combo_geom.findData(self._style.get('geometry_mode', default_geom))))
+            combo_geom.setToolTip(
+                "Cómo se construye la superficie a partir del nivel medido.\n"
+                "Radial al origen: el nivel escala todo el vector desde el centro (balloon clásico).\n"
+                "Radial al eje Z: el nivel sólo escala la parte horizontal; la altura depende nada "
+                "más del ángulo de elevación — un corte horizontal coincide exacto con una elevación.\n"
+                "Esfera: radio siempre 1, el nivel sólo se ve en el color (la vista Esfera de toda "
+                "la vida). Se puede usar en cualquiera de los dos gráficos 3D."
             )
-            form_interp.addRow("Paso de interpolación (°):", spin_interp_deg)
-            spin_smoothing = _NumEdit()
-            spin_smoothing.setRange(0.0, 500.0); spin_smoothing.setSingleStep(5.0)
-            spin_smoothing.setValue(self._style.get('smoothing', 0.0))
-            spin_smoothing.setToolTip(
-                "0 = la superficie pasa exacto por los datos medidos (recomendado,\n"
-                "dejar así salvo que se vea muy ruidosa). Si necesitás suavizar,\n"
-                "empezá con 20-50 y andá subiendo de a poco mirando el resultado.\n"
-                "Ojo: valores muy altos (200+) empiezan a deformar la forma real."
-            )
-            form_interp.addRow("Suavizado (factor spline):", spin_smoothing)
-            combo_smooth_method_3d = QComboBox()
-            combo_smooth_method_3d.setMaximumWidth(120)
-            combo_smooth_method_3d.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method_3d.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
-            combo_smooth_method_3d.setToolTip(
-                "Mismo suavizado circular que el Polar 2D, aplicado en la\n"
-                "dirección de azimuth (cada anillo horizontal de la esfera),\n"
-                "ANTES de ajustar la superficie. Sólo importa si la ventana de\n"
-                "abajo es mayor a 0.\n"
-                "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
-                "savgol: preserva mejor lóbulos/nulos angostos.\n"
-                "moving_average: el más simple, puede generar ondulaciones falsas.\n"
-                "none: sin efecto, ignora la ventana."
-            )
-            form_interp.addRow("Tipo de suavizado (azimuth):", combo_smooth_method_3d)
-            spin_smooth_win_3d = _NumEdit()
-            spin_smooth_win_3d.setDecimals(0)
-            spin_smooth_win_3d.setRange(0, 15); spin_smooth_win_3d.setSingleStep(1)
-            spin_smooth_win_3d.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
-            spin_smooth_win_3d.setToolTip(
-                "Cantidad de puntos vecinos que se promedian entre sí, sobre cada\n"
-                "anillo de azimuth. 0 = SIN SUAVIZAR (recomendado para empezar).\n"
-                "3 a 5 = suavizado leve. 7 a 9 = fuerte (cuidado, puede borrar\n"
-                "lóbulos/nulos reales). No recomendado pasar de 10."
-            )
-            form_interp.addRow("Intensidad (0 = sin suavizar):", spin_smooth_win_3d)
-            fields['interp_deg'] = spin_interp_deg
-            fields['smoothing']  = spin_smoothing
-            fields['smoothing_method'] = combo_smooth_method_3d
-            fields['smoothing_window'] = spin_smooth_win_3d
-            outer.addWidget(box_interp)
+            form_calc.addRow("Construcción:", combo_geom)
+            fields['geometry_mode'] = combo_geom
+            outer.addWidget(box_calc)
 
         elif self._mode == "polar2d":
             box_ax = QGroupBox("Ejes / traza")
@@ -538,12 +563,12 @@ class _ViewSection(QWidget):
             form_ax.addRow("Tamaño de números (dB):", spin_ring_font)
             spin_ring_step = _NumEdit()
             spin_ring_step.setRange(1, 20); spin_ring_step.setSingleStep(1)
-            spin_ring_step.setValue(self._style.get('ring_step', 5.0))
-            spin_ring_step.setToolTip("Cada cuántos dB se dibuja un anillo de referencia. Valor típico: 5 (default) o 3 si querés más detalle.")
+            spin_ring_step.setValue(self._style.get("ring_step", 4.0))
+            spin_ring_step.setToolTip("Cada cuántos dB se dibuja un anillo de referencia. Por defecto 4 dB (anillos en −16, −12, −8, −4, 0, 4).")
             form_ax.addRow("Paso entre anillos (dB):", spin_ring_step)
             spin_ring_angle = _NumEdit()
             spin_ring_angle.setRange(0, 360); spin_ring_angle.setSingleStep(5)
-            spin_ring_angle.setValue(self._style.get('ring_label_angle', 92))
+            spin_ring_angle.setValue(self._style.get('ring_label_angle', 15))
             spin_ring_angle.setToolTip(
                 "Ángulo donde aparecen los números de dB de los anillos (0°=derecha,\n"
                 "90°=arriba, 180°=izquierda, 270°=abajo). Por defecto: 92° (casi arriba).\n"
@@ -563,7 +588,7 @@ class _ViewSection(QWidget):
             form_ax.addRow("Posición de etiquetas de dB:", combo_ring_pos)
             spin_line_w = _NumEdit()
             spin_line_w.setRange(0.5, 8.0); spin_line_w.setSingleStep(0.5)
-            spin_line_w.setValue(self._style.get('line_width', 2.5))
+            spin_line_w.setValue(self._style.get('line_width', 2))
             spin_line_w.setToolTip("Grosor de la curva del patrón (sólo aplica con una banda a la vez). Valor típico: 2 a 3. Por defecto: 2.5.")
             form_ax.addRow("Grosor de traza (banda única):", spin_line_w)
             spin_legend = _NumEdit()
@@ -587,7 +612,7 @@ class _ViewSection(QWidget):
             form_rg.addRow("Anillos — color:", btn_ring)
             spin_ring_w = _NumEdit()
             spin_ring_w.setRange(0.25, 8.0)
-            spin_ring_w.setValue(self._style.get('ring_width', 1))
+            spin_ring_w.setValue(self._style.get('ring_width', 0.5))
             form_rg.addRow("Anillos — grosor:", spin_ring_w)
             combo_ring_dash = QComboBox()
             combo_ring_dash.addItems(_DASH_STYLES)
@@ -595,14 +620,14 @@ class _ViewSection(QWidget):
             form_rg.addRow("Anillos — tipo de línea:", combo_ring_dash)
             spin_spoke_step = _NumEdit()
             spin_spoke_step.setRange(0, 180)
-            spin_spoke_step.setValue(self._style.get('spoke_step', 30 if self._style.get('show_spokes', True) else 0))
+            spin_spoke_step.setValue(self._style.get('spoke_step', 45 if self._style.get('show_spokes', True) else 0))
             spin_spoke_step.setToolTip("Cada cuántos grados va una línea radial. 0 = sin líneas radiales.")
             form_rg.addRow("Líneas radiales cada (°):", spin_spoke_step)
             btn_spoke = self._make_color_button(dlg, self._style.get('spoke_color') or self._style.get('ring_color') or "#000000")
             form_rg.addRow("Radios — color:", btn_spoke)
             spin_spoke_w = _NumEdit()
             spin_spoke_w.setRange(0.25, 8.0)
-            spin_spoke_w.setValue(self._style.get('spoke_width', 1))
+            spin_spoke_w.setValue(self._style.get('spoke_width', 0.5))
             form_rg.addRow("Radios — grosor:", spin_spoke_w)
             combo_spoke_dash = QComboBox()
             combo_spoke_dash.addItems(_DASH_STYLES)
@@ -615,64 +640,6 @@ class _ViewSection(QWidget):
 
             fields['_compare'] = _CompareEditor(self, dlg)
             outer.addWidget(fields['_compare'])
-
-            box_interp = QGroupBox("Suavizado")
-            form_interp = QFormLayout(box_interp)
-            combo_smooth_method = QComboBox()
-            combo_smooth_method.setMaximumWidth(120)
-            combo_smooth_method.addItems(['gaussian', 'savgol', 'moving_average', 'none'])
-            combo_smooth_method.setCurrentText(self._style.get('smoothing_method', DEFAULT_SMOOTH_METHOD))
-            combo_smooth_method.setToolTip(
-                "Sólo importa si la 'Intensidad' de abajo es mayor a 0.\n"
-                "gaussian: recomendado para empezar, no genera ondulaciones falsas.\n"
-                "savgol (Savitzky-Golay): usalo si el gaussiano te 'redondea'\n"
-                "  demasiado un lóbulo o nulo que sabés que es real.\n"
-                "moving_average: el más simple, pero puede generar\n"
-                "  ondulaciones que no existen en la medición real.\n"
-                "none: sin suavizar, ignora la intensidad."
-            )
-            form_interp.addRow("Tipo de suavizado:", combo_smooth_method)
-            spin_smooth_win = _NumEdit()
-            spin_smooth_win.setDecimals(0)
-            spin_smooth_win.setRange(0, 15); spin_smooth_win.setSingleStep(1)
-            spin_smooth_win.setValue(self._style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW))
-            spin_smooth_win.setToolTip(
-                "Cantidad de puntos vecinos que se promedian entre sí.\n"
-                "0 = SIN SUAVIZAR (recomendado para empezar — dejalo así\n"
-                "  salvo que el patrón se vea con ruido/dientes de sierra raros).\n"
-                "3 a 5 = suavizado leve, buen punto de partida si hace falta.\n"
-                "7 a 9 = suavizado fuerte — cuidado, puede borrar lóbulos/nulos reales.\n"
-                "No recomendado pasar de 10: empieza a distorsionar la forma real."
-            )
-            form_interp.addRow("Intensidad (0 = sin suavizar):", spin_smooth_win)
-            combo_interp = QComboBox()
-            combo_interp.setMaximumWidth(120)
-            combo_interp.addItems(['cubic', 'quadratic', 'linear', 'none'])
-            combo_interp.setCurrentText(self._style.get('interp_kind', DEFAULT_INTERP_KIND))
-            combo_interp.setToolTip(
-                "No cambia los datos medidos, sólo cómo se dibuja la curva entre puntos.\n"
-                "cubic: recomendado, curva natural (por defecto).\n"
-                "quadratic: intermedio.\n"
-                "linear: conecta los puntos con rectas (se ve 'picudo', como un diamante).\n"
-                "none: sólo los puntos medidos, sin curva — útil para comparar\n"
-                "  contra el dato crudo y ver si el suavizado está bien."
-            )
-            form_interp.addRow("Tipo de interpolación:", combo_interp)
-            spin_interp_deg = _NumEdit()
-            spin_interp_deg.setRange(0.1, 10.0); spin_interp_deg.setSingleStep(0.5)
-            spin_interp_deg.setValue(self._style.get('interp_deg', DEFAULT_INTERP_DEG))
-            spin_interp_deg.setToolTip(
-                "Qué tan fina se dibuja la curva. No cambia los datos.\n"
-                "Recomendado: dejar en 1 (por defecto).\n"
-                "Bajalo a 0.5 sólo si vas a exportar una imagen grande y querés\n"
-                "más nitidez. Subilo a 2-5 si sentís que el gráfico va lento."
-            )
-            form_interp.addRow("Paso de interpolación (°):", spin_interp_deg)
-            fields['smoothing_method'] = combo_smooth_method
-            fields['smoothing_window'] = spin_smooth_win
-            fields['interp_kind']      = combo_interp
-            fields['interp_deg']       = spin_interp_deg
-            outer.addWidget(box_interp)
 
         elif self._mode == "spectrum":
             box_sp = QGroupBox("Barras")
@@ -729,18 +696,34 @@ class _ViewSection(QWidget):
                 self._max_db = float(fields['max_db'].text()) if fields['max_db'].text().strip() else None
             except ValueError:
                 pass
+            if 'scale_auto' in fields and fields['scale_auto'].isChecked():
+                self._min_db = None
+                self._max_db = None
 
             new_style = dict(self._style)
+            if 'scale_auto' in fields:
+                new_style['scale_auto'] = fields['scale_auto'].isChecked()
+            if 'color_distribution' in fields:
+                new_style['color_distribution'] = fields['color_distribution'].currentData()
+            if 'colorbar_pt' in fields:
+                new_style['colorbar_pt'] = fields['colorbar_pt'].value()
+            if 'colorbar_step' in fields:
+                new_style['colorbar_step'] = fields['colorbar_step'].value()
+            if 'balloon_min_db' in fields:
+                new_style['balloon_min_db'] = fields['balloon_min_db'].value()
+                new_style['balloon_max_db'] = fields['balloon_max_db'].value()
+                new_style['balloon_anchor'] = fields['balloon_anchor'].currentData()
 
             if self._mode in ("3d", "sphere"):
                 self._axis_color = fields['grid_color'].color_hex
                 self._axis_width = fields['grid_width'].value()
                 new_style['axis_label_size'] = fields['axis_label_size'].value()
                 new_style['axis_line_width'] = fields['axis_line_width'].value()
-                new_style['interp_deg']      = fields['interp_deg'].value()
-                new_style['smoothing']       = fields['smoothing'].value()
-                new_style['smoothing_method'] = fields['smoothing_method'].currentText()
-                new_style['smoothing_window'] = fields['smoothing_window'].value()
+                if self._mode == "3d":
+                    new_style['show_ref_plane'] = fields['show_ref_plane'].isChecked()
+                new_style['show_hemisphere_grid'] = fields['show_hemisphere_grid'].isChecked()
+                new_style['show_box_grid'] = fields['show_box_grid'].isChecked()
+                new_style['geometry_mode']        = fields['geometry_mode'].currentData()
             elif self._mode == "polar2d":
                 self._tick_font_size = fields['tick_font_size'].value()
                 new_style['ring_font_size']    = fields['ring_font_size'].value()
@@ -763,10 +746,6 @@ class _ViewSection(QWidget):
                 self.view.set_compare_styles(self._compare_styles)
                 new_style['line_width']        = fields['line_width'].value()
                 new_style['legend_font_size']  = fields['legend_font_size'].value()
-                new_style['smoothing_method']  = fields['smoothing_method'].currentText()
-                new_style['smoothing_window']  = fields['smoothing_window'].value()
-                new_style['interp_kind']       = fields['interp_kind'].currentText()
-                new_style['interp_deg']        = fields['interp_deg'].value()
             elif self._mode == "spectrum":
                 new_style['bar_color']  = fields['bar_color'].color_hex
                 new_style['err_color']  = fields['err_color'].color_hex
@@ -833,6 +812,9 @@ class _ViewSection(QWidget):
     def _reset_scale(self):
         self._min_db = None
         self._max_db = None
+        if self._mode in ("3d", "sphere"):
+            self._style['scale_auto'] = True          # escala automática: color y balloon según la banda
+            self.view.set_style(self._style)
         self.view.set_db_range(None, None)
 
     def _snapshot_properties(self) -> dict:
@@ -858,7 +840,9 @@ class _ViewSection(QWidget):
         return True
 
     def _apply_snapshot(self, snap: dict):
-        self._style          = dict(snap['style'])
+        # Se parte de los defaults del modo: sesiones viejas no traen claves nuevas (p. ej.
+        # geometry_mode), y sin esto la Esfera caía al default 'origin' y se veía como Superficie.
+        self._style          = {**_DEFAULT_STYLE_BY_MODE.get(self._mode, {}), **snap['style']}
         self._min_db         = snap['min_db']
         self._max_db         = snap['max_db']
         self._tick_font_size = snap['tick_font_size']
@@ -883,8 +867,9 @@ class _ViewSection(QWidget):
         self._apply_snapshot(c)
         self._compare_indices = c.get('compare_indices')
         self._compare_styles = {int(k): v for k, v in (c.get('compare_styles') or {}).items()}
-        self.view.set_compare_bands(self._compare_indices)
-        self.view.set_compare_styles(self._compare_styles)
+        if self._mode == "polar2d":        # comparación de bandas: sólo existe en Polar 2D
+            self.view.set_compare_bands(self._compare_indices)
+            self.view.set_compare_styles(self._compare_styles)
 
     def set_data(self, **kwargs):
         self.view.set_data(**kwargs)
@@ -912,19 +897,22 @@ class _ViewSection(QWidget):
 
 class TabDirectividad(QWidget):
     log      = pyqtSignal(str)
-    computed = pyqtSignal(object, str)  # (thetas_np, status_text)
-    compute_finished = pyqtSignal()     # terminó un cálculo pedido con 'Calcular' (no al cargar datos)
+    step_done = pyqtSignal(str, str)   # (botón, detalle) de Procesamiento terminado en este tab
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._ma             = None
         self._worker: Worker | None = None
         self._full_levels    = None
+        self.source_file: str | None = None   # archivo .cclp cargado (None = calculado desde audio)
+        self.on_data_changed = None
+        self.corr_ref_th = 'ref'              # micrófono de referencia de la corrección por toma (paso 2)
         self._full_azimuths  = None
         self._full_thetas    = None
         self._full_bands     = None
         self._raw_ref_spl    = None
         self._eq_ref_spl     = None
+        self._ref_base_az    = None
         self._current_el_idx  = None
         self._plane            = "XY"
         self._show_info        = False
@@ -944,6 +932,435 @@ class TabDirectividad(QWidget):
         }
 
         self._build_ui()
+        from ui.export_utils import get_smoothing_settings
+        self.apply_smoothing_settings(get_smoothing_settings())   # última config guardada (Herramientas ▸ Suavizado…)
+
+    @staticmethod
+    def _grid_idx(vals, v):
+        for i, x in enumerate(vals):
+            try:
+                if abs(float(x) - float(v)) < 0.5:
+                    return i
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def apply_mirror_replacements(self, pairs):
+        """Reemplazo de posiciones elegido en la matriz radial. Si ya se filtró por bandas, se hace sobre
+        la grilla por banda: el dato espejo pasa a todas las bandas de tercio a la vez, y después se rehacen
+        la corrección entre tomas y el nivelado. Si todavía no se filtró, se hace sobre el audio."""
+        ma = self._ma
+        if ma is None:
+            return "No hay datos cargados."
+        if getattr(ma, '_leq_cache', None) is not None:
+            return self._mirror_on_leq(pairs)
+        tensor = getattr(ma, 'tensor', None)
+        if tensor is None:
+            return "No hay audio cargado en memoria (sesión .cclp): cargá los WAV para aplicar."
+        n = 0
+        snap = []
+        prev_src = (dict(getattr(ma, '_mirror_src', None) or {}), dict(ma._mirror_cells))
+        for t_d, g_d, t_s, g_s in pairs:
+            i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
+            i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
+            if None in (i_d, j_d, i_s, j_s):
+                continue
+            snap.append((i_d, j_d, tensor[i_d, j_d, :].copy()))
+            tensor[i_d, j_d, :] = tensor[i_s, j_s, :]
+            self._set_mirror_src(i_d, j_d, i_s, j_s)
+            n += 1
+        if snap:
+            self._undo_stack = getattr(self, '_undo_stack', []) + [('tensor', snap, prev_src)]
+        return f"Aplicados {n} reemplazos al audio."
+
+    @staticmethod
+    def _rms_db(x):
+        return 20 * np.log10(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2)) + 1e-12)
+
+    def plan_gain_correction(self, pairs):
+        """Prepara "Corregir ganancia": para cada celda destino calcula cuántos dB hay que subir o bajar su señal
+        para que quede al nivel de su simétrica (nivel total de la toma completa, ya calibrado). Devuelve un dict
+        con lo que se va a modificar, o un texto si no hay nada para hacer."""
+        ma = self._ma
+        tensor = getattr(ma, 'tensor', None) if ma is not None else None
+        files = getattr(ma, 'source_files', None) if ma is not None else None
+        if tensor is None or not files:
+            return "No hay audio cargado desde una carpeta (sesión .cclp): cargá los WAV para corregir la ganancia."
+        items = {}
+        for t_d, g_d, t_s, g_s in pairs:
+            i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
+            i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
+            if None in (i_d, j_d, i_s, j_s) or (i_d, j_d) == (i_s, j_s):
+                continue
+            path = files.get((i_d, j_d))
+            if not path:
+                continue
+            g = float(self._rms_db(tensor[i_s, j_s, :]) - self._rms_db(tensor[i_d, j_d, :]))
+            if np.isfinite(g) and abs(g) >= 0.05:
+                items[(i_d, j_d)] = (path, i_d, j_d, g)
+        if not items:
+            return "Las celdas elegidas ya están al mismo nivel que sus simétricas (diferencia menor a 0,05 dB)."
+        from pathlib import Path
+        backup = str(Path(getattr(ma, 'source_dir', None) or Path(next(iter(items.values()))[0]).parent) / "Originales_respaldo")
+        return {"items": list(items.values()), "backup": backup}
+
+    def execute_gain_correction(self, plan):
+        """Aplica el plan: copia cada WAV original a Originales_respaldo (solo si todavía no está ahí, así el
+        respaldo siempre es el original), reescribe el WAV de la carpeta con la ganancia corregida y aplica la misma
+        ganancia al audio en memoria y a los niveles ya calculados. No hay Ctrl+Z: el respaldo es la vuelta atrás."""
+        import shutil
+        from pathlib import Path
+        import soundfile as sf
+        ma = self._ma
+        bak = Path(plan["backup"])
+        bak.mkdir(parents=True, exist_ok=True)
+        targets = [ma] + list((ma.notes or {}).values())
+        done, skipped, undo_items = [], [], []
+        for path, i, j, g in plan["items"]:
+            p = Path(path)
+            factor = 10 ** (g / 20)
+            try:
+                old_bytes = p.read_bytes()                # para Ctrl+Z: el archivo exactamente como estaba
+                info = sf.info(str(p))
+                data, sr = sf.read(str(p), dtype='float64', always_2d=True)
+                new = data * factor
+                if info.subtype.startswith('PCM') and float(np.max(np.abs(new))) >= 1.0:
+                    skipped.append(f"{p.name}: con +{g:.1f} dB se saturaría")
+                    continue
+                if not (bak / p.name).exists():
+                    shutil.copy2(str(p), str(bak / p.name))
+                sf.write(str(p), new, sr, subtype=info.subtype, format=info.format)
+            except Exception as e:
+                skipped.append(f"{p.name}: {e}")
+                continue
+            for t in targets:                          # audio en memoria y niveles ya calculados
+                if getattr(t, 'tensor', None) is not None:
+                    t.tensor[i, j, :] *= factor
+                cache = getattr(t, '_leq_cache', None)
+                if cache is not None:
+                    cache[0][i, j, :] += g
+                    cache[1][i, j] += g
+                glob = getattr(t, '_leq_global_cache', None)
+                if glob is not None:
+                    glob[i, j] += g
+            done.append((p.name, g))
+            undo_items.append((p, old_bytes, i, j, factor, g))
+        if undo_items:
+            self._undo_stack = getattr(self, '_undo_stack', []) + [
+                ('gain', undo_items, (dict(getattr(ma, '_mirror_src', None) or {}), dict(ma._mirror_cells)))]
+        if done and getattr(ma, '_leq_cache', None) is not None:
+            self._rebuild_after_leq()
+        for name, g in done:
+            self.log.emit(f"[Ganancia] {name}: {g:+.2f} dB")
+        for s in skipped:
+            self.log.emit(f"[Ganancia] NO modificado: {s}")
+        msg = f"Ganancia corregida en {len(done)} archivos; originales en {bak.name}. Ctrl+Z la deshace."
+        if skipped:
+            msg += f" {len(skipped)} sin modificar (ver Log)."
+        return msg
+
+    def _set_mirror_src(self, i_d, j_d, i_s, j_s):
+        """Anota de qué toma (giro) vino el dato de una posición reemplazada, para que la corrección
+        por toma use la de esa toma y no la del giro destino. Si la fuente ya era un reemplazo, sigue la cadena."""
+        src = self._ma.__dict__.setdefault('_mirror_src', {})
+        src[(i_d, j_d)] = src.get((i_s, j_s), i_s)
+        self._ma.register_mirror(i_d, j_d, i_s, j_s)     # el TDOA también lo tiene en cuenta
+
+    def _mirror_on_leq(self, pairs):
+        ma = self._ma
+        spl = ma._leq_cache[0]
+        glob = getattr(ma, '_leq_global_cache', None)
+        snap, n = [], 0
+        prev_src = (dict(getattr(ma, '_mirror_src', None) or {}), dict(ma._mirror_cells))
+        tensor = getattr(ma, 'tensor', None)             # el audio también cambia: así el TDOA lo ve siempre
+        for t_d, g_d, t_s, g_s in pairs:
+            i_d, j_d = self._grid_idx(ma.angles, g_d), self._grid_idx(ma.thetas, t_d)
+            i_s, j_s = self._grid_idx(ma.angles, g_s), self._grid_idx(ma.thetas, t_s)
+            if None in (i_d, j_d, i_s, j_s):
+                continue
+            old_audio = None if tensor is None else tensor[i_d, j_d, :].copy()
+            snap.append((i_d, j_d, spl[i_d, j_d, :].copy(), None if glob is None else glob[i_d, j_d].copy(), old_audio))
+            spl[i_d, j_d, :] = spl[i_s, j_s, :]           # todas las bandas de tercio a la vez
+            if glob is not None:
+                glob[i_d, j_d] = glob[i_s, j_s]
+            if tensor is not None:
+                tensor[i_d, j_d, :] = tensor[i_s, j_s, :]
+            self._set_mirror_src(i_d, j_d, i_s, j_s)
+            n += 1
+        if not n:
+            return "No hay reemplazos válidos."
+        self._undo_stack = getattr(self, '_undo_stack', []) + [('leq', snap, prev_src)]
+        self._rebuild_after_leq()
+        return f"Aplicados {n} reemplazos en todas las bandas."
+
+    def _rebuild_after_leq(self):
+        """Rehace la corrección entre tomas y el nivelado sobre la grilla por banda ya reemplazada."""
+        ma = self._ma
+        last = getattr(ma, '_last_corr', None)
+        if last is None:
+            return
+        was_onaxis = getattr(ma, 'leq_onaxis', None) is not None
+        ma.apply_take_correction_bands(ref_theta=last[0], ref_azimuth=last[1])
+        if was_onaxis:
+            ma.normalize_onaxis()
+        if getattr(ma, '_leq_global_cache', None) is not None:
+            ma.apply_take_correction_broadband(ref_theta=last[0], ref_azimuth=last[1])
+
+    def undo_replacements(self):
+        """Deshace el último lote de reemplazos (Ctrl+Z)."""
+        stack = getattr(self, '_undo_stack', [])
+        if not stack or self._ma is None:
+            return "Nada para deshacer."
+        kind, snap, (prev_src, prev_cells) = stack.pop()
+        self._ma._mirror_src = prev_src
+        self._ma._mirror_cells = prev_cells
+        if kind == 'gain':
+            ma = self._ma
+            targets = [ma] + list((ma.notes or {}).values())
+            for p, old_bytes, i, j, factor, g in snap:
+                p.write_bytes(old_bytes)                  # el WAV vuelve a ser byte a byte el de antes
+                for t in targets:
+                    if getattr(t, 'tensor', None) is not None:
+                        t.tensor[i, j, :] /= factor
+                    cache = getattr(t, '_leq_cache', None)
+                    if cache is not None:
+                        cache[0][i, j, :] -= g
+                        cache[1][i, j] -= g
+                    glob = getattr(t, '_leq_global_cache', None)
+                    if glob is not None:
+                        glob[i, j] -= g
+            if getattr(ma, '_leq_cache', None) is not None:
+                self._rebuild_after_leq()
+            return f"Deshecha la corrección de ganancia ({len(snap)} archivos restaurados)."
+        if kind == 'tensor':
+            for i_d, j_d, old in snap:
+                self._ma.tensor[i_d, j_d, :] = old
+            return f"Deshecho el último reemplazo ({len(snap)} tomas)."
+        spl = self._ma._leq_cache[0]
+        glob = getattr(self._ma, '_leq_global_cache', None)
+        tensor = getattr(self._ma, 'tensor', None)
+        for i_d, j_d, old, old_g, old_audio in snap:
+            spl[i_d, j_d, :] = old
+            if glob is not None and old_g is not None:
+                glob[i_d, j_d] = old_g
+            if tensor is not None and old_audio is not None:
+                tensor[i_d, j_d, :] = old_audio
+        self._rebuild_after_leq()
+        return f"Deshecho el último reemplazo ({len(snap)} tomas, todas las bandas)."
+
+    def show_graphs(self) -> bool:
+        """Mostrar gráficos: 2D, esfera y balloon toman la grilla procesada de la matriz (corrección,
+        nivelado, interpolación y suavizado incluidos). False si todavía no hay datos."""
+        m = self.matrix_bands()
+        if m is None:
+            return False
+        st = getattr(self, 'grid_state', None) or {}
+        self._hz_min = float(st.get('hz_min', self._hz_min))
+        self._hz_max = float(st.get('hz_max', self._hz_max))
+        lv, az, th, freqs, src, unit = m
+        fr = np.array([np.nan if f is None else float(f) for f in freqs], dtype=np.float32)
+        # todas las bandas: el rango de Hz lo aplican las vistas de Directividad (ver _refresh_display)
+        self.source_file    = None
+        self._unit          = unit
+        self._full_levels   = np.asarray(lv, dtype=np.float32)
+        self._full_azimuths = np.asarray(az, dtype=np.float32)
+        self._full_thetas   = np.asarray(th, dtype=np.float32)
+        self._full_bands    = fr
+        # el espectro vive en la grilla original (giros medidos); si la grilla se interpoló, se toma el giro más cercano
+        raw_m = self._matrix_bands_raw()
+        az_base = np.asarray(raw_m[1], dtype=float) if raw_m is not None else np.asarray(az, dtype=float)
+        raw, eq = self._reference_spectra(azimuths=az_base, freqs=fr)
+        if raw is None and self._raw_ref_spl is not None and self._ref_base_az is not None:
+            raw, eq, az_base = self._raw_ref_spl, self._eq_ref_spl, self._ref_base_az   # sin audios: el guardado
+        if raw is not None:
+            rows = [int(np.argmin(np.abs(az_base - float(a)))) for a in az]
+            raw = raw[rows]
+        self._raw_ref_spl, self._eq_ref_spl, self._ref_base_az = raw, eq, az_base
+        # la superficie y el esqueleto de la esfera toman la resolución de la grilla de Procesamiento
+        step = float(np.min(np.diff(np.unique(az)))) if len(np.unique(az)) > 1 else 10.0
+        for mode in ('3d', 'sphere'):
+            sec = self._sections.get(mode)
+            if sec is not None:
+                sec._style['interp_deg'] = step
+                sec.view.set_style(sec._style)
+        self._refresh_display()
+        return True
+
+    def _reference_spectra(self, azimuths=None, freqs=None):
+        """Espectro del micrófono de referencia por toma y banda (vista Espectro), calculado desde los
+        audios. Devuelve (crudo, igualado): crudo = nivel de cada toma; igualado = nivel de la toma base
+        (todas quedan en esa línea). Las bandas son las mostradas (self._full_bands)."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'tensor', None) is None or 'ref' not in list(ma.thetas):
+            return None, None
+        if ma._leq_cache is None:
+            ma.compute_leq_bands('1/3')
+        spl, _, freqs_c, _ = ma._leq_cache
+        azimuths = self._full_azimuths if azimuths is None else azimuths
+        freqs_show = self._full_bands if freqs is None else freqs
+        cols = [int(np.argmin(np.abs(np.asarray(freqs_c, float) - f))) for f in freqs_show]
+        i_ref = ma.thetas.index('ref')
+        raw = np.asarray(spl[:, i_ref, cols], dtype=np.float32)
+        # filas = giros de la grilla mostrada (puede estar afinada): el giro medido más cercano
+        rows = [int(np.argmin(np.abs(np.asarray(ma.angles, float) - a))) for a in azimuths]
+        raw = raw[rows]
+        base = int(float((getattr(self, 'grid_state', None) or {}).get('corr_base', 0)))
+        i_base = int(np.argmin(np.abs(np.asarray(azimuths, float) - base)))
+        return raw, raw[i_base]
+
+    def grid_snapshot(self):
+        """Grilla procesada de 10° (sin interpolar ni suavizar) para guardar en .gcclp. None si no hay datos."""
+        m = self._matrix_bands_raw()
+        if m is None:
+            return None
+        lv, az, th, freqs, src, unit = m
+        ref_raw, ref_eq = self._reference_spectra(az, freqs)
+        if ref_raw is None and self._raw_ref_spl is not None and self._raw_ref_spl.shape[0] == len(az):
+            ref_raw, ref_eq = self._raw_ref_spl, self._eq_ref_spl   # grilla abierta de archivo, sin audio
+        return dict(levels=lv, azimuths=az, thetas=th, freqs=freqs, unit=unit, ref_raw=ref_raw, ref_eq=ref_eq)
+
+    def grid_snapshots_all(self):
+        """Grilla procesada de la muestra completa y de cada nota extraída, para guardar en la sesión."""
+        ma = self._ma
+        names = ["Todo el audio"] + (list(ma.notes.keys()) if ma is not None and ma.notes else [])
+        keep, out = self._nota, {}
+        try:
+            for n in names:
+                self._nota = n
+                out[n] = self.grid_snapshot()
+        finally:
+            self._nota = keep
+        return out if out.get("Todo el audio") is not None else None
+
+    def load_grid_snapshot(self, d: dict):
+        """Abre una grilla guardada (.gcclp) y la muestra en la matriz y en los gráficos."""
+        self.source_file    = None
+        self._unit          = d['unit']
+        self._full_levels   = np.asarray(d['levels'], dtype=np.float32)
+        self._full_azimuths = np.asarray(d['azimuths'], dtype=np.float32)
+        self._full_thetas   = np.asarray(d['thetas'], dtype=np.float32)
+        self._full_bands    = np.asarray(d['freqs'], dtype=np.float32)
+        self._raw_ref_spl   = d.get('ref_raw')
+        self._eq_ref_spl    = d.get('ref_eq')
+        self._ref_base_az   = np.asarray(d['azimuths'], dtype=float)
+        self._refresh_display()
+
+    def matrix_bands(self):
+        """Matriz radial: niveles por banda ya con suavizado e interpolación (si están elegidos en el
+        panel izquierdo). Los valores medidos no cambian; la interpolación sólo agrega puntos."""
+        m = self._matrix_bands_raw()
+        st = getattr(self, 'grid_state', None)
+        if m is None or st is None:
+            return m
+        from mic_array import grid_refine as gr
+        lv, az, th, freqs, src, unit = m
+        lv = gr.smooth(lv, st.get('smooth_method', 'ninguno'), min(4, int(st.get('smooth_int', 0))))
+        lv, az, th = gr.interpolate(lv, az, th, st.get('interp_method', 'lineal'), float(st.get('interp_step', 0)))
+        return (lv, az, th, freqs, src, unit)
+
+    def _matrix_bands_raw(self):
+        """(niveles[azimut, elevación, banda], azimuts, elevaciones, frecuencias Hz, origen, unidad)
+        para la matriz radial. La corrección por toma (Aplicar) se suma acá, a cada giro, ANTES de
+        que la matriz promedie cenital y costura (esas celdas combinan tomas distintas)."""
+        ma = self._get_current_ma()
+        # Niveles por banda (Filtrar por bandas): corregidos si hubo Aplicar, si no sin corregir
+        if ma is not None and getattr(ma, 'leq_onaxis', None) is not None:
+            idx = [i for i, t in enumerate(ma.thetas) if t != 'ref']
+            th  = [float(ma.thetas[i]) for i in idx]
+            return (ma.leq_onaxis[:, idx, :], np.array(ma.angles, dtype=np.float32), np.array(th, dtype=np.float32),
+                    [float(f) for f in ma._leq_cache[2]], self.source_file, 'dB rel. on-axis (corregido)')
+        lv_bands = None
+        if ma is not None and getattr(ma, 'leq_corr', None) is not None:
+            lv_bands, unit_b = ma.leq_corr, 'dB SPL (corregido)'
+        elif ma is not None and getattr(ma, '_leq_cache', None) is not None:
+            lv_bands, unit_b = ma._leq_cache[0], ('dB SPL' if ma._is_spl else 'dBFS')
+        if lv_bands is not None:
+            idx = [i for i, t in enumerate(ma.thetas) if t != 'ref']
+            th  = [float(ma.thetas[i]) for i in idx]
+            freqs_b = ma._leq_cache[2] if getattr(ma, '_leq_cache', None) is not None else ma.dir_freqs
+            return (lv_bands[:, idx, :], np.array(ma.angles, dtype=np.float32), np.array(th, dtype=np.float32),
+                    [float(f) for f in freqs_b], self.source_file, unit_b)
+        shift = self._corr_shift()
+        if self._full_levels is not None:
+            from core.data_store import freq_label
+            freqs = [float(f) for f in self._full_bands]
+            lv = self._full_levels if shift is None else self._full_levels + shift[:, None, None]
+            return (lv, self._full_azimuths, self._full_thetas, freqs, self.source_file, 'dB rel. on-axis')
+        m = self.current_matrix()
+        if m is None:
+            return None
+        levels, az, th, label, src = m
+        unit = 'dB SPL' if getattr(self._ma, '_is_spl', False) else 'dB (sin calibrar)'
+        if shift is not None:
+            levels = levels + shift[:, None]
+        return (levels[:, :, None], az, th, [None], src, unit)
+
+    def corr_delta_2d(self):
+        """Corrección por toma aplicada (n_giros × bandas, dB) o None si todavía no hubo Aplicar."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'leq_corr', None) is None:
+            return None
+        return ma.dir_delta
+
+    def onaxis_ref_1d(self):
+        """Valor on-axis (dB, por banda) que se restó al nivelar, o None si no se niveló."""
+        ma = self._get_current_ma()
+        if ma is None or getattr(ma, 'leq_onaxis', None) is None or getattr(ma, 'leq_corr', None) is None:
+            return None
+        return ma.leq_corr[ma._az_to_row(0), ma._th_to_col(0), :]
+
+    def _corr_shift(self):
+        """Delta de corrección por toma (dB, banda ancha) por giro, o None si Aplicar no se usó."""
+        ma = self._get_current_ma()
+        d = getattr(ma, 'dir_delta_global', None) if ma is not None else None
+        return None if d is None else np.asarray(d, dtype=float)
+
+    def current_matrix(self):
+        """(niveles[azimut, elevación], azimuts, elevaciones, rótulo de la banda) de la banda mostrada."""
+        if self._full_levels is None:
+            # Sin patrón calculado: nivel RMS de cada toma directo de la señal (si hay audio cargado)
+            tensor = getattr(self._ma, 'tensor', None) if self._ma is not None else None
+            if tensor is None:
+                return None
+            def _num(v):
+                try:
+                    float(v)
+                    return True
+                except (TypeError, ValueError):
+                    return False
+            # thetas/angles pueden traer rótulos no numéricos (p. ej. 'ref', el micrófono de referencia)
+            ia = [i for i, v in enumerate(self._ma.angles) if _num(v)]
+            it = [j for j, v in enumerate(self._ma.thetas) if _num(v)]
+            rms = np.sqrt(np.mean(np.asarray(tensor, dtype=float) ** 2, axis=-1))
+            # señal calibrada (dB SPL): referencia 20 µPa, igual que el panel de Procesamiento
+            p_ref = 20e-6 if getattr(self._ma, '_is_spl', False) else 1.0
+            levels = 20.0 * np.log10(rms[np.ix_(ia, it)] / p_ref + 1e-12)   # (azimut, elevación)
+            files = getattr(self._ma, 'source_files', {}) or {}
+            # (azimut, elevación) -> ruta del WAV de esa toma
+            src = {(float(self._ma.angles[i]), float(self._ma.thetas[j])): files[(i, j)]
+                   for i in ia for j in it if (i, j) in files}
+            return (levels, np.asarray([float(self._ma.angles[i]) for i in ia]),
+                    np.asarray([float(self._ma.thetas[j]) for j in it]),
+                    "nivel RMS de cada toma (sin calcular el patrón)", src)
+        bi = min(self._current_band_idx, self._full_levels.shape[2] - 1)
+        hz = float(self._full_bands[bi])
+        from core.data_store import freq_label
+        return (self._full_levels[:, :, bi], self._full_azimuths, self._full_thetas,
+                f"banda {freq_label(hz)} Hz", self.source_file)
+
+    def apply_smoothing_settings(self, values: dict):
+        """Una sola configuración de suavizado para Polar 2D, Superficie 3D y Esfera (Herramientas
+        ▸ Suavizado…, ver ui/options_dialogs.py::SmoothingOptionsDialog) — reemplaza los paneles
+        de Suavizado/Interpolación que antes tenía cada Propiedades por separado, duplicados y
+        potencialmente desalineados entre sí."""
+        common = {k: values[k] for k in ('smoothing_method', 'smoothing_window', 'interp_deg')}
+        for mode in ('3d', 'sphere'):
+            sec = self._sections[mode]
+            sec._style.update(common, smoothing=values['spline_factor'])
+            sec.view.set_style(sec._style)
+        sec = self._sections['polar2d']
+        sec._style.update(common, interp_kind=values['interp_kind'])
+        sec.view.set_style(sec._style)
 
     # ── Construcción UI ───────────────────────────────────────────────────
 
@@ -1042,29 +1459,125 @@ class TabDirectividad(QWidget):
             if sec.isVisible():
                 sec.set_band(index)
 
-    def _run_compute(self, bands: str, ref_az: int, ref_th: int):
-        ma = self._get_current_ma()
-        ma.compute_directivity(
-            bands          = bands,
-            ref_azimuth    = ref_az,
-            ref_theta_plot = ref_th,
-        )
-        return ma
+    def _all_targets(self) -> list:
+        """Todo el audio + cada nota ya extraída (si hay). Filtrar por bandas, Corrección por toma
+        y Nivelar a on-axis dejan listo todo lo pendiente en un solo click: no tiene sentido ir
+        cambiando 'Nota a procesar' y repetir estos 3 pasos nota por nota."""
+        ma = self._ma
+        targets = [ma] if ma is not None else []
+        if ma is not None and ma.notes:
+            targets += list(ma.notes.values())
+        return [t for t in targets if getattr(t, 'tensor', None) is not None]
 
-    def _on_compute_done(self, ma):
-        nota = self._nota
-        if nota != "Todo el audio" and self._ma and self._ma.notes:
-            self._ma.notes[nota] = ma
-        else:
-            self._ma = ma
-        self._show_results(self._get_current_ma())
-        if self._full_levels is not None and self._full_bands is not None:
-            status = (
-                f"Dir. calculada — {self._full_levels.shape}  |  "
-                f"{self._full_bands[0]:.0f}–{self._full_bands[-1]:.0f} Hz"
-            )
-            self.computed.emit(self._full_thetas, status)
-        self.log.emit("[Directividad] Cómputo completado.")
+    def filter_bands(self) -> bool:
+        """Filtrar por bandas (1/3 de octava): Leq de cada grabación y banda (paso 1), para todo
+        el audio y cada nota extraída. Corre en un hilo con la barra de progreso de abajo.
+        Lo usa Aplicar. False si no hay audio."""
+        targets = self._all_targets()
+        if not targets:
+            return False
+
+        def run():
+            compute_bands_all(targets)
+
+        w = Worker(run)
+        w.label = "Filtrando por bandas 1/3…"
+        w.log.connect(self.log)
+        w.finished.connect(lambda _: self._on_filter_done(targets))
+        w.error.connect(lambda e: self.log.emit(e))
+        self._filter_worker = w
+        w.start()
+        return True
+
+    def inherit_note_corrections(self) -> bool:
+        """Las notas con niveles por banda que todavía no tienen corrección por toma / nivelación heredan las del audio
+        completo (mismo micrófono de referencia, toma base y nivelado). True si se tocó alguna."""
+        ma = self._ma
+        last = getattr(ma, '_last_corr', None) if ma is not None else None
+        if last is None or not ma.notes:
+            return False
+        mirror = getattr(ma, '_mirror_src', None) or {}
+        changed = False
+        for t in ma.notes.values():
+            if getattr(t, '_leq_cache', None) is None or getattr(t, '_last_corr', None) is not None:
+                continue
+            t._mirror_src = mirror
+            t.apply_take_correction_bands(ref_theta=last[0], ref_azimuth=last[1])
+            t._last_corr = last
+            if getattr(ma, 'leq_onaxis', None) is not None:
+                t.normalize_onaxis()
+            changed = True
+        if changed:
+            self.show_graphs()
+        return changed
+
+    def prepare_notes(self, only=None) -> bool:
+        """Notas extraídas sin niveles por banda: los calcula solos (1/3 de octava) y les aplica la misma corrección
+        por toma y nivelación que ya tenga el audio completo, así la matriz radial deja elegir nota y frecuencia
+        apenas se extraen (sin tener que volver a Filtrar). `only`: nombre de una sola nota. False si no hay nada."""
+        ma = self._ma
+        if ma is None or not ma.notes or (getattr(self, '_notes_worker', None) is not None
+                                          and self._notes_worker.isRunning()):
+            return False
+        notes = [t for k, t in ma.notes.items()
+                 if (only is None or k == only) and getattr(t, 'tensor', None) is not None
+                 and getattr(t, '_leq_cache', None) is None]
+        if not notes:
+            return False
+
+        def run():
+            compute_bands_all(notes)
+
+        def done(_):
+            self.inherit_note_corrections()
+            self.show_graphs()
+            self.log.emit(f"[Notas] {len(notes)} nota(s) filtradas por bandas de 1/3 de octava: ya se pueden elegir "
+                          "nota y frecuencia en la matriz.")
+
+        w = Worker(run)
+        w.label = "Filtrando las notas por bandas 1/3…"
+        w.log.connect(self.log)
+        w.finished.connect(done)
+        w.error.connect(lambda e: self.log.emit(e))
+        self._notes_worker = w
+        w.start()
+        return True
+
+    def _on_filter_done(self, targets):
+        self.show_graphs()   # la matriz se redibuja con las bandas nuevas
+        ma = targets[0]
+        n = len(ma._leq_cache[2]) if getattr(ma, '_leq_cache', None) is not None else '?'
+        self.step_done.emit('filter_bands', f"{n} bandas de 1/3 de octava")
+        extra = f" + {len(targets) - 1} nota(s)" if len(targets) > 1 else ""
+        self.log.emit(f"[Filtrar] Leq por posición en {n} bandas de 1/3 de octava (todo el audio{extra}).")
+
+    def nivelar_onaxis(self) -> bool:
+        """Nivelar a on-axis (paso 3): sobre la grilla corregida, cada banda queda en 0 dB en
+        (0°, 0°) — para todo el audio y cada nota extraída que ya tenga corrección por toma."""
+        targets = [t for t in self._all_targets() if getattr(t, 'leq_corr', None) is not None]
+        if not targets:
+            return False
+        for t in targets:
+            t.normalize_onaxis()
+        self.show_graphs()
+        return True
+
+    def apply_take_correction(self, ref_az: int) -> bool:
+        """Aplicar: corrección por toma banda por banda (tercios), para todo el audio y cada nota
+        extraída. Mic de referencia = corr_ref_th, toma base = ref_az. Calcula el Leq por banda si
+        falta (con audio cargado). False si no hay audio."""
+        targets = self._all_targets()
+        if not targets:
+            return False
+        mirror_src = getattr(self._ma, '_mirror_src', None) or {}
+        for t in targets:
+            t._mirror_src = mirror_src      # las notas comparten la grilla: mismos reemplazos
+            if t._leq_cache is None:
+                t.compute_leq_bands('1/3')
+            t.apply_take_correction_bands(ref_theta=self.corr_ref_th, ref_azimuth=ref_az)
+            t._last_corr = (self.corr_ref_th, ref_az)
+        self.show_graphs()
+        return True
 
     def _show_results(self, ma):
         if ma.dir_levels is None:
@@ -1074,10 +1587,9 @@ class TabDirectividad(QWidget):
         theta_idx  = [ma.thetas.index(t) for t in thetas_num]
 
         # Aplicar rango de frecuencias definido por el usuario al momento del cómputo
-        band_mask = (ma.dir_freqs >= self._hz_min) & (ma.dir_freqs <= self._hz_max)
-        if not band_mask.any():
-            band_mask = np.ones(len(ma.dir_freqs), dtype=bool)
+        band_mask = np.ones(len(ma.dir_freqs), dtype=bool)   # sin recorte: el rango lo aplican las vistas
 
+        self.source_file = None   # calculado desde audio, no desde un archivo
         self._full_levels   = ma.dir_levels[:, theta_idx, :][:, :, band_mask]
         self._full_azimuths = np.array(ma.angles,  dtype=np.float32)
         self._full_thetas   = np.array(thetas_num, dtype=np.float32)
@@ -1095,13 +1607,13 @@ class TabDirectividad(QWidget):
             n_az = len(ma.angles)
             self._raw_ref_spl = np.tile(ma.dir_ref_spl[band_mask], (n_az, 1)).astype(np.float32)
             self._eq_ref_spl  = ma.dir_ref_spl[band_mask].astype(np.float32)
-        else:
-            self._raw_ref_spl = None
-            self._eq_ref_spl  = None
+        # sin datos de referencia nuevos: se conserva el espectro que ya había (nunca se borra)
 
         self._refresh_display()
 
     def _refresh_display(self):
+        if self.on_data_changed is not None:
+            self.on_data_changed()          # p. ej. la matriz radial abierta se actualiza
         if self._full_levels is None:
             return
 
@@ -1122,7 +1634,9 @@ class TabDirectividad(QWidget):
             f_ref = None
 
         self.band_selector.set_bands(f_bands)
-        self._sections['spectrum'].view.set_unit(self._unit)
+        # el espectro muestra niveles absolutos del micrófono de referencia (no relativos al on-axis)
+        spec_unit = 'dBFS' if ('dBFS' in self._unit or 'sin calibrar' in self._unit) else 'dB SPL'
+        self._sections['spectrum'].view.set_unit(spec_unit)
         # Clamp el índice de banda al nuevo tamaño de f_bands
         safe_band = min(self._current_band_idx, max(0, len(f_bands) - 1))
 
@@ -1244,88 +1758,44 @@ class TabDirectividad(QWidget):
             return self._ma.notes.get(self._nota, self._ma)
         return self._ma
 
-    def _on_error(self, msg: str):
-        self.log.emit(f"[ERROR]\n{msg}")
-
-    # ── API pública ───────────────────────────────────────────────────────
+    def play_cell(self, azimuth: float, theta: float) -> str:
+        """Reproduce la toma del micrófono/azimut/elevación elegidos (sólo si el audio está en
+        memoria, es decir, sesión cargada desde los audios; en un .cclp no hay señal)."""
+        ma = self._get_current_ma()
+        tensor = getattr(ma, 'tensor', None) if ma is not None else None
+        if tensor is None:
+            return "Esta sesión no tiene el audio cargado (es un .cclp). Cargá los audios para escuchar."
+        # sólo entradas numéricas (el micrófono de referencia 'ref' no tiene elevación)
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+        ang = [(i, _num(v)) for i, v in enumerate(ma.angles)]
+        ang = [(i, v) for i, v in ang if v is not None]
+        ths = [(j, _num(v)) for j, v in enumerate(ma.thetas)]
+        ths = [(j, v) for j, v in ths if v is not None]
+        ia, va = min(ang, key=lambda t: abs(t[1] - azimuth))
+        it, vt = min(ths, key=lambda t: abs(t[1] - theta))
+        from ui.audio_play import play_signal, play_file
+        src = (getattr(ma, 'source_files', {}) or {}).get((ia, it))
+        if src:                                   # el WAV original de esa toma (directorio de carga)
+            play_file(src)
+        else:                                     # sin ruta (p. ej. audio armado en memoria)
+            play_signal(tensor[ia, it, :], ma.sr)
+        return f"Reproduciendo azimut {va:.0f}°, elevación {vt:.0f}°"
 
     def get_ma(self):
         """MicArray con la directividad calculada (y .notes poblado si se
         computó por nota) — puede ser un objeto distinto al que se pasó a
-        set_ma() la primera vez, ver _on_compute_done()."""
+        set_ma() la primera vez."""
         return self._ma
 
     def set_ma(self, ma):
         self._ma = ma
         self._npz = None
         if ma.dir_levels is not None:
-            self._show_results(ma)
-            status = (
-                f"Dir. disponible — {ma.dir_levels.shape}  |  "
-                f"{ma.dir_freqs[0]:.0f}–{ma.dir_freqs[-1]:.0f} Hz"
-            )
-            self.computed.emit(
-                np.array([t for t in ma.thetas if t != 'ref'], dtype=np.float32),
-                status,
-            )
-
-    def compute(self, bands: str, hz_min: float, hz_max: float,
-                ref_az: int, ref_th: int):
-        if self._ma is None or (self._worker and self._worker.isRunning()):
-            return
-        self._hz_min = hz_min
-        self._hz_max = hz_max
-        self.log.emit("[Directividad] Calculando…")
-        self._worker = Worker(
-            lambda: self._run_compute(bands, ref_az, ref_th)
-        )
-        self._worker.label = "Calculando directividad…"
-        self._worker.log.connect(self.log)
-        self._worker.finished.connect(self._on_compute_done)
-        self._worker.error.connect(self._on_error)
-        self._worker.start()
-
-    def compute_all(self, bands: str, hz_min: float, hz_max: float,
-                    ref_az: int, ref_th: int):
-        """Calcula directividad para todo el audio y todas las notas en batch."""
-        if self._ma is None or (self._worker and self._worker.isRunning()):
-            return
-        self._hz_min = hz_min
-        self._hz_max = hz_max
-
-        n_notes = len(self._ma.notes) if self._ma.notes else 0
-        n_total = 1 + n_notes
-
-        # El progreso se ve en la barra de estado (sin diálogo modal: una ventana extra que aparece y
-        # desaparece hacía parpadear la aplicación).
-        self._worker = _ComputeAllWorker(self._ma, bands, ref_az, ref_th)
-        self._worker.log.connect(self.log)
-        self._worker.all_done.connect(self._on_all_done)
-        self._worker.error.connect(self._on_error)
-
-        self.log.emit(
-            f"[Directividad] Iniciando cómputo — "
-            f"1 audio completo + {n_notes} nota(s)…"
-        )
-        self._worker.start()
-
-    def _on_all_done(self):
-        # Mostrar resultados del audio completo por defecto
-        self._nota = "Todo el audio"
-        self._show_results(self._ma)
-        if self._ma.dir_levels is not None:
-            status = (
-                f"Dir. calculada — {self._ma.dir_levels.shape}  |  "
-                f"{self._ma.dir_freqs[0]:.0f}–{self._ma.dir_freqs[-1]:.0f} Hz"
-                + ("" if self._ma._is_spl else "  |  SIN CALIBRAR (dBFS)")
-            )
-            self.computed.emit(
-                np.array([t for t in self._ma.thetas if t != 'ref'],
-                         dtype=np.float32),
-                status,
-            )
-        self.log.emit("[Directividad] Todas las configuraciones calculadas.")
-        self.compute_finished.emit()
+            self._show_results(ma)      # el estado y las elevaciones los actualiza MainWindow (ribbon.set_dir_computed)
 
     def load_from_npz(self, data: dict) -> list:
         """Carga resultados desde el dict devuelto por data_store.load_results().
@@ -1381,7 +1851,7 @@ class TabDirectividad(QWidget):
         self._spec_data   = params.get('spec_data', 0)
         self._spec_global = params.get('spec_global', True)
 
-        cs = params.get('colorscale', 'Plasma')
+        cs = params.get('colorscale', 'RdBu v4')
         for sec in self._sections.values():
             sec.set_colorscale(cs)
 
@@ -1404,9 +1874,16 @@ class TabDirectividad(QWidget):
                 self._apply_npz_entry(self._nota)
                 return
             current_ma = self._get_current_ma()
-            if current_ma is not None and current_ma.dir_levels is not None:
-                self._show_results(current_ma)
-                return
+            if current_ma is not None:
+                # pipeline nuevo (Filtrar/Aplicar/Nivelar): cada nota tiene su propia grilla por banda
+                if getattr(current_ma, '_leq_cache', None) is not None and self.show_graphs():
+                    return
+                # sesión .cclp vieja: la directividad ya venía calculada por nota
+                if current_ma.dir_levels is not None:
+                    self._show_results(current_ma)
+                    return
+                # nota recién elegida, todavía sin filtrar: limpiar para no mostrar la nota anterior
+                self._full_levels = None
 
         self._refresh_display()
 
@@ -1431,8 +1908,13 @@ class TabDirectividad(QWidget):
                 .replace(" ", "_"))
 
         if mode != "spectrum":
+            # La frecuencia del nombre sale del band_selector (lo que el usuario efectivamente
+            # ve resaltado), no de self._full_bands[self._current_band_idx]: ese array puede
+            # quedar con otro recorte de Rango (Hz) que el que se le pasó al selector la última
+            # vez (p. ej. si se cambió el rango sin recalcular), desincronizando los índices y
+            # guardando el nombre con una banda distinta a la que se está viendo.
             bi   = min(self._current_band_idx, len(self._full_bands) - 1)
-            freq = int(round(float(self._full_bands[bi])))
+            freq = int(round(self.band_selector.current_band_hz()))
             cmp_idx = [i for i in (self._sections[mode]._compare_indices or []) if i < len(self._full_bands)]
             if mode == "polar2d" and len(cmp_idx) >= 2:      # comparación: todas las bandas superpuestas
                 freq = "-".join(str(int(round(float(self._full_bands[i])))) for i in sorted(cmp_idx))

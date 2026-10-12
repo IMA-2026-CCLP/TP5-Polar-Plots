@@ -30,6 +30,9 @@ COLORSCALES = {
     "Cividis":  _seq("Cividis"),
     "Turbo":    _seq("Turbo"),
     "Hot":      "Hot",
+    # Misma paleta que la v4 (Plotly RdBu invertida: azul oscuro abajo, rojo arriba)
+    # Azul → magenta → rojo (sin blanco; el magenta evita el tono gris-apagado de mezclar azul y rojo).
+    "RdBu v4":  _cs(["#1d3f9a", "#9a1fa6", "#c81d25"]),
 }
 
 # ── Helpers comunes ───────────────────────────────────────────────────────────
@@ -721,6 +724,10 @@ def build_sphere_html(
             "thickness": 16, "len": 0.6, "x": 0.92,
             "tickfont":  {"color": style.get('text_color') or _TEXT_COL, "size": FONT_SIZE},
             "titlefont": {"color": style.get('text_color') or _TEXT_COL, "size": FONT_SIZE},
+            # marcas de la escala cada `colorbar_step` dB (alineadas a múltiplos del paso)
+            "tickmode":  "linear",
+            "tick0":     float(np.ceil(float(cmin) / float(style.get('colorbar_step', 1.0))) * float(style.get('colorbar_step', 1.0))),
+            "dtick":     float(style.get('colorbar_step', 1.0)),
         },
         "lighting":      {"ambient": 0.75, "diffuse": 0.7, "specular": 0.15, "roughness": 0.4},
         "lightposition": {"x": 100, "y": 100, "z": 150},
@@ -756,6 +763,40 @@ _COMPARE_COLORS = [
     "#ff6b6b", "#51cf66", "#ffd43b",
     "#c084fc", "#22d3ee", "#fb923c", "#f472b6",
 ]
+
+# Estilo por defecto de cada banda comparada en Polar 2D, por frecuencia (Hz): los colores y tipos de
+# línea de la exportación compar6. Así cada banda conserva su color al cambiar de plano o de selección.
+_COMPARE_BY_HZ = {
+    315:   {'color': '#000080', 'width': 2, 'dash': 'dash'},
+    400:   {'color': '#ffa500', 'width': 2, 'dash': 'dot'},
+    500:   {'color': '#00ff7f', 'width': 2, 'dash': 'solid'},
+    630:   {'color': '#ff00ff', 'width': 2, 'dash': 'dashdot'},
+    800:   {'color': '#50c878', 'width': 2, 'dash': 'solid'},
+    1000:  {'color': '#000080', 'width': 2, 'dash': 'dash'},
+    1250:  {'color': '#ffa500', 'width': 2, 'dash': 'dot'},
+    1600:  {'color': '#00ced1', 'width': 2, 'dash': 'solid'},
+    2000:  {'color': '#ff8c42', 'width': 2, 'dash': 'solid'},
+    2500:  {'color': '#00ff7f', 'width': 2, 'dash': 'solid'},
+    3150:  {'color': '#ff00ff', 'width': 2, 'dash': 'dashdot'},
+    4000:  {'color': '#ffa500', 'width': 2, 'dash': 'solid'},
+    5000:  {'color': '#20b2aa', 'width': 2, 'dash': 'solid'},
+    6300:  {'color': '#ff6b6b', 'width': 2, 'dash': 'solid'},
+    8000:  {'color': '#4caf50', 'width': 2, 'dash': 'solid'},
+    10000: {'color': '#ffd43b', 'width': 2, 'dash': 'solid'},
+}
+
+
+def default_compare_style(hz, band_index):
+    """Estilo por defecto de una banda comparada: por frecuencia si está en _COMPARE_BY_HZ,
+    si no, por su índice de banda (no por su posición en la selección)."""
+    try:
+        st = dict(_COMPARE_BY_HZ.get(int(round(float(hz))), {}))
+    except (TypeError, ValueError, OverflowError):      # banda sin frecuencia (RMS total / NaN): estilo por índice
+        st = {}
+    st.setdefault('color', _COMPARE_COLORS[int(band_index) % len(_COMPARE_COLORS)])
+    st.setdefault('dash', 'solid')
+    return st
+
 
 # Posición del texto de los anillos de dB relativa al punto sobre el eje
 # angular (ring_label_angle): 'center' = centrado sobre la línea, 'left'/

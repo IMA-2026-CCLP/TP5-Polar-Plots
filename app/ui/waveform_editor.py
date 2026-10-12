@@ -115,6 +115,17 @@ class WaveformEditorWidget(QWidget):
 
     # ── API pública ─────────────────────────────────────────────────────────
 
+    def set_corr_offset(self, fn):
+        """fn() → desplazamiento dB por azimut (corrección por toma) o None."""
+        self._corr_offset = fn
+
+    def _off(self, i_az):
+        fn = getattr(self, '_corr_offset', None)
+        if not self._db or fn is None:
+            return 0.0
+        arr = fn()
+        return float(arr[i_az]) if arr is not None and i_az < len(arr) else 0.0
+
     def set_ma(self, ma):
         self._ma = ma
         self._onset_line = None
@@ -198,6 +209,7 @@ class WaveformEditorWidget(QWidget):
             # overlay de todas las tomas para un theta fijo
             for i in range(ma.n_angles):
                 t, y = self._prepare(ma.tensor[i, i_th, :])
+                y = y + self._off(i)
                 ys.append(y)
                 col   = _OVERLAY_PALETTE[i % len(_OVERLAY_PALETTE)]
                 curve = self._plot.plot(t, y, pen=pg.mkPen(color=(*col, 150), width=1))
@@ -211,9 +223,13 @@ class WaveformEditorWidget(QWidget):
                 return
             for i_th_idx in range(ma.n_thetas):
                 t, y = self._prepare(ma.tensor[i_az, i_th_idx, :])
+                y = y + self._off(i_az)
                 ys.append(y)
                 col   = _OVERLAY_PALETTE[i_th_idx % len(_OVERLAY_PALETTE)]
-                curve = self._plot.plot(t, y, pen=pg.mkPen(color=(*col, 150), width=1))
+                rep   = (i_az, i_th_idx) in (getattr(ma, '_mirror_cells', None) or {})
+                pen   = pg.mkPen(color=(*col, 200), width=1.5, style=Qt.PenStyle.DashLine) if rep \
+                        else pg.mkPen(color=(*col, 150), width=1)      # punteado = reemplazado por su simétrico
+                curve = self._plot.plot(t, y, pen=pen)
                 self._curves.append(curve)
             self._build_legend(mode='th')
         else:
@@ -222,6 +238,7 @@ class WaveformEditorWidget(QWidget):
             except Exception:
                 return
             t, y = self._prepare(ma.tensor[i_az, i_th, :])
+            y = y + self._off(i_az)
             ys.append(y)
             p = _t.current()
             self._plot.plot(t, y, pen=pg.mkPen(p['accent'], width=1))
@@ -320,7 +337,8 @@ class WaveformEditorWidget(QWidget):
             return
 
         sig      = self._ma.tensor[i_az, i_th, :].astype(np.float64)
-        onset_s  = _detect_onset(sig, self._ma.sr, threshold_dB=self._threshold_dB) / self._ma.sr
+        onset_s  = _detect_onset(sig, self._ma.sr,
+                                 threshold_dB=self._threshold_dB + self._ma._thr_offset_db()) / self._ma.sr
 
         self._onset_line = pg.InfiniteLine(
             pos=onset_s, angle=90, movable=True,

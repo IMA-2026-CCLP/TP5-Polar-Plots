@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtGui import QFont, QFontDatabase, QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtCore import Qt
-# WebEngine debe importarse antes de crear QApplication
-from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+# (Ya no se usa Qt WebEngine: Superficie 3D, Esfera, Polar 2D y Espectro son nativos. Sacarlo del programa evita
+#  empaquetar el navegador interno, que pesaba más de 300 MB.)
 
 from version import __version__, APP_NAME
 from ui.main_window import MainWindow
@@ -95,6 +95,19 @@ def _make_splash_pixmap(w: int = 460, h: int = 280) -> QPixmap:
 
 
 def main():
+    # Obligatorio para que Superficie 3D (pyqtgraph.opengl, QOpenGLWidget) y Esfera
+    # (QWebEngineView/Plotly) convivan en la misma ventana sin corromperse el render entre
+    # sí (pantalla negra con contenido de otros paneles filtrándose adentro) — hay que
+    # setearlo ANTES de construir la QApplication, no alcanza con setearlo después.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+    # Buffer de profundidad explícito para los 3D (pyqtgraph.opengl): sin él el test de
+    # profundidad no funciona y los ejes X/Y/Z se dibujan siempre encima de la superficie, en
+    # vez de quedar tapados por ella según el ángulo de la cámara.
+    from PyQt6.QtGui import QSurfaceFormat
+    _fmt = QSurfaceFormat()
+    _fmt.setDepthBufferSize(24)
+    _fmt.setStencilBufferSize(8)
+    QSurfaceFormat.setDefaultFormat(_fmt)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)

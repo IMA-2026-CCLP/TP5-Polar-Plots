@@ -7,7 +7,7 @@ corregir la alineación arrastrando el cursor de onset.
 """
 import numpy as np
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 from PyQt6.QtCore import pyqtSignal
 
 from core.worker import Worker
@@ -15,8 +15,11 @@ from ui.waveform_editor import WaveformEditorWidget
 
 
 class TabPreprocesamiento(QWidget):
+    view_chosen = pyqtSignal(str)       # 'matrix' | 'db' | 'envelope' | 'amp' (desde el desplegable)
+
     ma_updated = pyqtSignal(object)
     log        = pyqtSignal(str)
+    op_done    = pyqtSignal(str, str)   # (botón, detalle): HPF / alinear tomas / alinear micrófonos terminadas
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,10 +31,62 @@ class TabPreprocesamiento(QWidget):
     def _build_ui(self):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        from PyQt6.QtWidgets import QStackedWidget, QComboBox, QHBoxLayout
+        # Selector de vista: arriba a la izquierda; con la matriz radial se mueve a su fila, junto a "Frecuencia:".
+        self._top_w = QWidget()
+        self._top = QHBoxLayout(self._top_w)
+        self._top.setContentsMargins(0, 0, 0, 0)
+        self._vista_box = QWidget()
+        vb = QHBoxLayout(self._vista_box)
+        vb.setContentsMargins(0, 0, 18, 0)
+        vlabel = QLabel("Vista:")
+        vlabel.setStyleSheet("font-weight: bold;")
+        vb.addWidget(vlabel)
+        self._view_combo = QComboBox()
+        self._view_combo.setMinimumWidth(130)
+        for label, key in (("Matriz radial", "matrix"), ("dB", "db"), ("Envolvente", "envelope"), ("Amplitud", "amp")):
+            self._view_combo.addItem(label, key)
+        self._view_combo.currentIndexChanged.connect(lambda _=None: self.view_chosen.emit(self._view_combo.currentData()))
+        vb.addWidget(self._view_combo)
+        self._top.addWidget(self._vista_box)
+        self._top.addStretch(1)
+        lay.addWidget(self._top_w)
+        self._stack = QStackedWidget()          # Vista: señal (waveform) o matriz radial
         self._editor = WaveformEditorWidget()
         self._editor.log.connect(self.log)
         self._editor.onset_dragged.connect(self._on_onset_dragged)
-        lay.addWidget(self._editor)
+        self._stack.addWidget(self._editor)
+        lay.addWidget(self._stack)
+
+    def set_sample_widget(self, w):
+        """Desplegable de Muestra (toda la muestra / cada nota): va a la derecha de Vista y se mueve con ella
+        (junto a Frecuencia en la matriz radial)."""
+        lab = QLabel("Muestra:")
+        lab.setStyleSheet("font-weight: bold;")
+        lay = self._vista_box.layout()
+        lay.addWidget(lab)
+        lay.addWidget(w)
+
+    def set_view_choice(self, key):
+        i = self._view_combo.findData(key)
+        if i >= 0 and i != self._view_combo.currentIndex():
+            self._view_combo.blockSignals(True)
+            self._view_combo.setCurrentIndex(i)
+            self._view_combo.blockSignals(False)
+
+    def show_matrix(self, panel):
+        panel.set_leading_widget(self._vista_box)     # Vista junto a Frecuencia, en la misma fila
+        self._top_w.hide()
+        if self._stack.indexOf(panel) < 0:
+            self._stack.addWidget(panel)
+        self._stack.setCurrentWidget(panel)
+
+    def show_waveform(self):
+        if self._vista_box.parent() is not self._top_w:
+            self._vista_box.setParent(None)
+            self._top.insertWidget(0, self._vista_box)
+        self._top_w.show()
+        self._stack.setCurrentWidget(self._editor)
 
     # ── API pública (llamada desde MainWindow / Ribbon) ───────────────────────
 
@@ -55,6 +110,7 @@ class TabPreprocesamiento(QWidget):
         if self._ma is None or self._busy():
             return
         self.log.emit(f"[Procesamiento] Aplicando HPF {hz:.0f} Hz…")
+        self._op = ('hpf', f"HPF {hz:.0f} Hz")
         self._worker = Worker(lambda: self._run_hpf(hz))
         self._worker.label = "Aplicando filtro pasa-altos…"
         self._worker.log.connect(self.log)
@@ -66,6 +122,7 @@ class TabPreprocesamiento(QWidget):
         if self._ma is None or self._busy():
             return
         self.log.emit(f"[Procesamiento] Alineando tomas (onset={onset}s, θ={theta}, ventana={window_ms:.0f}ms)…")
+        self._op = ('align_takes', f"onset {onset} s, umbral {thresh} dB")
         self._worker = Worker(lambda: self._run_align_takes(onset, thresh, theta, window_ms))
         self._worker.label = "Alineando tomas…"
         self._worker.log.connect(self.log)
@@ -76,8 +133,10 @@ class TabPreprocesamiento(QWidget):
     def align_ref(self, gcc_thresh=None):
         if self._ma is None or self._busy():
             return
-        thr_str = f"{gcc_thresh} dBFS" if gcc_thresh is not None else "sin umbral"
+        unit = "dB SPL" if getattr(self._ma, '_is_spl', False) else "dBFS"
+        thr_str = f"{gcc_thresh} {unit}" if gcc_thresh is not None else "sin umbral"
         self.log.emit(f"[Procesamiento] Alineando a referencia (GCC-PHAT, {thr_str})…")
+        self._op = ('align_ref', f"GCC-PHAT, {thr_str}")
         self._worker = Worker(lambda: self._run_align_ref(gcc_thresh))
         self._worker.label = "Alineando micrófonos…"
         self._worker.log.connect(self.log)
@@ -112,6 +171,10 @@ class TabPreprocesamiento(QWidget):
         else:
             tmp[:, :n + shift] = ma.tensor[az_idx, :, -shift:]
         ma.tensor[az_idx] = tmp
+        one = [0] * ma.n_angles
+        one[az_idx] = int(shift)
+        ma._acc_shift('align_takes_shifts', one)     # el ajuste manual también viaja en la máscara
+        ma.reapply_mirrors()                          # los canales reemplazados siguen a su fuente
 
         self.log.emit(
             f"[Procesamiento] Toma {ma.angles[az_idx]}° desplazada "
@@ -137,6 +200,9 @@ class TabPreprocesamiento(QWidget):
         self._ma = ma
         self.ma_updated.emit(ma)
         self.log.emit("[Procesamiento] Listo.")
+        op = getattr(self, '_op', None)
+        if op:
+            self.op_done.emit(*op)
 
     def _on_error(self, msg: str):
         self.log.emit(f"[ERROR]\n{msg}")

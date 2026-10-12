@@ -1,0 +1,1065 @@
+"""
+ui/gl3d_view.py — Vista nativa (pyqtgraph.opengl) de Superficie 3D. PILOTO de migración
+fuera de Plotly/QWebEngineView (ver comentario en tab_directividad.py::_VIEW_CLASS_BY_MODE).
+
+Reemplaza a BalloonView para el modo '3d' únicamente ('sphere' sigue en Plotly por ahora).
+La matemática de la malla (interpolación, suavizado, combinación frente/atrás, cap del
+cénit) se REUSA tal cual de plot/balloon.py (_build_hemisphere_grid) — sólo cambia cómo se
+dibuja: acá con GLMeshItem/GLLinePlotItem/GLTextItem nativos en vez de un mesh3d de Plotly
+dentro de un navegador embebido.
+
+Ventajas sobre BalloonView para este modo: sin Chromium de por medio (arranca más rápido,
+la app pesa menos), exportación y clic derecho nativos de Qt (sin los relays por consola
+que necesitaba Plotly porque WebGL se comía los eventos).
+
+Simplificaciones deliberadas de este primer piloto (fáciles de revisar/ajustar después):
+  - Cámara: pyqtgraph.opengl no tiene proyección ortográfica nativa: la vista "Isométrica"
+    queda en perspectiva (el ángulo isométrico sí es exacto, sólo cambia la proyección).
+  - Grilla: Plotly dibujaba una caja con grid en los 3 ejes; acá se reemplaza por círculos
+    de referencia (latitud/longitud), que tiene más sentido con datos inherentemente
+    esféricos — el control de color/grosor de "Ejes / grilla" en Propiedades sigue vivo,
+    ahora estiliza estos círculos.
+  - No hay tooltip al pasar el mouse sobre la malla (Plotly sí lo tenía).
+
+Bugs reales encontrados y corregidos tras la primera prueba en una PC real (ver historial de
+commits para el detalle de cada uno):
+  - El shader 'shaded' de pyqtgraph aplica una luz direccional fija que oscurecía casi a negro
+    cualquier cara que no mirara hacia esa dirección — se sacó (sin shader = colores planos,
+    fieles al dato).
+  - El cénit se armaba como una malla de "cap" aparte (anillo + un punto ápice) y, como el
+    anillo no es perfectamente plano (sigue la forma del dato), el ápice podía quedar más bajo
+    que partes del anillo y dejar un hueco visible. Ahora el polo es una fila más de la propia
+    grilla (todas las columnas colapsan al mismo punto): la superficie queda cerrada sin
+    discontinuidades siempre, sin tratamiento especial.
+  - La exportación usaba el último preset de cámara aplicado (self._camera) en vez de la
+    posición VIVA (self._gl.cameraParams()), así que ignoraba cualquier rotación/zoom hecho a
+    mano con el mouse. Ahora lee la cámara viva.
+  - Crear y destruir un GLViewWidget nuevo en cada exportación resultó poco confiable (la
+    segunda exportación seguida en el mismo proceso podía salir con errores de OpenGL e imagen
+    en blanco) — ahora se reusa un único widget de exportación (_get_export_clone) de principio
+    a fin de la sesión de trabajo.
+
+API pública: espejo del subconjunto de BalloonView que usa TabDirectividad para el modo
+'3d' (ver ui/tab_directividad.py::_ViewSection) — mismos nombres de método, misma firma.
+"""
+import numpy as np
+from PyQt6.QtWidgets import QWidget, QStackedLayout, QHBoxLayout, QLabel, QApplication
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QImage, QColor, QPixmap, QVector3D
+
+import pyqtgraph.opengl as gl
+
+from plot.balloon import (
+    _build_hemisphere_grid, FONT_SIZE, DEFAULT_SMOOTH_METHOD, DEFAULT_SMOOTH_WINDOW,
+    DEFAULT_INTERP_DEG, COLORSCALES,
+)
+from core.data_store import freq_label
+from core.symmetry_utils import apply_symmetry
+
+# Presets de cámara — mismos ángulos que _CAMERA_PRESETS de ui/balloon_view.py (Plotly),
+# convertidos de vector "eye" a (elevación, azimut) de pyqtgraph.opengl.
+# GLViewWidget.cameraPosition(): pos = centro + dist·(cos(elev)cos(az), cos(elev)sin(az), sin(elev))
+# — mismo Z-arriba que el resto de la app (X=frente/0°, Y=90°, Z=cénit), sin remapeo de ejes.
+_CAMERA_PRESETS = {
+    "top":     dict(elevation=90.0,    azimuth=0.0),
+    "bottom":  dict(elevation=-90.0,   azimuth=0.0),
+    "front":   dict(elevation=0.0,     azimuth=0.0),
+    "back":    dict(elevation=0.0,     azimuth=180.0),
+    "iso":     dict(elevation=35.264,  azimuth=45.0),     # ángulo isométrico clásico
+    "default": dict(elevation=24.23,   azimuth=36.87),
+}
+_CAMERA_CENTER_Z = 0.5
+_DEFAULT_DISTANCE = 4.6   # lejos: que entre toda la cúpula sin recortar
+_AXIS_LEN = 1.4
+# Micrófonos rotos del array (theta en grados). Sus datos se reemplazan por los del mic
+# opuesto (180° - theta), que es el "otro lado" del patrón; ver _replace_broken_mics.
+BROKEN_MIC_THETAS = (80.0,)
+_LABEL_OFFSET = 1.12   # factor sobre _AXIS_LEN para separar la etiqueta de la punta del eje
+_AXES = (  # (vector, etiqueta, color) — idéntico a plot/balloon.py::_axes_traces
+    ((_AXIS_LEN, 0, 0), "X (0°)",    QColor("#ff6b6b")),
+    ((0, _AXIS_LEN, 0), "Y (90°)",   QColor("#51cf66")),
+    ((0, 0, _AXIS_LEN), "Z (cénit)", QColor("#0d6dff")),
+)
+
+
+def _parse_color(c: str) -> list:
+    """'#rrggbb' o 'rgb(r,g,b)' → [r,g,b] 0–1 (las paletas de plot/balloon.py mezclan los dos
+    formatos: _seq() usa las de plotly.colors, en hex; PLOTLY_SCALES['Hot'] viene en rgb())."""
+    if c.startswith('#'):
+        c = c.lstrip('#')
+        return [int(c[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    nums = c[c.index('(') + 1: c.index(')')].split(',')
+    return [float(n) / 255.0 for n in nums[:3]]
+
+
+_LIGHT_DIR = np.array([-0.4, -0.5, 0.77]) / np.linalg.norm([-0.4, -0.5, 0.77])
+
+
+# Reflejo especular fijo (media entre la luz y la vista frontal), como el brillo de la v4 en Plotly.
+_SPEC_DIR = _LIGHT_DIR + np.array([0.0, 0.0, 1.0])
+_SPEC_DIR = _SPEC_DIR / np.linalg.norm(_SPEC_DIR)
+
+
+def _shade_vertex_colors(md) -> np.ndarray:
+    """Colores de vértice con sombreado: base luminosa (0.85..1.0 como la v4) + reflejo especular
+    blanco suave (ver _make_surface_item)."""
+    colors = md.vertexColors().copy()
+    normals = md.vertexNormals()
+    lambert = np.clip(normals @ _LIGHT_DIR, 0.0, 1.0)
+    spec = np.clip(normals @ _SPEC_DIR, 0.0, 1.0) ** 12 * 0.25
+    colors[:, :3] = np.clip(colors[:, :3] * (0.9 + 0.25 * lambert)[:, None] + spec[:, None], 0.0, 1.0)
+    return colors
+
+
+def _clean_outliers(lev_2d: np.ndarray, thetas, drop_db: float = 12.0) -> np.ndarray:
+    """Valores falsos de un mic (muy por debajo de los dos vecinos en theta, mismo azimut) se
+    reemplazan por el promedio de esos vecinos. Así un mic con datos malos en algunos azimutes no
+    contamina la reparación de otro mic (ver _replace_broken_mics)."""
+    thetas = np.asarray(thetas, dtype=float)
+    order = np.argsort(thetas)
+    out = lev_2d.astype(float).copy()
+    lev = lev_2d[:, order].astype(float)
+    res = out[:, order].copy()
+    for i in range(1, lev.shape[1] - 1):
+        left, right = lev[:, i - 1], lev[:, i + 1]
+        bad = lev[:, i] < np.minimum(left, right) - drop_db
+        res[bad, i] = 0.5 * (left[bad] + right[bad])
+    out[:, order] = res
+    return out
+
+
+def _replace_broken_mics(lev_2d: np.ndarray, thetas, azimuths) -> np.ndarray:
+    """Un mic roto deja su columna (theta) con datos falsos en todos los azimuts, y la grilla lo
+    combina con su par frontal/trasero (theta y 180-theta) → media superficie se hunde. Se
+    "miente" el dato: en cada azimut a, la columna rota toma el dato del mic opuesto (180-theta)
+    en el azimut espejado (180-a) — el patrón es simétrico izquierda/derecha."""
+    thetas = np.asarray(thetas, dtype=float)
+    azimuths = np.asarray(azimuths, dtype=float)
+    out = lev_2d.astype(float).copy()
+    # índice del azimut espejado (180-a) para cada azimut medido
+    mirror_az = np.array([int(np.argmin(np.abs(azimuths - (180.0 - a)))) for a in azimuths])
+    for bad in BROKEN_MIC_THETAS:
+        i_bad = int(np.argmin(np.abs(thetas - bad)))
+        i_opp = int(np.argmin(np.abs(thetas - (180.0 - bad))))
+        if i_bad != i_opp and np.abs(thetas[i_bad] - bad) <= 1.0 and np.abs(thetas[i_opp] - (180.0 - bad)) <= 1.0:
+            out[:, i_bad] = lev_2d[mirror_az, i_opp]
+    return out
+
+def _fill_missing_thetas(lev_2d: np.ndarray, thetas: np.ndarray):
+    """Repara el dato de micrófonos rotos antes de la grilla: los thetas ausentes y los valores
+    no finitos (NaN/-inf) se reemplazan por interpolación lineal en dB con los vecinos válidos
+    del mismo azimut. Sin esto, _render_inner toma esos NaN como vmin y la superficie se hunde.
+    Devuelve (lev_2d, thetas) con la grilla regular completa."""
+    thetas = np.asarray(thetas, dtype=float)
+    if len(thetas) < 3:
+        return lev_2d, thetas
+    order = np.argsort(thetas)
+    th = thetas[order]
+    lev = lev_2d[:, order].astype(float)
+    step = float(np.median(np.diff(th)))
+    if step <= 0:
+        return lev_2d, thetas
+    grid = np.arange(th[0], th[-1] + step * 0.5, step)
+    missing = [g for g in grid if np.min(np.abs(th - g)) > step * 0.6]
+    new_th = np.concatenate([th, missing]) if missing else th
+    new_lev = np.empty((lev.shape[0], len(new_th)))
+    new_lev[:, :len(th)] = lev
+    new_lev[:, len(th):] = np.nan
+    # Valores no finitos (mic sin dato / -inf) y thetas ausentes: se "miente" el dato
+    # interpolando en theta con los vecinos válidos del mismo azimut, en vez de dejar que
+    # entren como vmin y hundan la superficie.
+    o = np.argsort(new_th)
+    new_th = new_th[o]
+    new_lev = new_lev[:, o]
+    for a in range(new_lev.shape[0]):
+        row = new_lev[a]
+        ok = np.isfinite(row)
+        if not ok.all() and ok.any():
+            row[~ok] = np.interp(new_th[~ok], new_th[ok], row[ok])
+    return new_lev, new_th
+
+
+def _colorscale_stops(name: str):
+    """(t_stops, rgb_stops 0–1) desde COLORSCALES (listas [pos, color] de plot/balloon.py,
+    mismas que usa Plotly) — listo para np.interp."""
+    stops = COLORSCALES.get(name, COLORSCALES["Plasma"])
+    if isinstance(stops, str):          # "Hot": nombre de escala nativa de Plotly, sin lista explícita
+        import plotly.colors as pc
+        stops = pc.PLOTLY_SCALES[stops]
+    ts    = [float(t) for t, _ in stops]
+    rgbs  = [_parse_color(c) for _, c in stops]
+    return np.array(ts), np.array(rgbs)
+
+
+def _map_colors(values: np.ndarray, vmin: float, vmax: float, colorscale: str,
+                 distribution: str = 'linear', ref_sorted: np.ndarray | None = None) -> np.ndarray:
+    """values (N,) en dB → colores RGBA (N,4) en 0–1.
+
+    distribution: 'linear' (por defecto) reparte el color proporcional al valor — dos valores a
+    la misma distancia en dB quedan a la misma distancia de color. 'equalized' (ecualización por
+    percentil, ver Escala en Propiedades) en cambio reparte el color según cómo se distribuyen
+    los valores REALMENTE medidos en toda la superficie (ref_sorted, ver _render_inner): la zona
+    donde se agrupa la mayoría de los valores gana más contraste visual, a costa de que ya no sea
+    proporcional al dB — la barra de color sigue mostrando la paleta lineal (es la referencia de
+    la escala), pero el mapeo de la malla no lo es."""
+    ts, rgbs = _colorscale_stops(colorscale)
+    if distribution == 'equalized' and ref_sorted is not None and len(ref_sorted) > 1:
+        t = np.searchsorted(ref_sorted, values, side='left') / (len(ref_sorted) - 1)
+        t = np.clip(t, 0.0, 1.0)
+    else:
+        span = (vmax - vmin) or 1.0
+        t = np.clip((values - vmin) / span, 0.0, 1.0)
+    rgba = np.empty((len(values), 4), dtype=np.float32)
+    rgba[:, 0] = np.interp(t, ts, rgbs[:, 0])
+    rgba[:, 1] = np.interp(t, ts, rgbs[:, 1])
+    rgba[:, 2] = np.interp(t, ts, rgbs[:, 2])
+    rgba[:, 3] = 1.0
+    return rgba
+
+
+class GL3DView(QWidget):
+    """Ver docstring del módulo. Sólo modo '3d' (VIEW_MODES de BalloonView no aplica acá:
+    esta clase se instancia únicamente para ese modo, ver _VIEW_CLASS_BY_MODE)."""
+
+    log = pyqtSignal(str)
+    context_menu_requested = pyqtSignal(int, int)   # x, y en píxeles locales del widget
+
+    _EXPORT_FORMATS = ('png', 'jpeg', 'webp')   # sin SVG: es una malla rasterizada, no vectorial
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._levels:     np.ndarray | None = None
+        self._azimuths:   np.ndarray | None = None
+        self._elevations: np.ndarray | None = None
+        self._bands:      np.ndarray | None = None
+        self._band_index: int = 0
+        self._colorscale: str = "RdBu v4"
+        self._min_db:     float | None = None
+        self._max_db:     float | None = None
+        self._show_info:  bool = False
+        self._axis_color: str | None = None
+        self._axis_width: float = 1
+        self._style:      dict = {}
+        self._camera      = dict(_CAMERA_PRESETS["default"])
+        self._current_items: list = []
+        self._px_scale = 1.0        # escala de los elementos en píxeles (ver export_image)
+        self._export_clone = None   # GLViewWidget reusado entre exportaciones, ver _get_export_clone
+        self._cut_elevation: float = 0.0   # elevación elegida (0°–90°), ver _make_cut_ring_items
+        self._cut_visible:   bool  = False   # muestra la curva (y, si show_ref_plane, el plano)
+        self._show_ref_plane:      bool = True   # plano translúcido — sólo si _cut_visible también
+        self._show_hemisphere_grid: bool = True  # círculos de referencia lat/long, independiente del corte
+        self._show_box_grid: bool = True         # planos de fondo con grilla (casilla propia)
+        self._gl_line_items: list = []   # líneas de fondo (grilla de la esfera + planos): van en GL
+        # 'origin': el nivel escala el vector ENTERO desde (0,0,0) — balloon plot clásico
+        #           (CLIO, GLL Viewer, EASE...), el que ya tenía este programa. Modo Superficie 3D.
+        # 'zaxis':  el nivel sólo escala la parte horizontal; la altura Z depende nada más del
+        #           ángulo de elevación — con esto un plano horizontal SÍ coincide exacto con
+        #           una elevación fija (ver charla con el usuario sobre "Radial al eje Z").
+        # 'sphere': radio SIEMPRE 1 — el nivel no toca la geometría en absoluto, sólo el color.
+        #           Modo Esfera (antes su propio renderer aparte con Plotly, build_sphere_html;
+        #           es el mismo caso particular "radio constante" de esta misma clase).
+        self._geometry_mode: str = 'origin'
+        # último grid calculado (para reconstruir los mismos items al exportar sin
+        # recalcular la malla — ver export_image)
+        self._last_grid = None
+
+        # Columna izquierda: gráfico (apilado). Columna derecha: franja de la barra de color, como
+        # en el export (la barra no tapa la escena).
+        self._host = QWidget()
+        layout = QStackedLayout(self._host)
+        layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        layout.setContentsMargins(0, 0, 0, 0)
+        # Fondo blanco de toda la vista (incluida la franja de la escala), no el gris de la ventana.
+        self.setObjectName("gl3d_view")
+        self.setStyleSheet("QWidget#gl3d_view { background: #ffffff; }")
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self._host, 1)
+
+        self._gl = gl.GLViewWidget()
+        self._gl.setBackgroundColor('#ffffff')
+        self._gl.installEventFilter(self)
+
+        self._placeholder = QLabel("Calculá la directividad\npara ver el patrón polar aquí.")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet("background:#ffffff; color:#7a7a7a; font-size:11pt; border:none;")
+        self._placeholder.setFont(QFont("Segoe UI", 12))
+
+        # Overlays 2D (info + colorbar) — no controles interactivos: los botones/checkbox del
+        # corte y el modo de construcción se sacaron de acá (ver Propiedades…, botón "Intersectar"
+        # incluido) porque Qt no compone bien widgets interactivos superpuestos a un
+        # QOpenGLWidget: salían como recuadros en blanco, y el intento de arreglarlo con un
+        # contenedor transparente (WA_TransparentForMouseEvents) terminó bloqueando el mouse de
+        # la escena (orbitar/zoom) y a veces también los propios controles. Un QDialog aparte
+        # (Propiedades) no tiene ninguno de estos problemas: es una ventana normal, no se
+        # superpone a nada. self._info_label/_colorbar quedan en un contenedor transparente
+        # igual, porque no son clickeables (no tienen este problema).
+        self._overlay = QWidget()
+        self._overlay.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._overlay.setStyleSheet("background: transparent;")
+
+        layout.addWidget(self._gl)
+        layout.addWidget(self._overlay)
+        layout.addWidget(self._placeholder)
+        self._overlay.raise_()
+        self._placeholder.raise_()
+
+        self._info_label = QLabel(self._overlay)
+        self._info_label.setStyleSheet(
+            "background: rgba(255,255,255,0.85); color:#1a1a1a; padding:4px 8px; "
+            "border:1px solid #c8c8c8; border-radius:3px; font-size:10px;")
+        self._info_label.move(8, 8)
+        self._info_label.hide()
+
+        self._colorbar = QLabel()          # franja derecha (ver outer), no encima del gráfico
+        self._colorbar.setStyleSheet("background:#ffffff; border:none;")   # sin el gris de la app
+        self._colorbar.hide()
+        outer.addWidget(self._colorbar)
+
+        self._apply_camera()
+
+    # ── API pública ──────────────────────────────────────────────────────
+
+    def mapToGlobal(self, pos):
+        return self._gl.mapToGlobal(pos)
+
+    def eventFilter(self, obj, event):
+        if obj is self._gl and event.type() == event.Type.ContextMenu:
+            self.context_menu_requested.emit(event.pos().x(), event.pos().y())
+            return True
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._last_grid is not None:
+            self._update_colorbar(self._last_grid['cmin'], self._last_grid['cmax'])
+        self._reposition_overlays()
+
+    def _reposition_overlays(self):
+        pass   # la barra de color ya está en su columna (ver __init__)
+
+    # — no aplican a este modo, pero _ViewSection los llama para los 4 tipos de vista —
+    def set_view_mode(self, mode):
+        pass
+
+    def set_tick_font_size(self, size):
+        pass
+
+    def set_plane(self, plane):
+        pass
+
+    def set_el_index(self, idx):
+        pass
+
+    def set_normalize(self, value):
+        pass
+
+    def apply_theme(self, palette):
+        pass   # el gráfico 3D es siempre blanco, no sigue el tema claro/oscuro de la app
+
+    def show_placeholder(self):
+        self._placeholder.show()
+        self._placeholder.raise_()
+
+    def set_data(self, levels, azimuths, elevations, bands, band_index=0,
+                 symmetry_type="none", ref_spectrum=None, spec_global=True):
+        # ref_spectrum/spec_global no aplican a este modo (son del Espectro); se aceptan
+        # igual porque _ViewSection.set_data llama a todas las vistas con los mismos kwargs.
+        levels_s, az_s, el_s = apply_symmetry(levels, azimuths, elevations, symmetry_type)
+        self._levels     = levels_s
+        self._azimuths   = az_s
+        self._elevations = el_s
+        self._bands      = bands
+        self._band_index = band_index
+        self._render()
+
+    def set_band(self, band_index: int):
+        if self._levels is None:
+            return
+        self._band_index = band_index
+        self._render()
+
+    def set_colorscale(self, name: str):
+        self._colorscale = name
+        if self._levels is not None:
+            self._render()
+
+    def set_db_range(self, min_db, max_db):
+        self._min_db = min_db
+        self._max_db = max_db
+        if self._levels is not None:
+            self._render()
+
+    def set_show_info(self, show: bool):
+        self._show_info = show
+        if self._levels is None:
+            return
+        self._render()
+
+    def set_axis_style(self, color, width):
+        self._axis_color = color
+        self._axis_width = width
+        if self._levels is not None:
+            self._render()
+
+    def set_style(self, style: dict):
+        self._style = style or {}
+        self._gl.setBackgroundColor(self._style.get('bg_color') or '#ffffff')
+        self._cut_visible   = bool(self._style.get('cut_visible', False))
+        self._cut_elevation = float(self._style.get('cut_elevation', 0.0))
+        self._geometry_mode = self._style.get('geometry_mode', 'origin')
+        self._show_ref_plane       = bool(self._style.get('show_ref_plane', True))
+        self._show_hemisphere_grid = bool(self._style.get('show_hemisphere_grid', True))
+        self._show_box_grid = bool(self._style.get('show_box_grid', True))
+        if self._levels is not None:
+            self._render()
+
+    def set_camera_view(self, view: str):
+        preset = _CAMERA_PRESETS.get(view)
+        if preset is None:
+            return
+        self._camera = dict(preset)
+        self._apply_camera()
+
+    def _apply_camera(self):
+        # El centro baja a z=0.5: la escena (cúpula + eje Z hasta 1.4) queda centrada en vertical,
+        # y la etiqueta "Z (cénit)" no se corta arriba del panel.
+        self._gl.setCameraPosition(pos=QVector3D(0, 0, _CAMERA_CENTER_Z),
+                                   distance=_DEFAULT_DISTANCE, **self._camera)
+
+    # ── Render ───────────────────────────────────────────────────────────
+
+    def _render(self):
+        try:
+            self._render_inner()
+        except Exception as exc:
+            import traceback
+            self.log.emit(f"[ERROR] 3d render: {exc}\n{traceback.format_exc()}")
+
+    def _render_inner(self):
+        self._placeholder.hide()
+        style = self._style
+        lev_2d = self._levels[:, :, self._band_index]
+        band_hz = float(self._bands[self._band_index])
+
+        lev_2d = _clean_outliers(lev_2d, self._elevations)
+        lev_2d, thetas = _fill_missing_thetas(_replace_broken_mics(lev_2d, self._elevations, self._azimuths), self._elevations)
+        R_dB, phi_rad, elev_rad, vmin, vmax, zenith_dB = _build_hemisphere_grid(
+            lev_2d, self._azimuths, thetas,
+            interp_deg=style.get('interp_deg', DEFAULT_INTERP_DEG),
+            smoothing=style.get('smoothing', 0.0),
+            smoothing_method=style.get('smoothing_method', DEFAULT_SMOOTH_METHOD),
+            smoothing_window=int(style.get('smoothing_window', DEFAULT_SMOOTH_WINDOW)),
+        )
+        # El spline de interpolación (RectBivariateSpline, en _build_hemisphere_grid) puede
+        # devolver NaN/inf en condiciones borde (huecos de datos, mic caído, etc.) — un vértice
+        # así queda en una posición/color indefinidos, que la GPU suele pintar blanco con
+        # triángulos degenerados y filosos justo ahí (visto cerca del cénit, donde el spline es
+        # más delicado). Se reemplaza por vmin: no "inventa" un valor alto, achica ese punto.
+        if not np.isfinite(R_dB).all():
+            R_dB = np.nan_to_num(R_dB, nan=vmin, posinf=vmax, neginf=vmin)
+
+        # Sin límites fijos: la escala de color va del mínimo al máximo de la banda, redondeados al paso de la
+        # escala para que las fronteras queden en valores enteros.
+        step = max(0.5, float(style.get('colorbar_step', 1.0)))
+        cmin = self._min_db if self._min_db is not None else float(np.floor(vmin / step) * step)
+        cmax = self._max_db if self._max_db is not None else float(np.ceil(vmax / step) * step)
+        if cmax - cmin < step:
+            cmax = cmin + step
+        span = (vmax - vmin) or 1.0
+        R_clip = np.clip(R_dB, cmin, cmax)
+        # Valor que va en el borde de la esfera: máximo del balloon o el on-axis (Propiedades ▸ Escala)
+        self._set_balloon_anchor(lev_2d, R_dB)
+        R_r    = self._balloon_radius(R_dB)
+
+        E, P = np.meshgrid(elev_rad, phi_rad, indexing='ij')
+        if self._geometry_mode == 'sphere':
+            X = np.cos(E) * np.cos(P)   # radio siempre 1: el nivel no toca la geometría, sólo el color
+            Y = np.cos(E) * np.sin(P)
+            Z = np.sin(E)
+        elif self._geometry_mode == 'zaxis':
+            X = R_r * np.cos(E) * np.cos(P)
+            Y = R_r * np.cos(E) * np.sin(P)
+            Z = np.sin(E)   # sólo depende de la elevación (fila): no lo escala el nivel
+        else:
+            X = R_r * np.cos(E) * np.cos(P)
+            Y = R_r * np.cos(E) * np.sin(P)
+            Z = R_r * np.sin(E)   # 'origin': vector entero escalado por el nivel (balloon clásico)
+        C = R_clip
+
+        # Costura acimutal (φ=0° y φ=360° son el mismo meridiano, primera y última columna de
+        # la grilla): el spline de interpolación no garantiza que ambos bordes coincidan exacto
+        # — medido hasta ~0,08 de diferencia en radio normalizado, nada que ver con redondeo de
+        # punto flotante — y como son dos columnas de vértices DISTINTAS, esa diferencia dejaba
+        # una grieta angosta visible ahí (justo donde estaba la marca blanca, cerca de X/0°). Se
+        # fuerza la última columna a coincidir exacto con la primera: cierra siempre, sin
+        # depender de que el spline sea perfectamente periódico.
+        X[:, -1], Y[:, -1], Z[:, -1], C[:, -1] = X[:, 0], Y[:, 0], Z[:, 0], C[:, 0]
+
+        # Cierre del cénit: se agrega el polo como una fila más de la MISMA grilla (todas las
+        # columnas colapsan al mismo punto XYZ) en vez de una malla de "cap" aparte — así la
+        # triangulación estándar en abanico cierra siempre sola, sin depender de que el último
+        # anillo sea plano (no lo es: sigue la forma del dato, y un cap separado con un solo
+        # punto ápice podía quedar más bajo que partes del anillo y dejar un hueco visible).
+        if zenith_dB is not None and np.isfinite(zenith_dB):
+            n_p = X.shape[1]
+            # 'zaxis': el polo está siempre en Z=1 (90° de elevación), sin importar el nivel.
+            z_pole = 1.0 if self._geometry_mode in ('zaxis', 'sphere') else float(self._balloon_radius(zenith_dB))
+            z_color = float(np.clip(zenith_dB, cmin, cmax))
+            X = np.vstack([X, np.zeros(n_p)])
+            Y = np.vstack([Y, np.zeros(n_p)])
+            Z = np.vstack([Z, np.full(n_p, z_pole)])
+            C = np.vstack([C, np.full(n_p, z_color)])
+
+        self._last_grid = dict(X=X, Y=Y, Z=Z, C=C, cmin=cmin, cmax=cmax,
+                                zenith_dB=zenith_dB, vmin=vmin, span=span,
+                                elev_deg=np.degrees(elev_rad),   # una fila del grid por elevación medida/interpolada
+                                C_sorted=np.sort(C.reshape(-1)))  # ver distribution='equalized' en _map_colors
+
+        for it in self._current_items:
+            self._gl.removeItem(it)
+        self._current_items = self._build_items(self._last_grid)
+        for it in self._current_items:
+            self._gl.addItem(it)
+
+        self._update_colorbar(cmin, cmax)
+
+        if self._show_info:
+            zenith_str = f"<br><b>Cénit:</b> {zenith_dB:.1f} dB" if zenith_dB is not None else ""
+            self._info_label.setText(
+                f"<b>Banda:</b> {freq_label(band_hz)} Hz<br>"
+                f"<b>Máx:</b> {vmax:.1f} dB<br>"
+                f"<b>Mín:</b> {vmin:.1f} dB{zenith_str}<br>"
+                f"<b>Rango dinámico:</b> {vmax - vmin:.1f} dB"
+            )
+            self._info_label.adjustSize()
+            self._info_label.show()
+        else:
+            self._info_label.hide()
+
+    # ── Construcción de items (usado tanto por el render en pantalla como por export_image,
+    #    que arma los mismos items sobre un GLViewWidget clon fuera de pantalla) ───────────
+
+    def _build_items(self, g: dict) -> list:
+        items = [self._make_surface_item(g)]
+        items += self._make_axis_items()
+        # sin escala numérica sobre el eje Z (la de dB va en la barra de color)
+        self._gl_line_items = []
+        if self._show_hemisphere_grid:
+            self._gl_line_items += self._make_grid_items()
+            items += self._gl_line_items
+        if self._show_box_grid:
+            self._gl_line_items += self._make_box_items()
+            items += self._gl_line_items
+        if self._cut_visible:
+            items += self._make_cut_ring_items(g)
+            if self._show_ref_plane:
+                items.append(self._make_reference_plane_item())
+        return items
+
+    def _make_cut_ring_items(self, g: dict) -> list:
+        """Curva REAL a la elevación elegida, resaltada sobre la propia malla (fila de la grilla
+        más cercana) — acá el radio codifica el nivel medido, no es una esfera real, así que la
+        curva a una elevación no es plana (sube y baja siguiendo el nivel de cada azimut); el
+        plano de referencia (chato, ver _make_reference_plane_item, activable aparte en
+        Propiedades) se muestra al lado a propósito para que se note esa diferencia."""
+        elev_deg = g.get('elev_deg')
+        if elev_deg is None or not len(elev_deg):
+            return []
+        row = int(np.argmin(np.abs(elev_deg - np.clip(self._cut_elevation, 0, 90))))
+        X, Y, Z = g['X'], g['Y'], g['Z']
+        pts = np.stack([X[row], Y[row], Z[row]], axis=-1)
+        color = (0.05, 0.05, 0.05, 1.0)   # casi negro: contraste fuerte contra cualquier color de la malla
+        ring = gl.GLLinePlotItem(pos=pts, color=color, width=5 * self._px_scale, antialias=True)
+        # Puntito en cada vértice: ayuda a ver que la curva sigue el relieve real (no es plana).
+        dots = gl.GLScatterPlotItem(pos=pts[::4], color=color, size=6 * self._px_scale, pxMode=True)
+        return [ring, dots]
+
+    def _make_reference_plane_item(self):
+        """Disco chato y semitransparente a la altura Z que tendría un punto a esta elevación
+        en una esfera de radio 1 — sólo referencia visual, nunca se usa para calcular nada."""
+        e = np.radians(np.clip(self._cut_elevation, 0, 90))
+        z = float(np.sin(e))
+        radius = 1.3
+        n = 48
+        phi = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        rim = np.stack([radius * np.cos(phi), radius * np.sin(phi), np.full(n, z)], axis=-1)
+        verts = np.vstack([rim, [[0.0, 0.0, z]]])   # centro al final
+        center = n
+        faces = np.array([[k, (k + 1) % n, center] for k in range(n)])
+        color = QColor("#2F6DB5")
+        colors = np.tile([color.redF(), color.greenF(), color.blueF(), 0.18], (len(verts), 1))
+        md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
+        return gl.GLMeshItem(meshdata=md, smooth=False, glOptions='translucent')
+
+    def _make_surface_item(self, g: dict):
+        # El polo (cénit) ya viene como una fila más de esta misma grilla si zenith_dB no es
+        # None (ver _render_inner) — todas sus columnas coinciden en un mismo punto XYZ, así
+        # que la triangulación de abajo cierra sola en un abanico sin ningún tratamiento
+        # especial: superficie sin agujero ni discontinuidad en el cénit, siempre.
+        X, Y, Z, C = g['X'], g['Y'], g['Z'], g['C']
+        n_e, n_p = X.shape
+        verts  = np.stack([X, Y, Z], axis=-1).reshape(-1, 3)
+        colors = _map_colors(C.reshape(-1), g['cmin'], g['cmax'], self._colorscale,
+                             distribution=self._style.get('color_distribution', 'linear'),
+                             ref_sorted=g.get('C_sorted'))
+
+        i = np.arange(n_e - 1)[:, None]
+        j = np.arange(n_p - 1)[None, :]
+        idx = i * n_p + j
+        a, b, c, d = idx, idx + 1, idx + n_p, idx + n_p + 1
+        tri1 = np.stack([a, b, c], axis=-1).reshape(-1, 3)
+        tri2 = np.stack([b, d, c], axis=-1).reshape(-1, 3)
+        faces = np.concatenate([tri1, tri2], axis=0)
+        # triángulos de área nula (p. ej. las columnas que caen en el cénit): sin ellos las normales
+        # quedan en 0/0 y pyqtgraph avisa con RuntimeWarning
+        e1 = verts[faces[:, 1]] - verts[faces[:, 0]]
+        e2 = verts[faces[:, 2]] - verts[faces[:, 0]]
+        area2 = np.linalg.norm(np.cross(e1, e2), axis=1)
+        faces = faces[np.isfinite(area2) & (area2 > 1e-12)]
+
+        md = gl.MeshData(vertexes=verts, faces=faces, vertexColors=colors)
+        # Sin shader de pyqtgraph (su 'shaded' oscurece casi a negro las caras que no miran a la
+        # luz). En cambio, el sombreado suave se hornea en los colores de vértice: luz fija desde
+        # arriba-adelante, rango 0.65..1.0 para no tapar el color del dato.
+        md.setVertexColors(_shade_vertex_colors(md))
+        # Sin aristas dibujadas: superficie continua con normales suavizadas (look tipo Plotly).
+        return gl.GLMeshItem(meshdata=md, smooth=True, glOptions='opaque')
+
+    def _make_axis_items(self) -> list:
+        width = float(self._style.get('axis_line_width', 3)) * self._px_scale
+        label_size = max(1, round(int(self._style.get('axis_label_size', FONT_SIZE)) * self._px_scale))
+        items = []
+        for vec, label, color in _AXES:
+            rgba = (color.redF(), color.greenF(), color.blueF(), 1.0)
+            # glOptions='opaque': con el 'translucent' por defecto el eje se dibuja encima de la
+            # superficie aunque esté detrás; con 'opaque' respeta la profundidad (queda tapado).
+            items.append(gl.GLLinePlotItem(pos=np.array([[0, 0, 0], vec]), color=rgba,
+                                            width=width, antialias=True, glOptions='opaque'))
+            # Etiqueta un poco más allá de la punta: si no, el texto arranca encima de la línea.
+            items.append(gl.GLTextItem(pos=np.array(vec, dtype=float) * _LABEL_OFFSET, text=label, color=color,
+                                        font=QFont("Segoe UI", label_size)))
+        return items
+
+    def _make_db_scale_items(self) -> list:
+        """Regla de dB sobre el eje Z (cénit): cada marca está a la altura del radio que le
+        corresponde, así se ve de qué a qué valores va el balloon (p. ej. −12 a +6 dB)."""
+        A = getattr(self, '_rad_A', 0.0)
+        dmin = A + getattr(self, '_rad_min', -12.0)
+        dmax = A + getattr(self, '_rad_max', 6.0)
+        step = 3.0 if (dmax - dmin) <= 24 else 6.0
+        font = QFont("Segoe UI", max(1, int(self._style.get('axis_label_size', FONT_SIZE))))
+        items = []
+        d = np.ceil(dmin / step) * step
+        while d <= dmax + 1e-9:
+            r = float(self._balloon_radius(d))
+            if r <= 1.45:
+                items.append(gl.GLTextItem(pos=np.array([0.03, 0.0, r]), text=f"{d:+.0f} dB",
+                                           color=QColor('#4a4a4a'), font=font))
+            d += step
+        return items
+
+    def _make_box_items(self) -> list:
+        """Planos de fondo con grilla: piso (z=0) largo y paredes pegadas a la escena, en x=-W e
+        y=-W con altura W (W=1.4, justo fuera de la superficie). Paso de 0.25. Se activan y
+        desactivan con su propia casilla (Propiedades ▸ Ejes / grilla)."""
+        qc = QColor(self._axis_color or '#8a8f9a')
+        color = (qc.redF(), qc.greenF(), qc.blueF(), 0.45)
+        width = float(self._axis_width or 1)
+        W, step = 1.4, 0.25                   # W: distancia, altura y largo del piso y las paredes
+        L = W
+        t = np.arange(-L, L + step / 2, step)
+        tw = np.arange(-W, W + step / 2, step)
+        h = np.arange(0.0, W + step / 2, step)
+        segs = []
+        for x in t:                                  # piso
+            segs += [[x, -L, 0], [x, L, 0]]
+        for y in t:
+            segs += [[-L, y, 0], [L, y, 0]]
+        for x in tw:                                 # pared y=-W
+            segs += [[x, -W, 0], [x, -W, W]]
+        for z in h:
+            segs += [[-W, -W, z], [W, -W, z]]
+        for y in tw:                                 # pared x=-W
+            segs += [[-W, y, 0], [-W, y, W]]
+        for z in h:
+            segs += [[-W, -W, z], [-W, W, z]]
+        return [gl.GLLinePlotItem(pos=np.array(segs, dtype=float), color=color, width=width,
+                                  antialias=True, mode='lines', glOptions='translucent')]
+
+    def _make_grid_items(self) -> list:
+        """Esqueleto de la semiesfera: las líneas son los BORDES de las celdas de la grilla (a media
+        distancia entre valores), así que cada celda queda rodeada, como en la matriz radial."""
+        qc = QColor(self._axis_color or '#8a8f9a')   # gris medio — el navy oscuro de antes se notaba poco
+        color = (qc.redF(), qc.greenF(), qc.blueF(), 0.85)
+        width = float(self._axis_width or 1)
+        items = []
+
+        def _edges(vals, lo, hi):
+            """Bordes entre valores consecutivos, más los de los extremos, recortados a [lo, hi]."""
+            v = np.unique(np.asarray(vals, dtype=float))
+            if len(v) == 0:
+                return np.array([])
+            step = float(np.min(np.diff(v))) if len(v) > 1 else 10.0
+            mids = (v[:-1] + v[1:]) / 2.0
+            e = np.concatenate([[v[0] - step / 2.0], mids, [v[-1] + step / 2.0]])
+            return np.unique(np.clip(e, lo, hi))
+
+        # latitudes: elevación de cada punto del hemisferio = min(θ, 180 − θ)
+        th = np.asarray(self._elevations, dtype=float)
+        for e_deg in _edges(np.minimum(th, 180.0 - th), 0.0, 90.0):
+            if e_deg >= 90 - 1e-6:                  # el cénit es un punto, no un círculo
+                continue
+            phi = np.linspace(0, 2 * np.pi, 181)
+            e = np.radians(e_deg)
+            r = np.cos(e)
+            pts = np.stack([r * np.cos(phi), r * np.sin(phi), np.full_like(phi, np.sin(e))], axis=-1)
+            items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
+        # longitudes: bordes entre giros consecutivos (delante y su opuesto, atrás)
+        t = np.linspace(0, np.pi / 2, 46)
+        for a_deg in _edges(self._azimuths, -180.0, 360.0):
+            for extra in (0.0, 180.0):
+                a = np.radians(a_deg + extra)
+                pts = np.stack([np.cos(t) * np.cos(a), np.cos(t) * np.sin(a), np.sin(t)], axis=-1)
+                items.append(gl.GLLinePlotItem(pos=pts, color=color, width=width * self._px_scale, antialias=True, glOptions="translucent"))
+        return items
+
+    def _set_balloon_anchor(self, lev_2d, R_dB):
+        """Fija el valor dB que queda en el borde (radio 1), según 'balloon_anchor':
+        'max' = máximo de cualquier ángulo (el pico toca el borde; no hay margen por encima),
+        'onaxis' = nivel en 0°/0° (el eje queda en el borde; hay margen por encima)."""
+        dmin = float(self._style.get('balloon_min_db', -16.0))     # extremo del centro (dB, relativo al anclaje)
+        dmax = float(self._style.get('balloon_max_db', 0.0))       # extremo del borde (dB, relativo al anclaje)
+        if dmax - dmin < 0.5:
+            dmax = dmin + 0.5
+        anchor = str(self._style.get('balloon_anchor', 'onaxis'))
+        A = None
+        if anchor == 'onaxis':
+            az = np.asarray(self._azimuths, dtype=float)
+            th = np.asarray(self._elevations, dtype=float)
+            if len(az) and len(th):
+                ia = int(np.argmin(np.abs(az - 0.0)))
+                it = int(np.argmin(np.abs(th - 0.0)))
+                v = lev_2d[ia, it]
+                if np.isfinite(v):
+                    A = float(v)
+        if A is None:                       # 'max' o on-axis no disponible
+            A = float(np.nanmax(R_dB))
+        if self._style.get('scale_auto'):   # escala automática: el balloon va del mínimo al máximo de la banda
+            fin = np.asarray(R_dB, dtype=float)
+            fin = fin[np.isfinite(fin)]
+            if fin.size:
+                dmin = float(np.floor(fin.min() - A))
+                dmax = float(np.ceil(fin.max() - A))
+                if dmax - dmin < 0.5:
+                    dmax = dmin + 0.5
+        self._rad_A, self._rad_min, self._rad_max = A, dmin, dmax
+
+    def _balloon_radius(self, dB):
+        """Radio del balloon con escala FIJA en dB (como en la nota de Audiomatica AN-002, fig. 14):
+        0 dB (eje/referencia) toca el borde (radio 1); cada dB por debajo acorta el radio, y a
+        −rango el radio es el mínimo. El rango es configurable (Propiedades ▸ Escala, 12 dB)."""
+        A = getattr(self, '_rad_A', 0.0)
+        dmin = getattr(self, '_rad_min', -12.0)
+        dmax = getattr(self, '_rad_max', 6.0)
+        # lineal en dB: dmin (relativo al anclaje) en el centro, dmax en el borde (radio 1)
+        r = (np.asarray(dB, dtype=float) - A - dmin) / (dmax - dmin)
+        return np.clip(r, 0.01, None)   # sin tope superior: lo que supera dmax sale de la esfera
+
+    def _colorbar_pt(self) -> float:
+        """Tamaño (pt) de la escala: Propiedades ▸ Escala (por gráfico); si no hay, Opciones ▸ Imágenes."""
+        from ui.export_utils import get_colorbar_pt
+        return float(self._style.get('colorbar_pt', get_colorbar_pt()))
+
+    def _panel_bar_h(self) -> int:
+        """Alto de la barra de color en pantalla: proporcional al panel (en 4 paneles es chica,
+        en 'ver en grande' crece), siempre dentro de un rango legible."""
+        return max(70, min(220, int(self.height() * 0.42)))
+
+    def _colorbar_image(self, cmin: float, cmax: float, s: float = 1.0, bar_h: int | None = None,
+                        font_px: float | None = None) -> QImage:
+        """Barra de color estilo Plotly (como la v4): barra alta y angosta con marco fino, marcas
+        y valores en números redondos dentro del rango, y "dB" girado al costado. `s` escala todo
+        (para el export, ver export_image); en pantalla s=1."""
+        if font_px is None:       # en pantalla: pt de Propiedades ▸ Escala (96 dpi)
+            font_px = self._colorbar_pt() / 72.0 * 96
+        fs = font_px * s
+        bar_w = int(16 * s)
+        bar_h = int(bar_h if bar_h is not None else 300 * s)
+        pad = max(int(8 * s), int(fs * 0.75))     # lugar para la mitad del primer y último valor (están en los bordes)
+        tick_len = int(5 * s)
+        label_w = int(fs * 3.4)
+        title_w = int(fs * 1.6)
+        gap = int(fs * 0.3)
+        w = title_w + bar_w + tick_len + gap + label_w
+        h = bar_h + 2 * pad
+        from PyQt6.QtGui import QPainter, QFont as _QFont, QPen
+        from PyQt6.QtCore import Qt as _Qt
+        ts, rgbs = _colorscale_stops(self._colorscale)
+        img = QImage(w, h, QImage.Format.Format_ARGB32)
+        img.fill(QColor(0, 0, 0, 0))
+        x0 = title_w
+        # bloques de color, uno por cada tramo de `step` dB (igual que la escala de la grilla radial):
+        # cada bloque toma el color de su valor central
+        span = (cmax - cmin) or 1.0
+        step = float(self._style.get('colorbar_step', 1.0))
+        nb = max(1, int(round(span / step)))
+        blocks = []
+        for i in range(nb):
+            v_mid = cmax - (i + 0.5) * span / nb
+            t = min(1.0, max(0.0, (v_mid - cmin) / span))
+            r = float(np.interp(t, ts, rgbs[:, 0]))
+            gg = float(np.interp(t, ts, rgbs[:, 1]))
+            b = float(np.interp(t, ts, rgbs[:, 2]))
+            blocks.append((i, v_mid, QColor(int(r * 255), int(gg * 255), int(b * 255))))
+        for i, _, color in blocks:
+            y0 = pad + i * bar_h / nb
+            y1 = pad + (i + 1) * bar_h / nb
+            for y in range(int(round(y0)), int(round(y1))):
+                for x in range(bar_w):
+                    img.setPixelColor(x0 + x, y, color)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # marco fino alrededor de la barra (como el colorbar de Plotly)
+        p.setPen(QPen(QColor("#444444"), max(1.0, 1.0 * s)))
+        p.setBrush(_Qt.BrushStyle.NoBrush)
+        p.drawRect(x0, pad, bar_w - 1, bar_h - 1)
+        font = _QFont("Segoe UI")
+        font.setPixelSize(max(1, round(fs)))
+        p.setFont(font)
+        p.setPen(QColor("#1a1a1a"))
+        # valor en cada frontera entre colores (incluidos el máximo arriba y el mínimo abajo), con su marca
+        bounds = [cmax - i * span / nb for i in range(nb + 1)]
+        fmt = "{:.0f}"                    # siempre sin decimales
+        p.setPen(QPen(QColor("#444444"), max(1.0, 1.0 * s)))
+        for i, v in enumerate(bounds):
+            y = pad + i * bar_h / nb
+            p.drawLine(x0 + bar_w, int(y), x0 + bar_w + tick_len, int(y))
+        p.setPen(QColor("#1a1a1a"))
+        # con pasos chicos no entran todos los valores: se muestra uno cada tantas fronteras (siempre el máximo
+        # arriba y, si coincide con la separación, el mínimo abajo), sin que se pisen los textos
+        every = max(1, int(np.ceil(fs * 1.35 / (bar_h / nb))))
+        for i, v in enumerate(bounds):
+            if i % every:
+                continue
+            y = pad + i * bar_h / nb
+            p.drawText(x0 + bar_w + tick_len + gap, int(y - fs * 0.6), label_w, int(fs * 1.2),
+                       _Qt.AlignmentFlag.AlignLeft | _Qt.AlignmentFlag.AlignVCenter, fmt.format(v))
+        # "dB" horizontal, a la izquierda de la barra, arriba (pegado a la barra)
+        p.drawText(0, pad, x0 - gap, int(fs * 1.2),
+                   _Qt.AlignmentFlag.AlignRight | _Qt.AlignmentFlag.AlignVCenter, "dB")
+        p.end()
+        return img
+
+    def _update_colorbar(self, cmin: float, cmax: float):
+        """Barra en la franja derecha, a todo el alto del panel (igual que en el export)."""
+        img = self._colorbar_image(cmin, cmax, bar_h=max(60, self.height() - 16))
+        w, h = img.width(), img.height()
+        self._colorbar.setPixmap(QPixmap.fromImage(img))
+        self._colorbar.setFixedSize(w, h)
+        self._colorbar.setToolTip(f"{cmax:.1f} dB (arriba) — {cmin:.1f} dB (abajo)")
+        self._colorbar.show()
+
+    # ── Exportación ──────────────────────────────────────────────────────
+
+    def _get_export_clone(self):
+        """GLViewWidget fuera de pantalla para exportar, creado UNA sola vez y reusado en cada
+        exportación (en vez de crear/destruir uno por llamada): crear varios QOpenGLWidget
+        seguidos en el mismo proceso resultó poco confiable acá (la segunda exportación salía
+        con errores de OpenGL y la imagen quedaba prácticamente en blanco) — reusar el mismo
+        contexto de principio a fin lo evita. Se posiciona fuera del área visible del escritorio
+        (move a coordenadas negativas) en vez de WA_DontShowOnScreen: un QOpenGLWidget necesita
+        una ventana nativa real para poder crear su contexto OpenGL."""
+        if self._export_clone is None:
+            self._export_clone = gl.GLViewWidget()
+            self._export_clone.move(-4000, -4000)
+            self._export_clone.show()
+        return self._export_clone
+
+    def _render_scene_at(self, W: int, H: int, k: float) -> QImage:
+        """Escena a W×H píxeles reales. La superficie se renderiza en GL a esa resolución; las
+        líneas (ejes, caja, grilla) y los textos se dibujan con QPainter proyectando sus puntos con
+        la misma cámara, porque el driver no admite líneas gruesas en un framebuffer grande."""
+        from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat
+        from PyQt6.QtCore import QSize, QPointF
+        from PyQt6.QtGui import QPainter, QPen, QMatrix4x4, QVector4D
+        from OpenGL import GL
+        view = self._gl
+        on_screen = list(view.items)
+        self._px_scale = 1.0
+        export_items = self._build_items(self._last_grid)
+        # Superficie y caja de planos van en GL (con profundidad); ejes y textos se dibujan
+        # encima con QPainter, ocluidos con el mismo depth buffer.
+        gl_items = [it for it in export_items if type(it).__name__ == 'GLMeshItem' or it in self._gl_line_items]
+        for it in on_screen:
+            view.removeItem(it)
+        for it in gl_items:
+            view.addItem(it)
+        try:
+            view.makeCurrent()
+            fmt = QOpenGLFramebufferObjectFormat()
+            fmt.setAttachment(QOpenGLFramebufferObject.Attachment.CombinedDepthStencil)
+            fbo = QOpenGLFramebufferObject(QSize(W, H), fmt)
+            fbo.bind()
+            GL.glViewport(0, 0, W, H)
+            view.paint(region=(0, 0, W, H), viewport=(0, 0, W, H))
+            # Buffer de profundidad de la escena: sirve para tapar las líneas que quedan detrás
+            depth = np.asarray(GL.glReadPixels(0, 0, W, H, GL.GL_DEPTH_COMPONENT, GL.GL_FLOAT),
+                               dtype=float).reshape(H, W)
+            img = fbo.toImage()
+            fbo.release()
+            view.doneCurrent()
+        finally:
+            for it in gl_items:
+                view.removeItem(it)
+            for it in on_screen:
+                view.addItem(it)
+        img = img.convertToFormat(QImage.Format.Format_ARGB32)
+
+        # Cámara y proyección (mismas matrices que usa pyqtgraph para dibujar)
+        mvp = QMatrix4x4(view.projectionMatrix((0, 0, W, H), (0, 0, W, H))) * view.viewMatrix()
+
+        def to_px(p):
+            v = mvp * QVector4D(float(p[0]), float(p[1]), float(p[2]), 1.0)
+            if abs(v.w()) < 1e-9:
+                return None
+            return QPointF((v.x() / v.w() + 1) / 2 * W, (1 - v.y() / v.w()) / 2 * H)
+
+        # Oclusión por geometría (no por el depth buffer): un punto queda tapado si el rayo hacia la cámara
+        # atraviesa algún triángulo de la superficie. Así no depende del driver de OpenGL.
+        # la superficie es siempre el primer ítem de _build_items (los planos translúcidos no ocluyen)
+        surf = [export_items[0].opts['meshdata']] if type(export_items[0]).__name__ == 'GLMeshItem' else []
+        tris = [(md.vertexes()[md.faces()[:, 0]], md.vertexes()[md.faces()[:, 1]], md.vertexes()[md.faces()[:, 2]])
+                for md in surf]
+        cp = view.cameraPosition()
+        cam = np.array([cp.x(), cp.y(), cp.z()], dtype=float)
+
+        def occluded(p):
+            p = np.asarray(p, dtype=float)
+            d = cam - p
+            L = float(np.linalg.norm(d))
+            if L < 1e-9:
+                return False
+            dn = d / L
+            for A, B, C in tris:
+                e1, e2 = B - A, C - A
+                h = np.cross(dn, e2)
+                a = np.einsum('ij,ij->i', e1, h)
+                ok = np.abs(a) > 1e-12
+                inv = np.where(ok, 1.0 / np.where(ok, a, 1.0), 0.0)
+                sv = p - A
+                u = inv * np.einsum('ij,ij->i', sv, h)
+                q = np.cross(sv, e1)
+                v = inv * (q @ dn)
+                t = inv * np.einsum('ij,ij->i', e2, q)
+                hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-4 * L) & (t < L * (1 - 1e-4))
+                if hit.any():
+                    return True
+            return False
+
+        def visible(pt, p):
+            """True si el punto 3D p no queda detrás de la superficie (rayo a la cámara)."""
+            if pt is None:
+                return False
+            return not occluded(p)
+
+        def draw_segment(painter, a, b, n=48):
+            """Dibuja el segmento 3D a→b sólo en los tramos visibles (ocluidos por la superficie, no)."""
+            a = np.asarray(a, dtype=float); b = np.asarray(b, dtype=float)
+            run = []
+            for t in np.linspace(0.0, 1.0, n):
+                q = a + (b - a) * t
+                pt = to_px(q)
+                if pt is not None and visible(pt, q):
+                    run.append(pt)
+                else:
+                    if len(run) > 1:
+                        painter.drawPolyline(*run)
+                    run = []
+            if len(run) > 1:
+                painter.drawPolyline(*run)
+
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for it in export_items:
+            name = type(it).__name__
+            if it in self._gl_line_items:
+                continue
+            if name == 'GLLinePlotItem' and it.pos is not None:
+                c = it.color if np.ndim(it.color) == 1 else np.asarray(it.color)[0]
+                qc = QColor.fromRgbF(*[float(x) for x in c[:3]], float(c[3]) if len(c) > 3 else 1.0)
+                pen = QPen(qc)
+                pen.setWidthF(float(it.width) * k)
+                painter.setPen(pen)
+                P = np.asarray(it.pos, dtype=float)
+                step = 2 if it.mode == 'lines' else 1
+                for a in range(0, len(P) - 1, step):
+                    draw_segment(painter, P[a], P[a + 1])
+            elif name == 'GLTextItem' and it.pos is not None:
+                pt = to_px(it.pos)
+                if pt is None or not visible(pt, it.pos):
+                    continue
+                f = QFont(it.font)
+                f.setPixelSize(max(1, round(f.pointSizeF() * 96 / 72 * k)))
+                painter.setFont(f)
+                painter.setPen(QColor(it.color) if it.color is not None else QColor('#1a1a1a'))
+                painter.drawText(pt, it.text)
+        painter.end()
+        return img
+
+    def export_image(self, path: str, dpi: int = 300, fmt: str = 'png', on_done=None, size_cm=None):
+        """Exporta EXACTAMENTE lo que se ve en pantalla: captura el gráfico tal como está (mismo
+        tamaño de panel, misma cámara, mismos ejes y caja), lo escala por el DPI y le agrega la
+        escala de colores con las mismas proporciones. size_cm se ignora en 3D (el tamaño sale
+        del panel)."""
+        if self._last_grid is None:
+            self.log.emit("[Dir] Sin datos para exportar.")
+            if on_done:
+                on_done(False)
+            return
+        fmt = fmt if fmt in self._EXPORT_FORMATS else 'png'
+
+        from ui.export_utils import set_png_dpi
+        k = dpi / 96.0
+        scene_w = max(1, self._gl.width())
+        scene_h = max(1, self._gl.height())
+        W = max(1, int(round(scene_w * k)))
+        H = max(1, int(round(scene_h * k)))
+        g = self._last_grid
+
+        def _grab():
+            ok = False
+            # El cursor puede quedar capturado dentro de la imagen (bug de Qt/Windows con
+            # QOpenGLWidget): se oculta justo antes de capturar.
+            QApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
+            try:
+                from PyQt6.QtGui import QPainter
+                scene = self._render_scene_at(W, H, k)
+                pad = int(8 * k)
+                cb = self._colorbar_image(g['cmin'], g['cmax'], k, bar_h=H - 2 * pad,
+                                          font_px=self._colorbar_pt() / 72.0 * 96)
+                gap = int(12 * k)
+                out = QImage(W + gap + cb.width(), H, QImage.Format.Format_ARGB32)
+                out.fill(QColor(self._style.get('bg_color') or '#ffffff'))
+                p = QPainter(out)
+                p.drawImage(0, 0, scene)
+                p.drawImage(W + gap, 0, cb)
+                p.end()
+                ok = (not out.isNull()) and out.save(path)
+                if ok and fmt != 'svg':
+                    set_png_dpi(path, dpi)
+                if ok:
+                    self.log.emit(f"[Dir] Imagen guardada → {path} ({dpi} DPI, {fmt})")
+                else:
+                    self.log.emit(f"[ERROR] No se pudo guardar la imagen en {path}")
+            except Exception as exc:
+                self.log.emit(f"[ERROR] Exportando 3D: {exc}")
+            finally:
+                QApplication.restoreOverrideCursor()
+                if on_done:
+                    on_done(ok)
+
+        QTimer.singleShot(50, _grab)

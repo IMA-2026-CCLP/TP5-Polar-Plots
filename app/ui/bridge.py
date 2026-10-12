@@ -29,6 +29,12 @@ class Bridge(QObject):
     sig_save_session_as    = pyqtSignal()       # ídem, siempre pregunta la ruta
     sig_load_session       = pyqtSignal()
     sig_apply_hpf          = pyqtSignal(float)
+    sig_corr_recalc        = pyqtSignal()
+    sig_filter_bands       = pyqtSignal()
+    sig_nivelar_onaxis     = pyqtSignal()
+    sig_matrix_grid        = pyqtSignal()
+    sig_save_grid         = pyqtSignal()
+    sig_load_grid         = pyqtSignal()
     sig_align_takes        = pyqtSignal(float, float, object, float)
     sig_align_ref          = pyqtSignal(object)
     sig_align_preview      = pyqtSignal(float, float, object)
@@ -39,9 +45,9 @@ class Bridge(QObject):
     sig_preset_changed     = pyqtSignal(str)
     sig_save_mask          = pyqtSignal()
     sig_load_mask          = pyqtSignal()
-    sig_compute_dir        = pyqtSignal(str, float, float, int, int)
     sig_export_all_images  = pyqtSignal()
     sig_dir_display_changed = pyqtSignal()
+    sig_intersect_cut3d     = pyqtSignal()   # "Intersectar" (Corte, Superficie 3D) — no toca Polar 2D
     sig_theme_toggled      = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -50,14 +56,17 @@ class Bridge(QObject):
         self.state = {
             'tab':        0,
             'theta':      'ref',  'az':        'Todos',
-            'envelope':   True,   'db':         True,
-            'smooth':     20.0,   'ymin':       None,   'ymax': None,
+            'envelope':   True,   'db':         True,   'matrix': True,  'detect': False,
+            'corr_ref':   'ref',  'corr_view':  '0',  'corr_base':  0,
+            'interp_method': 'lineal', 'interp_step': 0,
+            'smooth_method': 'ninguno', 'smooth_int': 0,
+            'smooth':     20.0,   'ymin':       -60.0,  'ymax': 0.0,
             'hpf_hz':     200.0,
             'onset':      1.0,    'thresh':    -40.0,   'window_ms': 50.0,
-            'align_theta':'ref',  'gcc_thresh': None,
+            'align_theta':'ref',  'gcc_thresh': -55.0,
             'bands':      '1/3',  'hz_min':    315.0,   'hz_max': 10000.0,
             'ref_az':     0,      'ref_th':     0,
-            'colorscale': 'Plasma','el_idx':    None,
+            'colorscale': 'RdBu v4','el_idx':    None,
             'symmetry':   'none', 'nota':       'Todo el audio',
             'spec_data':  0,      'spec_global': True,
             'view_3d':    True,   'view_sphere': True,
@@ -66,6 +75,7 @@ class Bridge(QObject):
             'note_start': 0.0,    'note_grad':   25.0,
             'note_theta': 'ref',
             'show_info':  False,   # recuadro de información de los gráficos: apagado por defecto
+            'cut3d_elevation': 0.0,   # "Corte (Superficie 3D)": elevación del corte, ver intersectCut3D
         }
 
     # ── Slots llamados desde JS ───────────────────────────────────────────────
@@ -122,6 +132,24 @@ class Bridge(QObject):
         self.sig_plot_params.emit(theta, azimuth, env, db, yrange, smooth)
 
     @pyqtSlot()
+    def corrRecalc(self):
+        self.sig_corr_recalc.emit()
+
+    def filterBands(self):
+        self.sig_filter_bands.emit()
+
+    def nivelarOnaxis(self):
+        self.sig_nivelar_onaxis.emit()
+
+    def matrixGridChanged(self):
+        self.sig_matrix_grid.emit()
+
+    def saveGrid(self):
+        self.sig_save_grid.emit()
+
+    def loadGrid(self):
+        self.sig_load_grid.emit()
+
     def applyHpf(self):
         self.sig_apply_hpf.emit(float(self.state.get('hpf_hz', 200.0)))
 
@@ -179,15 +207,6 @@ class Bridge(QObject):
         self.sig_load_mask.emit()
 
     @pyqtSlot()
-    def computeDir(self):
-        self.sig_compute_dir.emit(
-            str(self.state.get('bands', '1/3')),
-            float(self.state.get('hz_min', 315.0)),
-            float(self.state.get('hz_max', 10000.0)),
-            int(self.state.get('ref_az', 0)),
-            int(self.state.get('ref_th', 0)),
-        )
-
     @pyqtSlot()
     def exportAllImages(self):
         self.sig_export_all_images.emit()
@@ -195,6 +214,10 @@ class Bridge(QObject):
     @pyqtSlot()
     def dirDisplayChanged(self):
         self.sig_dir_display_changed.emit()
+
+    @pyqtSlot()
+    def intersectCut3D(self):
+        self.sig_intersect_cut3d.emit()
 
     @pyqtSlot()
     def themeToggled(self):

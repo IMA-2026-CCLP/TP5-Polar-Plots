@@ -65,9 +65,14 @@ def save_results(
     ref_azimuth: int = 0,
     ref_theta_plot: int = 0,
     view: dict | None = None,
+    grids: dict | None = None,
 ) -> None:
     """
     Guarda el patrón de directividad de un MicArray en el formato NPZ acordado.
+
+    grids : {"Todo el audio": snap, "<nota>": snap, ...} con snap = dict(levels, azimuths, thetas, freqs, unit,
+            ref_raw, ref_eq) (la grilla procesada de la matriz). Se usa cuando no se corrió compute_directivity():
+            la sesión guarda directamente la grilla (corregida y nivelada) de la muestra completa y de cada nota.
 
     Parameters
     ----------
@@ -91,6 +96,11 @@ def save_results(
     # usuario haya trabajado únicamente por nota, en vez de quedar vacío.
     ma_global = ma if ma.dir_levels is not None else (
         ma.notes[notes_to_save[0]] if notes_to_save else None)
+    if grids and grids.get("Todo el audio") is not None:
+        # Lo que se ve en pantalla (grilla procesada y espectro de referencia de cada toma) es lo que se guarda, aunque
+        # haya resultados viejos de una corrida anterior de Calcular: así la sesión abre igual que se dejó.
+        _save_from_grids(filepath, grids, bands, ref_azimuth, ref_theta_plot, view)
+        return
     if ma_global is None:
         raise RuntimeError(
             "Ejecutar compute_directivity() antes de guardar (global o por nota).")
@@ -148,6 +158,48 @@ def save_results(
     print(f"  Guardado: {filepath}  ({size_kb:.0f} KB)")
 
 
+def _save_from_grids(filepath, grids, bands, ref_azimuth, ref_theta_plot, view):
+    """Sesión armada a partir de las grillas procesadas de la matriz (sin compute_directivity)."""
+    p = Path(filepath)
+    if p.suffix.lower() not in ('.npz', '.cclp'):
+        filepath = str(p) + '.npz'
+    g = grids["Todo el audio"]
+    f32 = lambda a: np.asarray(a, dtype=np.float32)
+    freqs = f32([np.nan if f is None else f for f in g['freqs']])
+    n_b = len(freqs)
+    notes = [n for n in grids if n != "Todo el audio" and grids[n] is not None]
+    meta = {
+        "bands": bands, "ref_azimuth": ref_azimuth, "ref_theta_plot": ref_theta_plot,
+        "saved_at": datetime.now().isoformat(timespec='seconds'),
+        "notes": notes, "unit": g['unit'], "from_grid": True,
+    }
+    if view:
+        meta["view"] = view
+
+    def entry(snap):
+        eq = snap.get('ref_eq')
+        return f32(eq) if eq is not None else np.zeros(n_b, dtype=np.float32), snap.get('ref_raw')
+
+    eq, raw = entry(g)
+    kwargs: dict[str, Any] = dict(
+        azimuths=f32(g['azimuths']), thetas=f32(g['thetas']), dir_freqs=freqs,
+        dir_levels=f32(g['levels']), spl_ref=eq,
+    )
+    if raw is not None:
+        kwargs['spl_ref_per_az'] = f32(raw)
+    for name in notes:
+        eq_n, raw_n = entry(grids[name])
+        kwargs[f'note_{name}_dir_levels'] = f32(grids[name]['levels'])
+        kwargs[f'note_{name}_spl_ref'] = eq_n
+        if raw_n is not None:
+            kwargs[f'note_{name}_spl_ref_per_az'] = f32(raw_n)
+    kwargs['metadata'] = np.array([json.dumps(meta, ensure_ascii=False,
+                                              default=lambda o: o.item() if hasattr(o, 'item') else str(o))])
+    with open(filepath, 'wb') as f:
+        np.savez_compressed(f, **kwargs)
+    print(f"  Guardado (desde grilla): {filepath}  ({Path(filepath).stat().st_size / 1024:.0f} KB)")
+
+
 def drop_bad_thetas(
     filepath_in:  str,
     filepath_out: str,
@@ -181,9 +233,10 @@ def drop_bad_thetas(
             kwargs[key] = raw[key][:, keep, :].astype(np.float32)
 
     p = str(filepath_out)
-    if not p.endswith('.npz'):
+    if Path(p).suffix.lower() not in ('.npz', '.cclp'):
         p += '.npz'
-    np.savez_compressed(p, **kwargs)
+    with open(p, 'wb') as f:      # ver nota de save_results(): evita que numpy fuerce ".npz"
+        np.savez_compressed(f, **kwargs)
     print(f"  Guardado sin thetas malos: {p}")
 
 
@@ -257,11 +310,12 @@ def repair_broken_mic(
             kwargs[key] = note_lev.astype(np.float32)
 
     p = str(filepath_out)
-    if not p.endswith('.npz'):
+    if Path(p).suffix.lower() not in ('.npz', '.cclp'):
         p += '.npz'
-    np.savez_compressed(p, **kwargs)
+    with open(p, 'wb') as f:      # ver nota de save_results(): evita que numpy fuerce ".npz"
+        np.savez_compressed(f, **kwargs)
     size_kb = Path(p).stat().st_size / 1024
-    print(f"  NPZ reparado guardado en: {p}  ({size_kb:.0f} KB)")
+    print(f"  Reparado guardado en: {p}  ({size_kb:.0f} KB)")
 
 
 def load_results(filepath: str) -> dict:
