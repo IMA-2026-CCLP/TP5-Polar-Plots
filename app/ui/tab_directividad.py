@@ -1489,6 +1489,28 @@ class TabDirectividad(QWidget):
         w.start()
         return True
 
+    def inherit_note_corrections(self) -> bool:
+        """Las notas con niveles por banda que todavía no tienen corrección por toma / nivelación heredan las del audio
+        completo (mismo micrófono de referencia, toma base y nivelado). True si se tocó alguna."""
+        ma = self._ma
+        last = getattr(ma, '_last_corr', None) if ma is not None else None
+        if last is None or not ma.notes:
+            return False
+        mirror = getattr(ma, '_mirror_src', None) or {}
+        changed = False
+        for t in ma.notes.values():
+            if getattr(t, '_leq_cache', None) is None or getattr(t, '_last_corr', None) is not None:
+                continue
+            t._mirror_src = mirror
+            t.apply_take_correction_bands(ref_theta=last[0], ref_azimuth=last[1])
+            t._last_corr = last
+            if getattr(ma, 'leq_onaxis', None) is not None:
+                t.normalize_onaxis()
+            changed = True
+        if changed:
+            self.show_graphs()
+        return changed
+
     def prepare_notes(self, only=None) -> bool:
         """Notas extraídas sin niveles por banda: los calcula solos (1/3 de octava) y les aplica la misma corrección
         por toma y nivelación que ya tenga el audio completo, así la matriz radial deja elegir nota y frecuencia
@@ -1507,15 +1529,7 @@ class TabDirectividad(QWidget):
             compute_bands_all(notes)
 
         def done(_):
-            last = getattr(ma, '_last_corr', None)
-            mirror = getattr(ma, '_mirror_src', None) or {}
-            for t in notes:
-                t._mirror_src = mirror
-                if last is not None:
-                    t.apply_take_correction_bands(ref_theta=last[0], ref_azimuth=last[1])
-                    t._last_corr = last
-                    if getattr(ma, 'leq_onaxis', None) is not None:
-                        t.normalize_onaxis()
+            self.inherit_note_corrections()
             self.show_graphs()
             self.log.emit(f"[Notas] {len(notes)} nota(s) filtradas por bandas de 1/3 de octava: ya se pueden elegir "
                           "nota y frecuencia en la matriz.")

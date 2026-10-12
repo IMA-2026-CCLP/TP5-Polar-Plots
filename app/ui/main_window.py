@@ -898,7 +898,8 @@ class MainWindow(QMainWindow):
         self.ribbon.set_ma_loaded(ma)
         if ma.notes:
             self.ribbon.set_notes_loaded(list(ma.notes.keys()))
-            self.view_dir.prepare_notes()          # notas recién extraídas: niveles por banda listos para la matriz
+            if not self.view_dir.prepare_notes():  # notas recién extraídas: niveles por banda listos para la matriz
+                self.view_dir.inherit_note_corrections()   # (si ya vienen calculados, solo heredan la corrección)
         if ma.dir_levels is not None:
             self.ribbon.set_dir_computed(ma.dir_freqs)
             self.ribbon.set_dir_status("Sesión cargada")

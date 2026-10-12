@@ -321,6 +321,12 @@ class TabNotas(QWidget):
 
     def _run_extract(self):
         self._ma.extract_all_notes(self._segs)
+        # Los niveles por banda de la muestra completa (si faltan) y de todas las notas se calculan acá mismo, con una
+        # sola barra de 0 a 100 % bajo "Extrayendo notas…" (antes aparecía una tanda por nota y otra por la muestra).
+        from ui.tab_directividad import compute_bands_all
+        todo = [t for t in [self._ma] + list((self._ma.notes or {}).values())
+                if getattr(t, 'tensor', None) is not None and getattr(t, '_leq_cache', None) is None]
+        compute_bands_all(todo)
         return self._ma
 
     def _on_extract_done(self, ma):
