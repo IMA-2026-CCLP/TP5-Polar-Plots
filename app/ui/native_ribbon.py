@@ -576,12 +576,23 @@ class NativeRibbon(QWidget):
 
     def _about(self):
         from version import __version__, APP_NAME
-        QMessageBox.about(
-            self.window(), "Acerca de",
+        from PyQt6.QtGui import QPalette, QColor
+        box = QMessageBox(self.window())
+        box.setWindowTitle("Acerca de")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(
             f"<b>{APP_NAME}</b> &nbsp;v{__version__}<br><br>"
             "GUI realizada para mediciones de patrón polar.<br><br>"
             "Dudas, bugs o recomendaciones: "
             "<a href=\"mailto:abellamasm@gmail.com\">abellamasm@gmail.com</a>")
+        pal = box.palette()
+        pal.setColor(QPalette.ColorRole.Link, QColor("#1a6fe0"))          # el enlace va en azul (no en el rosa del tema)
+        pal.setColor(QPalette.ColorRole.LinkVisited, QColor("#1a6fe0"))
+        box.setPalette(pal)
+        for lab in box.findChildren(QLabel):
+            lab.setPalette(pal)
+        box.exec()
 
     def _make_tabbar(self) -> QHBoxLayout:
         h = QHBoxLayout()
