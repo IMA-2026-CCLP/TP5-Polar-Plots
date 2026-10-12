@@ -86,6 +86,31 @@ _DEFAULT_MIN_DB_BY_MODE = {"polar2d": -16.0, "sphere": -16.0}
 _DEFAULT_MAX_DB_BY_MODE = {"polar2d": 4.0, "sphere": 4.0}
 
 
+def compute_bands_all(targets):
+    """Niveles por banda de 1/3 de varios MicArray (la muestra completa y/o cada nota) con UNA sola barra de progreso
+    de 0 a 100 % para todo el conjunto, y no una por cada nota."""
+    import mic_array.patron as _patron
+    targets = list(targets)
+    if not targets:
+        return
+    sizes = [int(t.n_angles) * int(t.n_thetas) for t in targets]
+    grand = max(1, sum(sizes))
+    rep = getattr(_patron, 'progress_callback', None)
+    off = {'v': 0}
+
+    def scaled(done, total):
+        if rep:
+            rep(off['v'] + int(done), grand)
+
+    _patron.progress_callback = scaled
+    try:
+        for t, n in zip(targets, sizes):
+            t.compute_leq_bands('1/3')
+            off['v'] += n
+    finally:
+        _patron.progress_callback = rep
+
+
 # ── Worker para cómputo batch (todo el audio + todas las notas) ───────────────
 
 _PROGRESS_RE = re.compile(r'(\d+)/(\d+)\s+az=')
@@ -1453,8 +1478,7 @@ class TabDirectividad(QWidget):
             return False
 
         def run():
-            for t in targets:
-                t.compute_leq_bands('1/3')
+            compute_bands_all(targets)
 
         w = Worker(run)
         w.label = "Filtrando por bandas 1/3…"
@@ -1480,8 +1504,7 @@ class TabDirectividad(QWidget):
             return False
 
         def run():
-            for t in notes:
-                t.compute_leq_bands('1/3')
+            compute_bands_all(notes)
 
         def done(_):
             last = getattr(ma, '_last_corr', None)
