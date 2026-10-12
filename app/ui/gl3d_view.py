@@ -747,6 +747,14 @@ class GL3DView(QWidget):
                     A = float(v)
         if A is None:                       # 'max' o on-axis no disponible
             A = float(np.nanmax(R_dB))
+        if self._style.get('scale_auto'):   # escala automática: el balloon va del mínimo al máximo de la banda
+            fin = np.asarray(R_dB, dtype=float)
+            fin = fin[np.isfinite(fin)]
+            if fin.size:
+                dmin = float(np.floor(fin.min() - A))
+                dmax = float(np.ceil(fin.max() - A))
+                if dmax - dmin < 0.5:
+                    dmax = dmin + 0.5
         self._rad_A, self._rad_min, self._rad_max = A, dmin, dmax
 
     def _balloon_radius(self, dB):

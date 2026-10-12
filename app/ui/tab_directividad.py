@@ -59,12 +59,12 @@ _DEFAULT_STYLE_BY_MODE = {
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "origin",
                  "show_ref_plane": True, "show_hemisphere_grid": False, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
-                 "colorbar_pt": 12.0, "colorbar_step": 1.0},
+                 "colorbar_pt": 12.0, "colorbar_step": 1.0, "scale_auto": True},
     "sphere":   {"bg_color": "#ffffff", "text_color": "#000000", "smoothing_method": DEFAULT_SMOOTH_METHOD,
                  "smoothing_window": DEFAULT_SMOOTH_WINDOW, "interp_deg": DEFAULT_INTERP_DEG,
                  "cut_visible": False, "cut_elevation": 0.0, "geometry_mode": "sphere",
                  "show_ref_plane": True, "show_hemisphere_grid": True, "show_box_grid": True, "color_distribution": "linear", "balloon_min_db": -16.0, "balloon_max_db": 4.0, "balloon_anchor": "onaxis",
-                 "colorbar_pt": 12.0, "colorbar_step": 1.0},
+                 "colorbar_pt": 12.0, "colorbar_step": 1.0, "scale_auto": False},
     "polar2d":  {
         "bg_color":         "#ffffff",
         "text_color":       "#1a1a1a",
@@ -268,7 +268,8 @@ class _ViewSection(QWidget):
 
         act_properties = menu.addAction("Propiedades…")
         act_auto = menu.addAction("Autoescala")
-        act_auto.setEnabled(self._min_db is not None or self._max_db is not None)
+        act_auto.setEnabled(self._min_db is not None or self._max_db is not None
+                            or (self._mode in ("3d", "sphere") and not self._style.get('scale_auto', False)))
         menu.addSeparator()
         act_save = menu.addAction("Guardar imagen…")
 
@@ -382,6 +383,13 @@ class _ViewSection(QWidget):
             le_max.setFixedWidth(70)
             le_max.setPlaceholderText("auto")
             le_max.setToolTip("Límite superior del rango de dB mostrado. Vacío = automático (recomendado para empezar).\nEjemplo: 0")
+            if self._mode in ("3d", "sphere"):
+                chk_auto = QCheckBox("Escala automática (mínimo y máximo de la banda)")
+                chk_auto.setChecked(bool(self._style.get('scale_auto', self._min_db is None and self._max_db is None)))
+                chk_auto.setToolTip("Tildada, la escala de color y el rango del balloon se ajustan solos a los valores de la banda "
+                                    "que estás viendo. Destildada, se usan los límites de abajo.")
+                form.addRow(chk_auto)
+                fields['scale_auto'] = chk_auto
             form.addRow("Min (dB):", le_min)
             form.addRow("Max (dB):", le_max)
             fields['min_db'], fields['max_db'] = le_min, le_max
@@ -437,6 +445,12 @@ class _ViewSection(QWidget):
                                         "o el máximo de cualquier ángulo (el pico toca el borde).")
                 form.addRow("Valor en el borde de la esfera:", combo_anchor)
                 fields['balloon_anchor'] = combo_anchor
+
+                def _auto_toggled(on, _w=(le_min, le_max, spin_min, spin_max)):
+                    for x in _w:
+                        x.setEnabled(not on)          # con escala automática los límites a mano no se usan
+                chk_auto.toggled.connect(_auto_toggled)
+                _auto_toggled(chk_auto.isChecked())
             outer.addWidget(box)
 
         if self._mode in ("3d", "sphere"):
@@ -657,8 +671,13 @@ class _ViewSection(QWidget):
                 self._max_db = float(fields['max_db'].text()) if fields['max_db'].text().strip() else None
             except ValueError:
                 pass
+            if 'scale_auto' in fields and fields['scale_auto'].isChecked():
+                self._min_db = None
+                self._max_db = None
 
             new_style = dict(self._style)
+            if 'scale_auto' in fields:
+                new_style['scale_auto'] = fields['scale_auto'].isChecked()
             if 'color_distribution' in fields:
                 new_style['color_distribution'] = fields['color_distribution'].currentData()
             if 'colorbar_pt' in fields:
@@ -768,6 +787,9 @@ class _ViewSection(QWidget):
     def _reset_scale(self):
         self._min_db = None
         self._max_db = None
+        if self._mode in ("3d", "sphere"):
+            self._style['scale_auto'] = True          # escala automática: color y balloon según la banda
+            self.view.set_style(self._style)
         self.view.set_db_range(None, None)
 
     def _snapshot_properties(self) -> dict:
